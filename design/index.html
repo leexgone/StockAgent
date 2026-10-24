@@ -86,31 +86,34 @@
 <script>
 (function () {
   const D = window.QW;
-  D.chrome({ active: 'index.html', crumb: '<b>工作台</b>' });
+  D.chrome({ active: 'index.html', crumb: '<b>工作台</b>', onRefresh: renderHead });
 
-  // 问候语随真实时段变化
-  const c = D.marketClock();
-  const h = new Date().getHours();
-  const hello = h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好';
-  document.getElementById('greet-title').textContent = hello;
-  document.getElementById('greet-eyebrow').textContent =
-    new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + c.state;
-  const pend = D.alerts.filter(a => !a.done);
-  document.getElementById('greet-desc').textContent =
-    `${c.state === '已收盘' ? '今日已收盘' : c.live ? '现在' + c.state : c.next}。${pend.length} 条预警待处理，`
-    + `${D.holdings.find(x => x.code === '002594').name} 浮亏扩大至 ${D.pct(D.holdings.find(x => x.code === '002594').pnlPct)}，`
-    + `组合最大单票占资产 ${(D.holdings.reduce((m, x) => Math.max(m, x.mv), 0) / D.totalAssets * 100).toFixed(1)}%。`;
-  document.getElementById('s-assets').textContent = D.money(D.totalAssets);
-  document.getElementById('s-exposure').innerHTML = `<span class="muted">持仓市值 ${D.money(D.totalMv)} · 仓位 ${D.exposure.toFixed(1)}%</span>`;
-  const day = document.getElementById('s-day');
-  day.textContent = (D.dayPnl > 0 ? '+' : '') + D.fmt(D.dayPnl, 2);
-  day.className = 'metric-value num ' + D.dirClass(D.dayPnl);
-  document.getElementById('s-day-pct').innerHTML = `<span class="delta ${D.dirClass(D.dayPnl)}">${D.pct(D.dayPnlPct)} 相对昨日</span>`;
-  const tot = document.getElementById('s-total');
-  tot.textContent = (D.totalPnl > 0 ? '+' : '') + D.fmt(D.totalPnl, 0);
-  tot.className = 'metric-value num ' + D.dirClass(D.totalPnl);
-  document.getElementById('s-total-pct').innerHTML = `<span class="delta ${D.dirClass(D.totalPnl)}">${D.pct(D.totalPnlPct)}</span> <span>投入成本 ${D.money(D.costTotal)}</span>`;
-  document.getElementById('s-alerts').textContent = pend.length;
+  // 问候语与核心指标：随时段变化，手动刷新时随行情快照一起重绘
+  function renderHead() {
+    const c = D.marketClock();
+    const h = new Date().getHours();
+    const hello = h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+    document.getElementById('greet-title').textContent = hello;
+    document.getElementById('greet-eyebrow').textContent =
+      new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + c.state;
+    const pend = D.alerts.filter(a => !a.done);
+    document.getElementById('greet-desc').textContent =
+      `${c.state === '已收盘' ? '今日已收盘' : c.live ? '现在' + c.state : c.next}。${pend.length} 条预警待处理，`
+      + `${D.holdings.find(x => x.code === '002594').name} 浮亏扩大至 ${D.pct(D.holdings.find(x => x.code === '002594').pnlPct)}，`
+      + `组合最大单票占资产 ${(D.holdings.reduce((m, x) => Math.max(m, x.mv), 0) / D.totalAssets * 100).toFixed(1)}%。`;
+    document.getElementById('s-assets').textContent = D.money(D.totalAssets);
+    document.getElementById('s-exposure').innerHTML = `<span class="muted">持仓市值 ${D.money(D.totalMv)} · 仓位 ${D.exposure.toFixed(1)}%</span>`;
+    const day = document.getElementById('s-day');
+    day.textContent = (D.dayPnl > 0 ? '+' : '') + D.fmt(D.dayPnl, 2);
+    day.className = 'metric-value num ' + D.dirClass(D.dayPnl);
+    document.getElementById('s-day-pct').innerHTML = `<span class="delta ${D.dirClass(D.dayPnl)}">${D.pct(D.dayPnlPct)} 相对昨日</span>`;
+    const tot = document.getElementById('s-total');
+    tot.textContent = (D.totalPnl > 0 ? '+' : '') + D.fmt(D.totalPnl, 0);
+    tot.className = 'metric-value num ' + D.dirClass(D.totalPnl);
+    document.getElementById('s-total-pct').innerHTML = `<span class="delta ${D.dirClass(D.totalPnl)}">${D.pct(D.totalPnlPct)}</span> <span>投入成本 ${D.money(D.costTotal)}</span>`;
+    document.getElementById('s-alerts').textContent = pend.length;
+  }
+  renderHead();
 
   /* 界面入口 */
   const SCREENS = [

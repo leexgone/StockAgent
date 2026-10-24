@@ -115,7 +115,7 @@
 <script>
 (function () {
   const D = window.QW, C = window.QWC;
-  D.chrome({ active: 'diagnosis.html', crumb: '工作台 / <b>组合诊断</b>' });
+  D.chrome({ active: 'diagnosis.html', crumb: '工作台 / <b>组合诊断</b>', onRefresh: renderAll });
   let win = 90;
 
   /* ---------- 工具 ---------- */

@@ -166,7 +166,10 @@
 <script>
 (function () {
   const D = window.QW, C = window.QWC;
-  D.chrome({ active: 'analysis.html', crumb: '工作台 / <b>AI 分析建议</b>' });
+  D.chrome({
+    active: 'analysis.html', crumb: '工作台 / <b>AI 分析建议</b>',
+    onRefresh: () => render(),
+  });
 
   const TAG = { 买入: 'vt-buy', 加仓: 'vt-add', 持有: 'vt-hold', 减仓: 'vt-reduce', 卖出: 'vt-sell', 定投: 'vt-dca' };
   const params = new URLSearchParams(location.search);

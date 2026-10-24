@@ -65,50 +65,76 @@
   ];
   const kindLabel = { stock: '股票', etf: 'ETF / 基金', cb: '可转债' };
 
-  // 逐笔派生：涨跌、市值、当日盈亏、累计盈亏
-  holdings.forEach(h => {
-    h.dayChg = (h.price - h.prev) / h.prev * 100;
-    h.dayVal = (h.price - h.prev) * h.shares;
-    h.mv = h.price * h.shares;
-    h.pnl = (h.price - h.cost) * h.shares;
-    h.pnlPct = (h.price - h.cost) / h.cost * 100;
-    h.spark = walk(h.code + h.name, 30, h.price, h.kind === 'cb' ? 0.012 : 0.03, 0.0012);
-    h.bars = walk(h.code + 'v', 30, 1, 1.4, 0).map(v => 0.25 + v * 0.75);
-  });
+  /* ---------- 派生与汇总 ----------
+   * 所有派生值统一由 recalc() 重算：任何会改变持仓或价格的入口
+   * （自动跳动、手动刷新、记入交易、将来的真实数据推送）都必须调用它，
+   * 保证页面数字与行情条永远来自同一份快照（backlog B1 的修复）。
+   * agg 是唯一的汇总快照，recalc 后同步到导出对象，页面读 D.totalAssets 等即最新值。 */
+  let QW = null;                       // 导出对象，文件末尾组装
+  let bySector = {};                   // 行业市值，wsec() 用
+  const agg = {
+    cash: 0, mvStocks: 0, mvEtf: 0, mvCb: 0, totalMv: 0, totalAssets: 0,
+    dayPnl: 0, dayPnlPct: 0, totalPnl: 0, totalPnlPct: 0, costTotal: 0,
+    exposure: 0, sectors: [], hhi: 0, top3Sector: 0,
+  };
+  function publish() { if (QW) Object.assign(QW, agg); }
 
-  const cash = ws.cash;
-  const mvStocks = holdings.filter(h => h.kind === 'stock').reduce((s, h) => s + h.mv, 0);
-  const mvEtf = holdings.filter(h => h.kind === 'etf').reduce((s, h) => s + h.mv, 0);
-  const mvCb = holdings.filter(h => h.kind === 'cb').reduce((s, h) => s + h.mv, 0);
-  const totalMv = mvStocks + mvEtf + mvCb;
-  const totalAssets = totalMv + cash;
-  const dayPnl = holdings.reduce((s, h) => s + h.dayVal, 0);
-  const totalPnl = holdings.reduce((s, h) => s + h.pnl, 0);
-  const costTotal = holdings.reduce((s, h) => s + h.cost * h.shares, 0);
-  const totalPnlPct = totalPnl / costTotal * 100;
-  const dayPnlPct = dayPnl / (totalAssets - dayPnl) * 100;
-  const exposure = totalMv / totalAssets * 100;
+  function recalc() {
+    // 逐笔派生：涨跌、市值、当日盈亏、累计盈亏；spark/bars 是演示曲线，只生成一次
+    holdings.forEach(h => {
+      h.dayChg = (h.price - h.prev) / h.prev * 100;
+      h.dayVal = (h.price - h.prev) * h.shares;
+      h.mv = h.price * h.shares;
+      h.pnl = (h.price - h.cost) * h.shares;
+      h.pnlPct = (h.price - h.cost) / h.cost * 100;
+      if (!h.spark) h.spark = walk(h.code + h.name, 30, h.price, h.kind === 'cb' ? 0.012 : 0.03, 0.0012);
+      if (!h.bars) h.bars = walk(h.code + 'v', 30, 1, 1.4, 0).map(v => 0.25 + v * 0.75);
+    });
 
-  // 行业集中度
-  const bySector = {};
-  holdings.forEach(h => { bySector[h.sector] = (bySector[h.sector] || 0) + h.mv; });
-  const sectors = Object.entries(bySector)
-    .map(([name, v]) => ({ name, v, w: v / totalMv * 100 }))
-    .sort((a, b) => b.v - a.v);
-  const hhi = sectors.reduce((s, x) => s + Math.pow(x.w, 2), 0) / 10000; // 归一化 0–1
-  const top3Sector = sectors.slice(0, 3).reduce((s, x) => s + x.w, 0);
+    agg.cash = ws.cash;
+    agg.mvStocks = holdings.filter(h => h.kind === 'stock').reduce((s, h) => s + h.mv, 0);
+    agg.mvEtf = holdings.filter(h => h.kind === 'etf').reduce((s, h) => s + h.mv, 0);
+    agg.mvCb = holdings.filter(h => h.kind === 'cb').reduce((s, h) => s + h.mv, 0);
+    agg.totalMv = agg.mvStocks + agg.mvEtf + agg.mvCb;
+    agg.totalAssets = agg.totalMv + agg.cash;
+    agg.dayPnl = holdings.reduce((s, h) => s + h.dayVal, 0);
+    agg.totalPnl = holdings.reduce((s, h) => s + h.pnl, 0);
+    agg.costTotal = holdings.reduce((s, h) => s + h.cost * h.shares, 0);
+    agg.totalPnlPct = agg.costTotal ? agg.totalPnl / agg.costTotal * 100 : 0;
+    // 当日盈亏百分比分母 = 昨日总资产（= 当前总资产减去当日变动）
+    agg.dayPnlPct = (agg.totalAssets - agg.dayPnl) ? agg.dayPnl / (agg.totalAssets - agg.dayPnl) * 100 : 0;
+    agg.exposure = agg.totalAssets ? agg.totalMv / agg.totalAssets * 100 : 0;
 
-  // 文案里出现的仓位数字，一律取自上面的计算，避免「文字与图表打架」
+    // 权重：市值 / 总资产，与 wp() 同分母，保留数值供排序、纪律校验与跨页使用
+    holdings.forEach(h => { h.weight = agg.totalAssets ? h.mv / agg.totalAssets * 100 : 0; });
+
+    // 行业集中度
+    bySector = {};
+    holdings.forEach(h => { bySector[h.sector] = (bySector[h.sector] || 0) + h.mv; });
+    agg.sectors = Object.entries(bySector)
+      .map(([name, v]) => ({ name, v, w: agg.totalMv ? v / agg.totalMv * 100 : 0 }))
+      .sort((a, b) => b.v - a.v);
+    agg.hhi = agg.sectors.reduce((s, x) => s + Math.pow(x.w, 2), 0) / 10000; // 归一化 0–1
+    agg.top3Sector = agg.sectors.slice(0, 3).reduce((s, x) => s + x.w, 0);
+
+    publish();
+  }
+  recalc(); // 加载即首算；页面不要再自行补算派生值
+
+  // 实时总市值（不经快照，任何时刻调用都一致）
+  const totalMvAll = () => holdings.reduce((s, h) => s + h.price * h.shares, 0);
+
+  // 文案里出现的仓位数字，一律取自 recalc() 的快照，避免「文字与图表打架」
   const H = c => holdings.find(h => h.code === c) || {};
-  const wp = c => (H(c).mv ? (H(c).mv / totalAssets * 100).toFixed(1) : '0.0');
-  const wsec = n => (bySector[n] ? (bySector[n] / totalMv * 100).toFixed(1) : '0.0');
+  const wp = c => (H(c).mv ? (H(c).mv / agg.totalAssets * 100).toFixed(1) : '0.0');
+  const wsec = n => (bySector[n] ? (bySector[n] / agg.totalMv * 100).toFixed(1) : '0.0');
   const BYD = H('002594');
   // 降到目标仓位需要卖的股数（按 100 股一手向上取整）
   const sellTo = (c, target) => {
     const h = H(c);
-    return Math.max(100, Math.ceil((h.mv - totalAssets * target / 100) / h.price / 100) * 100);
+    return Math.max(100, Math.ceil((h.mv - agg.totalAssets * target / 100) / h.price / 100) * 100);
   };
-  const weightAfter = (c, qty) => ((H(c).mv - qty * H(c).price) / totalAssets * 100).toFixed(1);
+  const weightAfter = (c, qty) => ((H(c).mv - qty * H(c).price) / agg.totalAssets * 100).toFixed(1);
 
   // 权益曲线（近 90 个交易日）
   const equity = {
@@ -116,7 +142,7 @@
   };
   (function () {
     const n = 90;
-    const port = walk('PORT90', n, totalAssets, 0.018, 0.0009);
+    const port = walk('PORT90', n, agg.totalAssets, 0.018, 0.0009);
     const bench = walk('HS300_90', n, 4528.66 / (1 + 0.086), 0.011, 0.0008);
     const base = port[0];
     const d = new Date('2026-10-24T00:00:00');
@@ -187,7 +213,7 @@
         { k: '资金面', s: 41, t: '主力 5 日净流出，融资余额连续 4 日下降。' },
         { k: '消息面', s: 46, t: '新一轮官降预期发酵，经销商库存系数 1.7 偏高。' },
       ],
-      risks: ['单笔浮亏已达 -4.04%，建议分批而非一次性处理，避免情绪化操作。', `按现仓位测算，正股再跌 10% 大约拖累总资产 ${(H('002594').mv / totalAssets * 10).toFixed(1)}%；把仓位降到 15% 后，同样的跌幅只拖累约 1.5%。`],
+      risks: ['单笔浮亏已达 -4.04%，建议分批而非一次性处理，避免情绪化操作。', `按现仓位测算，正股再跌 10% 大约拖累总资产 ${(H('002594').mv / agg.totalAssets * 10).toFixed(1)}%；把仓位降到 15% 后，同样的跌幅只拖累约 1.5%。`],
     },
     '600519': {
       score: 71, action: '持有', horizon: '长线 6 月+', conf: 0.69, position: '当前 28.0% → 维持（提额需等回落）',
@@ -254,12 +280,12 @@
       q: '比亚迪今天亏了，要不要止损？',
       a: [
         { t: `先给结论：不该恐慌清仓，但确实要减 —— 把 ${BYD.name} 从 ${wp('002594')}% 降到 15% 附近，一次减 ${sellTo('002594', 15)} 股就够，不用拆成很多笔。`, k: 'conclusion' },
-        { t: `三个理由：① 你的浮亏来自仓位而非判断——${wp('002594')}% 是组合里的第二大单票，一旦跌 10% 就拖累总资产 ${(H('002594').mv / totalAssets * 10).toFixed(1)}%；② 技术面刚跌破 60 日线，尚未出现放量止跌；③ 基本面销量仍在创新高，不是逻辑坏掉。`, k: 'body' },
+        { t: `三个理由：① 你的浮亏来自仓位而非判断——${wp('002594')}% 是组合里的第二大单票，一旦跌 10% 就拖累总资产 ${(H('002594').mv / agg.totalAssets * 10).toFixed(1)}%；② 技术面刚跌破 60 日线，尚未出现放量止跌；③ 基本面销量仍在创新高，不是逻辑坏掉。`, k: 'body' },
         { t: `具体操作：今天 254 附近一次减 ${sellTo('002594', 15)} 股（整手），仓位落到约 ${weightAfter('002594', sellTo('002594', 15))}%，已经回到上限内；剩下的 ${BYD.shares - sellTo('002594', 15)} 股用 241 这条止损线守着，不必再减。`, k: 'plan' },
       ],
       cites: [
         { src: '持仓明细', txt: `002594 比亚迪 · ${fmt(BYD.shares, 0)} 股 · 成本 ${fmt(BYD.cost, 2)} · 现价 ${fmt(BYD.price, 2)} · 当日 ${pct(BYD.dayChg)}` },
-        { src: '组合诊断', txt: `单票集中度 ${wp('002594')}%（上限 25%），前三行业合计占持仓 ${top3Sector.toFixed(1)}%` },
+        { src: '组合诊断', txt: `单票集中度 ${wp('002594')}%（上限 25%），前三行业合计占持仓 ${agg.top3Sector.toFixed(1)}%` },
         { src: '行情快照', txt: `10-24 收盘 ${fmt(BYD.price, 2)}，昨收 ${fmt(BYD.prev, 2)}，跌破 20 日线与 60 日线` },
       ],
       chips: ['分两笔的话，第一笔挂什么价？', '降到 15% 后风险会小多少？', '换成什么标的更好？'],
@@ -268,11 +294,11 @@
       q: '帮我把组合调均衡一点',
       a: [
         { t: '结论：主要问题是「单票 + 单行业」双重集中，不是缺标的。', k: 'conclusion' },
-        { t: `前三大行业合计占持仓 ${top3Sector.toFixed(1)}%：${sectors.slice(0, 3).map(s => `${s.name} ${s.w.toFixed(1)}%`).join('、')}；最大单票 ${H('600519').name} 一只就占总资产 ${wp('600519')}%，已经贴着你的 25% 上限。`, k: 'body' },
+        { t: `前三大行业合计占持仓 ${agg.top3Sector.toFixed(1)}%：${agg.sectors.slice(0, 3).map(s => `${s.name} ${s.w.toFixed(1)}%`).join('、')}；最大单票 ${H('600519').name} 一只就占总资产 ${wp('600519')}%，已经贴着你的 25% 上限。`, k: 'body' },
         { t: `先只做一件事：${BYD.name} 减 ${sellTo('002594', 15)} 股（降到约 ${weightAfter('002594', sellTo('002594', 15))}%），${H('600519').name} 不加仓，回收资金按 4:3:3 投向医药 / 宽基定投 / 现金。调整前后的波动对比在「组合诊断」页可以实测，代价是牛市弹性下降。`, k: 'plan' },
       ],
       cites: [
-        { src: '行业权重', txt: sectors.slice(0, 4).map(s => `${s.name} ${s.w.toFixed(1)}%`).join(' · ') },
+        { src: '行业权重', txt: agg.sectors.slice(0, 4).map(s => `${s.name} ${s.w.toFixed(1)}%`).join(' · ') },
         { src: '回测', txt: `近 ${equity.dates.length} 交易日 组合 ${pct(P.cum)} / 沪深300 ${pct(P.benchCum)}，最大回撤 ${P.mdd.toFixed(1)}%` },
       ],
       chips: ['这个调整要花多少钱的手续费？', '能不能只减不卖？', '减掉的钱先留现金还是补别的？'],
@@ -411,8 +437,8 @@
       </span>`).join('')
       + `<span class="strip-item" style="border-right:0">
         <span class="strip-name">我的总资产</span>
-        <span class="strip-v">${money(totalAssets)}</span>
-        <span class="delta ${dirClass(dayPnl)}">今日 ${dayPnl > 0 ? '+' : ''}${fmt(dayPnl, 0)}</span>
+        <span class="strip-v">${money(agg.totalAssets)}</span>
+        <span class="delta ${dirClass(agg.dayPnl)}">今日 ${agg.dayPnl > 0 ? '+' : ''}${fmt(agg.dayPnl, 0)}</span>
       </span>`;
   }
 
@@ -433,7 +459,11 @@
     if (side) side.addEventListener('click', e => { if (e.target.closest('a')) side.classList.remove('on'); });
 
     const rb = document.getElementById('refresh-btn');
-    if (rb) rb.addEventListener('click', () => { tickPrices(true); });
+    // 手动刷新：先跳动价格并重算快照，再让页面通过 onRefresh 重绘自己的区块
+    if (rb) rb.addEventListener('click', () => {
+      tickPrices(true);
+      if (typeof opts.onRefresh === 'function') opts.onRefresh();
+    });
 
     const ab = document.getElementById('alert-btn');
     if (ab) ab.addEventListener('click', () => {
@@ -456,11 +486,12 @@
     });
   }
 
-  // 模拟行情跳动：小幅 tick，数字闪色
+  // 模拟行情跳动：小幅 tick，数字闪色；返回本次价格是否真的变动，
+  // 页面可据此决定是否重绘（非交易时段自动跳动会跳过，避免无意义重渲染）
   let tickN = 0;
   function tickPrices(manual) {
     tickN++;
-    if (!manual && !marketClock().live) return;
+    if (!manual && !marketClock().live) return false;
     holdings.forEach(h => {
       const step = h.price * (Math.random() - 0.5) * (h.kind === 'cb' ? 0.0006 : 0.0009);
       const np = Math.max(0.001, h.price + step);
@@ -472,9 +503,13 @@
         el.classList.add(np >= h.price ? 'flash-up' : 'flash-down');
       }
       h.price = np;
-      h.dayChg = (h.price - h.prev) / h.prev * 100;
     });
+    // 价格变了就必须整体重算并同步行情条，汇总不再是加载时常量
+    recalc();
+    const strip = document.getElementById('strip');
+    if (strip) strip.innerHTML = stripHTML();
     if (manual) toast('行情已刷新 · ' + new Date().toTimeString().slice(0, 8), 'check');
+    return true;
   }
 
   function toast(msg, kind) {
@@ -487,11 +522,12 @@
     setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 220); }, 3200);
   }
 
-  W.QW = {
+  QW = {
     fmt, money, pct, wan, dirClass, ICONS,
     ws, indices, holdings, kindLabel, watchlist, advice, alerts, qa, sessions,
-    cash, mvStocks, mvEtf, mvCb, totalMv, totalAssets, dayPnl, dayPnlPct, totalPnl, totalPnlPct,
-    exposure, sectors, hhi, top3Sector, equity, P, costTotal, wp, wsec, sellTo, weightAfter,
-    marketClock, chrome, toast, tickPrices, stripHTML,
+    equity, P, wp, wsec, sellTo, weightAfter,
+    marketClock, chrome, toast, tickPrices, stripHTML, recalc, totalMvAll,
   };
+  W.QW = QW;
+  publish(); // 把汇总快照（cash/totalAssets/sectors/hhi…）写入导出对象，此后每次 recalc() 自动同步
 })(window);

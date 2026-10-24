@@ -156,16 +156,19 @@
 <script>
 (function () {
   const D = window.QW, C = window.QWC;
-  D.chrome({ active: 'dashboard.html', crumb: '<b>总览仪表盘</b>' });
-  const clock = D.marketClock();
-  document.getElementById('d-eyebrow').textContent =
-    new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + clock.state;
-  const worst = [...D.holdings].sort((a, b) => a.dayVal - b.dayVal)[0];
-  const best = [...D.holdings].sort((a, b) => b.dayVal - a.dayVal)[0];
-  document.getElementById('d-desc').textContent =
-    `${clock.state === '已收盘' || clock.live ? '今日' : '上一交易日'}组合 ${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元：`
-    + `主要是 ${best.name} ${D.pct(best.dayChg)}，${worst.name} ${D.pct(worst.dayChg)} 拖累最多。`
-    + `仓位 ${D.exposure.toFixed(1)}%，累计浮盈 ${D.pct(D.totalPnlPct)}。`;
+  D.chrome({ active: 'dashboard.html', crumb: '<b>总览仪表盘</b>', onRefresh: renderAll });
+
+  function renderHeadline() {
+    const clock = D.marketClock();
+    document.getElementById('d-eyebrow').textContent =
+      new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + clock.state;
+    const worst = [...D.holdings].sort((a, b) => a.dayVal - b.dayVal)[0];
+    const best = [...D.holdings].sort((a, b) => b.dayVal - a.dayVal)[0];
+    document.getElementById('d-desc').textContent =
+      `${clock.state === '已收盘' || clock.live ? '今日' : '上一交易日'}组合 ${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元：`
+      + `主要是 ${best.name} ${D.pct(best.dayChg)}，${worst.name} ${D.pct(worst.dayChg)} 拖累最多。`
+      + `仓位 ${D.exposure.toFixed(1)}%，累计浮盈 ${D.pct(D.totalPnlPct)}。`;
+  }
 
   /* ---------- 净值曲线 ---------- */
   let n = 90;
@@ -197,43 +200,45 @@
       tip: i => `<span class="k">${L[i]}</span><br>组合 <b>${D.money(s[i])}</b> · 基准 <b>${(b[i] / 10000).toFixed(2)} 万</b><br><span class="k">区间</span> <b>${D.pct((s[i] / from - 1) * 100)}</b>`,
     });
   }
-  renderEquity();
   document.getElementById('period').addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
     n = +b.dataset.n; renderEquity();
   });
-  setInterval(() => renderEquity(), 60000);
 
   /* ---------- 资产分布 ---------- */
-  const alloc = [
-    { k: '股票', v: D.mvStocks }, { k: 'ETF / 基金', v: D.mvEtf },
-    { k: '可转债', v: D.mvCb }, { k: '现金', v: D.cash },
-  ];
-  C.donut('#alloc-donut', alloc.map((a, i) => ({ name: a.k, v: a.v, color: C.DONUT_COLORS[i] })), { size: 132, thick: 16 });
-  document.getElementById('alloc-list').innerHTML = alloc.map((a, i) => `
-    <div style="display:flex;align-items:center;gap:8px;font-size:12.5px" data-od-id="alloc-row-${i}">
-      <i style="width:9px;height:9px;border-radius:3px;background:${C.DONUT_COLORS[i]};flex:none"></i>
-      <span>${a.k}</span>
-      <span class="num" style="margin-left:auto;color:var(--fg-2)">${D.fmt(a.v, 0)}</span>
-      <span class="num" style="width:46px;text-align:right;color:var(--muted)">${(a.v / D.totalAssets * 100).toFixed(1)}%</span>
-    </div>`).join('');
-  document.getElementById('d-cash').textContent = D.money(D.cash);
+  function renderAlloc() {
+    const alloc = [
+      { k: '股票', v: D.mvStocks }, { k: 'ETF / 基金', v: D.mvEtf },
+      { k: '可转债', v: D.mvCb }, { k: '现金', v: D.cash },
+    ];
+    C.donut('#alloc-donut', alloc.map((a, i) => ({ name: a.k, v: a.v, color: C.DONUT_COLORS[i] })), { size: 132, thick: 16 });
+    document.getElementById('alloc-list').innerHTML = alloc.map((a, i) => `
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px" data-od-id="alloc-row-${i}">
+        <i style="width:9px;height:9px;border-radius:3px;background:${C.DONUT_COLORS[i]};flex:none"></i>
+        <span>${a.k}</span>
+        <span class="num" style="margin-left:auto;color:var(--fg-2)">${D.fmt(a.v, 0)}</span>
+        <span class="num" style="width:46px;text-align:right;color:var(--muted)">${(a.v / D.totalAssets * 100).toFixed(1)}%</span>
+      </div>`).join('');
+    document.getElementById('d-cash').textContent = D.money(D.cash);
+  }
 
   /* ---------- 当日归因 ---------- */
-  const att = D.holdings.map(h => ({ k: h.name, v: h.dayVal })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
-  const maxAbs = Math.max(...att.map(a => Math.abs(a.v)));
-  document.getElementById('attribution').innerHTML = att.map(a => `
-    <div class="bar-line" data-od-id="attr-${a.k}">
-      <span class="lb">${a.k}</span>
-      <span class="tr" style="display:flex;align-items:center;gap:0">
-        <i style="width:${(Math.abs(a.v) / maxAbs * 100).toFixed(1)}%;background:${a.v >= 0 ? 'var(--up)' : 'var(--down)'};float:left"></i>
-      </span>
-      <span class="vl ${D.dirClass(a.v)}">${(a.v > 0 ? '+' : '') + D.fmt(a.v, 0)}</span>
-    </div>`).join('');
-  document.getElementById('attr-note').textContent =
-    `${att.filter(a => a.v > 0).length} 涨 / ${att.filter(a => a.v < 0).length} 跌，`
-    + `前两只贡献了今日 ${(( (att[0].v + att[1].v) / (D.dayPnl || 1)) * 100).toFixed(0)}% 的变动。`;
+  function renderAttribution() {
+    const att = D.holdings.map(h => ({ k: h.name, v: h.dayVal })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    const maxAbs = Math.max(...att.map(a => Math.abs(a.v)));
+    document.getElementById('attribution').innerHTML = att.map(a => `
+      <div class="bar-line" data-od-id="attr-${a.k}">
+        <span class="lb">${a.k}</span>
+        <span class="tr" style="display:flex;align-items:center;gap:0">
+          <i style="width:${(Math.abs(a.v) / maxAbs * 100).toFixed(1)}%;background:${a.v >= 0 ? 'var(--up)' : 'var(--down)'};float:left"></i>
+        </span>
+        <span class="vl ${D.dirClass(a.v)}">${(a.v > 0 ? '+' : '') + D.fmt(a.v, 0)}</span>
+      </div>`).join('');
+    document.getElementById('attr-note').textContent =
+      `${att.filter(a => a.v > 0).length} 涨 / ${att.filter(a => a.v < 0).length} 跌，`
+      + `前两只贡献了今日 ${(( (att[0].v + att[1].v) / (D.dayPnl || 1)) * 100).toFixed(0)}% 的变动。`;
+  }
 
   /* ---------- 预警 ---------- */
   function renderAlerts() {
@@ -268,16 +273,18 @@
   });
 
   /* ---------- 持仓表 ---------- */
-  const rows = [...D.holdings].sort((a, b) => b.mv - a.mv);
-  document.querySelector('#dash-holdings tbody').innerHTML = rows.map(h => `
-    <tr data-clickable data-href="analysis.html?code=${h.code}" data-od-id="dash-hrow-${h.code}">
-      <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt} · ${D.kindLabel[h.kind]}</div></td>
-      <td class="txt" style="width:110px">${C.spark(h.spark, h.dayChg, 100, 30)}</td>
-      <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, h.kind === 'etf' ? 3 : 2)}</span></td>
-      <td class="num ${D.dirClass(h.dayChg)}">${D.pct(h.dayChg)}</td>
-      <td class="num ${D.dirClass(h.pnl)}">${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}</td>
-      <td class="num" style="color:var(--muted)">${(h.mv / D.totalAssets * 100).toFixed(1)}%</td>
-    </tr>`).join('');
+  function renderHoldings() {
+    const rows = [...D.holdings].sort((a, b) => b.mv - a.mv);
+    document.querySelector('#dash-holdings tbody').innerHTML = rows.map(h => `
+      <tr data-clickable data-href="analysis.html?code=${h.code}" data-od-id="dash-hrow-${h.code}">
+        <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt} · ${D.kindLabel[h.kind]}</div></td>
+        <td class="txt" style="width:110px">${C.spark(h.spark, h.dayChg, 100, 30)}</td>
+        <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, h.kind === 'etf' ? 3 : 2)}</span></td>
+        <td class="num ${D.dirClass(h.dayChg)}">${D.pct(h.dayChg)}</td>
+        <td class="num ${D.dirClass(h.pnl)}">${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}</td>
+        <td class="num" style="color:var(--muted)">${(h.mv / D.totalAssets * 100).toFixed(1)}%</td>
+      </tr>`).join('');
+  }
   document.getElementById('dash-holdings').addEventListener('click', e => {
     const tr = e.target.closest('tr[data-href]'); if (tr) location.href = tr.dataset.href;
   });
@@ -293,19 +300,28 @@
   document.getElementById('watch-add').addEventListener('click', () => D.toast('在搜索框输入代码或名称即可加入自选（演示）', 'info'));
 
   /* ---------- 收盘摘要 ---------- */
-  const brief = [
-    { t: '组合今天怎么了', b: `${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元（${D.pct(D.dayPnlPct)}）。银行、电力设备贡献正向，汽车仓位是唯一明显拖累。` },
-    { t: '仓位提醒', b: `贵州茅台占总资产 ${(rows[0].mv / D.totalAssets * 100).toFixed(1)}%，已接近你设的 25% 单票上限；有色金属因两只转债叠加到 ${D.sectors.find(s => s.name === '有色金属').w.toFixed(1)}%（行业口径）。` },
-    { t: '下个交易日要留意的', b: '博威转债强赎时间窗继续收窄；科创50ETF 已触发 +12% 止盈线，若低开建议先减一半；比亚迪按助理建议减 200 股，把单票压回上限以内。' },
-  ];
-  document.getElementById('brief').innerHTML = brief.map((x, i) => `
-    <div data-od-id="brief-item-${i}">
-      <div class="eyebrow">${String(i + 1).padStart(2, '0')} · ${x.t}</div>
-      <p style="margin-top:9px;font-size:13px;line-height:1.7;color:var(--fg-2);max-width:60ch">${x.b}</p>
-    </div>`).join('');
+  function renderBrief() {
+    const rows = [...D.holdings].sort((a, b) => b.mv - a.mv);
+    const brief = [
+      { t: '组合今天怎么了', b: `${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元（${D.pct(D.dayPnlPct)}）。银行、电力设备贡献正向，汽车仓位是唯一明显拖累。` },
+      { t: '仓位提醒', b: `贵州茅台占总资产 ${(rows[0].mv / D.totalAssets * 100).toFixed(1)}%，已接近你设的 25% 单票上限；有色金属因两只转债叠加到 ${D.sectors.find(s => s.name === '有色金属').w.toFixed(1)}%（行业口径）。` },
+      { t: '下个交易日要留意的', b: '博威转债强赎时间窗继续收窄；科创50ETF 已触发 +12% 止盈线，若低开建议先减一半；比亚迪按助理建议减 200 股，把单票压回上限以内。' },
+    ];
+    document.getElementById('brief').innerHTML = brief.map((x, i) => `
+      <div data-od-id="brief-item-${i}">
+        <div class="eyebrow">${String(i + 1).padStart(2, '0')} · ${x.t}</div>
+        <p style="margin-top:9px;font-size:13px;line-height:1.7;color:var(--fg-2);max-width:60ch">${x.b}</p>
+      </div>`).join('');
+  }
 
-  // 行情跳动（盘中每秒轻微 tick，非交易时段静止）
-  setInterval(() => { D.tickPrices(); renderEquity(); }, 5000);
+  /* ---------- 汇总渲染 ----------
+   * 所有读汇总快照的区块统一从这里重绘：初次加载、手动刷新（chrome onRefresh）、
+   * 盘中自动跳动三处走同一条路径，数字不会各算各的。 */
+  function renderAll() { renderHeadline(); renderEquity(); renderAlloc(); renderAttribution(); renderHoldings(); renderBrief(); }
+  renderAll();
+
+  // 行情跳动：tickPrices 内部已重算快照并同步行情条；返回 true（价格真的动了）才重绘
+  setInterval(() => { if (D.tickPrices()) renderAll(); }, 5000);
 })();
 </script>
 </body>

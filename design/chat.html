@@ -112,23 +112,26 @@
 <script>
 (function () {
   const D = window.QW;
-  D.chrome({ active: 'chat.html', crumb: '工作台 / <b>智能问答</b>' });
+  D.chrome({ active: 'chat.html', crumb: '工作台 / <b>智能问答</b>', onRefresh: renderCtx });
   const thread = document.getElementById('thread');
   const input = document.getElementById('input');
   const KEY = 'qingwu:chat:me';
   let busy = false;
 
   /* ---------- 上下文面板 ---------- */
-  document.getElementById('ctx-ws').textContent = `${D.ws.name} · ${D.ws.broker}`;
-  const top3 = [...D.holdings].sort((a, b) => b.mv - a.mv).slice(0, 3);
-  document.getElementById('ctx-body').innerHTML = `
-    <div class="row"><span>总资产</span><span class="v">${D.money(D.totalAssets)}</span></div>
-    <div class="row"><span>持仓只数</span><span class="v">${D.holdings.length} 只</span></div>
-    <div class="row"><span>可用现金</span><span class="v">${D.money(D.cash)}</span></div>
-    <div class="row"><span>仓位</span><span class="v">${(D.totalMv / (D.totalMv + D.cash) * 100).toFixed(1)}%</span></div>
-    <div class="row"><span>前三大</span><span class="v" style="font-size:11.5px">${top3.map(h => `${h.name} ${(h.mv / D.totalAssets * 100).toFixed(1)}%`).join(' · ')}</span></div>
-    <div class="row"><span>待处理预警</span><span class="v">${D.alerts.filter(a => !a.done).length} 条</span></div>
-    <div class="row"><span>数据时点</span><span class="v" style="font-size:11.5px">${new Date().toTimeString().slice(0, 8)}</span></div>`;
+  function renderCtx() {
+    document.getElementById('ctx-ws').textContent = `${D.ws.name} · ${D.ws.broker}`;
+    const top3 = [...D.holdings].sort((a, b) => b.mv - a.mv).slice(0, 3);
+    document.getElementById('ctx-body').innerHTML = `
+      <div class="row"><span>总资产</span><span class="v">${D.money(D.totalAssets)}</span></div>
+      <div class="row"><span>持仓只数</span><span class="v">${D.holdings.length} 只</span></div>
+      <div class="row"><span>可用现金</span><span class="v">${D.money(D.cash)}</span></div>
+      <div class="row"><span>仓位</span><span class="v">${(D.totalMv / (D.totalMv + D.cash) * 100).toFixed(1)}%</span></div>
+      <div class="row"><span>前三大</span><span class="v" style="font-size:11.5px">${top3.map(h => `${h.name} ${(h.mv / D.totalAssets * 100).toFixed(1)}%`).join(' · ')}</span></div>
+      <div class="row"><span>待处理预警</span><span class="v">${D.alerts.filter(a => !a.done).length} 条</span></div>
+      <div class="row"><span>数据时点</span><span class="v" style="font-size:11.5px">${new Date().toTimeString().slice(0, 8)}</span></div>`;
+  }
+  renderCtx();
   document.getElementById('recent').innerHTML = D.sessions.map((s, i) => `
     <div class="list-item" data-od-id="recent-item-${i}">
       <span class="li-main"><span class="li-title">${s.who}</span><span class="li-desc">${s.text}</span></span>

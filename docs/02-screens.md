@@ -1,19 +1,19 @@
 # 02 · 界面清单与模块职责
 
-七个页面，共享同一套外壳（侧栏 + 顶栏 + 行情条 + 移动端底部标签栏），外壳由 `QW.chrome({ active, crumb })` 注入（`design/assets/data.js:354`）。
+七个页面，共享同一套外壳（侧栏 + 顶栏 + 行情条 + 移动端底部标签栏），外壳由 `QW.chrome({ active, crumb, onRefresh? })` 注入（`design/assets/data.js:380`）。`onRefresh` 是页面重绘回调：顶栏刷新完成跳动与重算后被调用，各页面用它把读汇总快照的区块重画一遍（见 `04` 行为函数表）。
 
 ## 全局导航与快捷键
 
 | 入口 | 行为 | 实现 |
 |---|---|---|
-| 侧栏 1–5 + 微信 | 五个主界面 + 接入设置 | `NAV`（`data.js:346`） |
-| 数字键 `1`–`6` | 直接切页（输入框内不拦截） | `bindChrome()`（`data.js:451`） |
-| `⌘K` / `Ctrl+K` | 聚焦全局搜索 | `data.js:452` |
-| 全局搜索回车 | 命中持仓/自选 → `analysis.html?code=`；否则 → `chat.html?q=` | `data.js:444` |
-| 顶栏刷新按钮 | 手动跳一次行情（`tickPrices(true)`） | `data.js:435` |
-| 顶栏铃铛 | toast 汇总待处理预警条数与最近一条 | `data.js:438` |
-| 行情条 | 5 个指数 + 我的总资产 / 今日盈亏 | `stripHTML()`（`data.js:405`） |
-| 市场时钟 | 每秒重绘时段与倒计时 | `marketClock()`（`data.js:299`） |
+| 侧栏 1–5 + 微信 | 五个主界面 + 接入设置 | `NAV`（`data.js:372`） |
+| 数字键 `1`–`6` | 直接切页（输入框内不拦截） | `bindChrome()`（`data.js:481`） |
+| `⌘K` / `Ctrl+K` | 聚焦全局搜索 | `data.js:482` |
+| 全局搜索回车 | 命中持仓/自选 → `analysis.html?code=`；否则 → `chat.html?q=` | `data.js:474` |
+| 顶栏刷新按钮 | 手动跳一次行情 + 全量重算 + 重绘行情条，再回调页面 `onRefresh` | `data.js:461` |
+| 顶栏铃铛 | toast 汇总待处理预警条数与最近一条 | `data.js:468` |
+| 行情条 | 5 个指数 + 我的总资产 / 今日盈亏（读实时快照，每次跳动后重绘） | `stripHTML()`（`data.js:431`） |
+| 市场时钟 | 每秒重绘时段与倒计时 | `marketClock()`（`data.js:325`） |
 
 每屏底部固定一个免责区块（`*-disclaimer`），新增界面不能省。
 
@@ -31,7 +31,7 @@
 | `home-timeline` | 助理最近的动作（微信问答、定时复盘） | `sessions` |
 | `home-attention` | 今天需要你决定的 3 件事，按紧迫度排序 | `advice`、`holdings` |
 
-摘要句里的数字必须来自计算（`index.html:99`），这是「不写死数字」约定的样板位置。
+摘要句里的数字必须来自计算（`renderHead()`，`index.html:100`），这是「不写死数字」约定的样板位置；顶栏刷新会连同指标卡一起重绘。
 
 ---
 
@@ -51,9 +51,9 @@
 
 | 模块 | 内容 | 数据依赖 |
 |---|---|---|
-| `holdings-summary` | 市值、当日浮动、累计盈亏、可用现金、盈利标的数 | 本页重算（见 04 的跨页陷阱） |
+| `holdings-summary` | 市值、当日浮动、累计盈亏、可用现金、盈利标的数 | `recalc()` 快照统一重算（见 04） |
 | `holdings-table-card` | 全部持仓，排序 / 类型筛选 / 搜索，行内 sparkline 与仓位条 | `holdings` |
-| `trade-drawer` | **加减仓抽屉**：方向分段、数量与价格输入、快捷档位、整手与涨跌停校验、费用与摊薄成本预览、调整后仓位与超上限提示、「我已确认」勾选后才可提交 | `lots`、`fee()`（`holdings.html:329`） |
+| `trade-drawer` | **加减仓抽屉**：方向分段、数量与价格输入、快捷档位、整手与涨跌停校验、费用与摊薄成本预览、调整后仓位与超上限提示、「我已确认」勾选后才可提交 | `lots`、`fee()`（`holdings.html:320`） |
 | `order-log-card` | 委托 / 成交流水，提交试算后追加一条 | 本地 `LOG` 数组 |
 | `rule-card` | 仓位纪律四条进度与「已触及 / 安全」 | 见 03 |
 
@@ -68,7 +68,7 @@
 | `verdict-card` | 结论标签（加仓/买入/持有/减仓/卖出/定投）、得分弧、置信度、目标与止损、现价与当日涨跌 | `advice[code]` |
 | `kline-card` | 30 日 OHLC 蜡烛 + MA5/MA20，日K/周K 切换，末根锚定现价 | `QW` 派生 + 本页 `candle()` |
 | `dims-card` | 技术 / 基本面 / 资金 / 消息四维分数与观察 | `advice[].dims[4]` |
-| `plan-card` | 分笔执行计划（减仓三步、买入两笔 + 失效条件） | `buildPlan()`（`analysis.html:356`） |
+| `plan-card` | 分笔执行计划（减仓三步、买入两笔 + 失效条件） | `buildPlan()`（`analysis.html:359`） |
 | `risk-card` | 「这个结论可能错在哪」 | `advice[].risks[]` |
 | `history-card` | 该标的的历史建议与当时结论 | 本页样本数组 |
 
@@ -79,7 +79,7 @@
 | 模块 | 内容 | 数据依赖 |
 |---|---|---|
 | `chat-thread-card` | 对话流：打字指示 → 分段呈现，回答固定「结论 / 为什么 / 怎么做」三层 | `qa[]`（`k: conclusion / body / plan`） |
-| `chat-context-card` | 「助理现在能看到什么」：账户、持仓数、现金、时段 | `ws`、`marketClock()` |
+| `chat-context-card` | 「助理现在能看到什么」：账户、总资产、持仓数、现金、时段 | `ws`、汇总快照（`renderCtx()`，顶栏刷新时重绘） |
 | `chat-limit-card` | 「它不会做的事」：能力边界自陈 | 静态文案 + 免责 |
 | `chat-sessions-card` | 最近会话，含微信里的语音与文字 | `sessions` |
 | 依据来源 | 每条回答下方列出引用的界面与原文（持仓明细 / 组合诊断 / 行情快照 / 公告） | `qa[].cites` |

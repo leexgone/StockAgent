@@ -174,28 +174,19 @@
 <script>
 (function () {
   const D = window.QW, C = window.QWC;
-  D.chrome({ active: 'holdings.html', crumb: '工作台 / <b>持仓管理</b>' });
+  D.chrome({
+    active: 'holdings.html', crumb: '工作台 / <b>持仓管理</b>',
+    onRefresh: () => { renderSummary(); render(); renderRules(); },
+  });
   document.getElementById('h-search').previousElementSibling.outerHTML = D.ICONS.search;
 
   const lots = { stock: 100, etf: 100, cb: 10 };
   const units = { stock: '股', etf: '份', cb: '张' };
   let sortKey = 'mv', sortDir = -1, filterKind = 'all', query = '';
 
-  /* ---------- 汇总条 ---------- */
-  function refreshDerived() {
-    D.holdings.forEach(h => {
-      h.dayChg = (h.price - h.prev) / h.prev * 100;
-      h.dayVal = (h.price - h.prev) * h.shares;
-      h.mv = h.price * h.shares;
-      h.pnl = (h.price - h.cost) * h.shares;
-      h.pnlPct = (h.price - h.cost) / h.cost * 100;
-      h.weight = h.mv / (D.totalMvAll() + D.cash) * 100;
-      if (!h.spark) h.spark = new Array(30).fill(h.price);
-    });
-  }
-  D.totalMvAll = () => D.holdings.reduce((s, h) => s + h.price * h.shares, 0);
-  refreshDerived();
-
+  /* ---------- 汇总条 ----------
+   * 派生值（dayChg/mv/pnl/weight）与全部汇总都由 data.js 的 recalc() 提供，
+   * 加载时已算好；本页只负责渲染，改动持仓或现金后调用 D.recalc()。 */
   function renderSummary() {
     const mv = D.totalMvAll(), ta = mv + D.cash;
     const day = D.holdings.reduce((s, h) => s + h.dayVal, 0);
@@ -413,14 +404,14 @@
         const h = { code: cur.code, name: cur.name, mkt: cur.code[0] === '6' ? 'SH' : 'SZ', kind: m.kind, sector: cur.sector || '新建持仓', shares: qty, cost: (amount + f) / qty, price: cur.price, prev: m.prev };
         D.holdings.push(h); cur = h;
       }
-      D.cash -= amount + f;
+      D.ws.cash -= amount + f;   // 现金源头是 ws.cash，recalc() 后重新发布为 D.cash
     } else {
-      cur.shares -= qty; rp = (price - cur.cost) * qty - f; D.cash += amount - f;
+      cur.shares -= qty; rp = (price - cur.cost) * qty - f; D.ws.cash += amount - f;
       if (cur.shares <= 0) D.holdings.splice(D.holdings.indexOf(cur), 1);
     }
     LOG.unshift({ t: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-').slice(0, 16), code: cur.code, name: cur.name, side: side === 'buy' ? '买入' : '卖出', qty, price, fee: f, rp });
     const note = document.getElementById('in-note').value;
-    refreshDerived(); renderSummary(); render(); renderLog(); renderRules(); close();
+    D.recalc(); renderSummary(); render(); renderLog(); renderRules(); close();
     D.toast(`已记入：${side === 'buy' ? '买入' : '卖出'} ${cur.name} ${qty} ${m.unit} @ ${D.fmt(price, 2)}${note ? ' · ' + note : ''}`, 'check');
   });
 
@@ -455,7 +446,8 @@
     if (qp.get('qty')) { document.getElementById('in-qty').value = qp.get('qty'); calc(); }
   }
 
-  setInterval(() => { D.tickPrices(); refreshDerived(); renderSummary(); render(); renderRules(); }, 6000);
+  // 盘中自动跳动：tickPrices 内部已重算快照并同步行情条，返回 true 才需要重绘本页
+  setInterval(() => { if (D.tickPrices()) { renderSummary(); render(); renderRules(); } }, 6000);
 })();
 </script>
 </body>

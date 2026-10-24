@@ -10,14 +10,14 @@
 | `etf` | 场内 ETF | 100 份 | 整数份 | 3 |
 | `cb` | 可转债 | 10 张 | 整数张 | 3 ⚠️ |
 
-- 数量校验：`qty % lot === 0`，否则报「数量需为 N 的整数倍」（`holdings.html:351`）。
-- 卖出不得超过当前持仓：`qty > held` 时报「最多可卖 X」（`holdings.html:352`）。
-- 快捷档位：按当前持仓（无持仓时按 10 手）的 10% / 25% / 50% 向下取整到手，卖出额外给「全部清仓」（`holdings.html:343`）。
-- ⚠️ 抽屉精度按 `kind === 'etf' ? 3 : 2` 取（`holdings.html:287`），转债因此显示 2 位（126.72），而成交流水按 `price < 10 ? 3 : 2` 取（`holdings.html:398`）——转债两处口径不一致。建议统一为「按 `kind` 决定精度」，把规则收进 `data.js`。
+- 数量校验：`qty % lot === 0`，否则报「数量需为 N 的整数倍」（`holdings.html:342`）。
+- 卖出不得超过当前持仓：`qty > held` 时报「最多可卖 X」（`holdings.html:343`）。
+- 快捷档位：按当前持仓（无持仓时按 10 手）的 10% / 25% / 50% 向下取整到手，卖出额外给「全部清仓」（`holdings.html:334`）。
+- ⚠️ 抽屉精度按 `kind === 'etf' ? 3 : 2` 取（`holdings.html:278`），转债因此显示 2 位（126.72），而成交流水按 `price < 10 ? 3 : 2` 取（`holdings.html:389`）——转债两处口径不一致。建议统一为「按 `kind` 决定精度」，把规则收进 `data.js`。
 
 ## 2. 价格合法性（涨跌停校验）
 
-原型实现（`holdings.html:302` 显示、`:356` 拦截）：
+原型实现（`holdings.html:293` 显示、`:347` 拦截）：
 
 ```
 股票 / ETF： 昨收 × 0.899  ≤  委托价  ≤  昨收 × 1.1001
@@ -39,7 +39,7 @@
 总费用   = 佣金 + 印花税 + 过户费
 ```
 
-实现见 `holdings.html:329`。ETF 与可转债免印花税、免过户费。
+实现见 `holdings.html:320`。ETF 与可转债免印花税、免过户费。
 
 ⚠️ 注释写「沪市过户费」，代码对**所有**股票收取（含深市 `002594`/`300750`）。自 2022-04-29 起沪深两市均按成交金额 0.001% 收取过户费——**代码是对的，文案要改**（`design/README.md` 与界面提示里的「沪市过户费」）。
 ⚠️ 可转债若发生「转股」，费用与税务与买卖不同，原型未覆盖，属于范围外但要留扩展位。
@@ -64,7 +64,7 @@
 现金     cashAfter   = cash + amount − f
 ```
 
-实现见 `holdings.html:361`。已实现收益率按 `realized / (cost × qty)` 展示。
+实现见 `holdings.html:352`。已实现收益率按 `realized / (cost × qty)` 展示。
 
 **试算后的调整后仓位**（分母随本次交易变化，不能用当前总资产）：
 
@@ -72,14 +72,16 @@
 others  = Σ(其他持仓市值)          # 不含本次标的
 taAfter = others + afterShares × price + cashAfter
 afterW  = afterShares × price / taAfter × 100
-超上限判定：afterW > 25 → 抽屉里给「纪律提示」（holdings.html:370）
+超上限判定：afterW > 25 → 抽屉里给「纪律提示」（holdings.html:361）
 ```
 
 现金不足（`cashAfter < 0`）时数字标绿并在提交判定中拦截，不弹错误框。
 
 ## 5. 逐笔与组合派生指标
 
-逐笔（`data.js:69`）：
+全部派生值统一由 `recalc()` 计算（`data.js:82`），页面不自行补算；行情跳动、手动刷新、记入交易都走它，算完自动同步到 `QW` 导出对象（`publish()`，`data.js:80`）。分母为 0 时（空持仓）各比率取 0，不产生 NaN。
+
+逐笔（`data.js:84`）：
 
 ```
 dayChg   = (price − prev) / prev × 100        # 当日涨跌幅 %
@@ -87,10 +89,10 @@ dayVal   = (price − prev) × shares            # 当日盈亏额
 mv       = price × shares                     # 市值
 pnl      = (price − cost) × shares            # 累计浮动盈亏
 pnlPct   = (price − cost) / cost × 100
-weight   = mv / (totalMv + cash) × 100        # 占总资产（含现金）
+weight   = mv / (totalMv + cash) × 100        # 占总资产（含现金），data.js:109
 ```
 
-组合（`data.js:79`）：
+组合（`data.js:94`）：
 
 ```
 totalMv      = Σ mv                     totalAssets = totalMv + cash
@@ -112,11 +114,11 @@ exposure     = totalMv / totalAssets × 100             # 仓位（不含现金�
 | 可转债合计占组合 | ≤ 12% | `Σ mv(kind=cb)` | **totalAssets（含现金）** |
 | 现金最低保留 | ≥ 10% | `cash` | **totalAssets（含现金）** |
 
-实现：`holdings.html:428`（规则清单）、`data.js:103`（`wp()` 占总资产）、`data.js:104`（`wsec()` 占市值）。
+实现：`holdings.html:419`（规则清单）、`data.js:129`（`wp()` 占总资产）、`data.js:130`（`wsec()` 占市值）。
 
 ⚠️ 两个分母并存且都出现在文案里（「占总资产 22.6%」与「行业占持仓 35.1%」）。后端与推送文案必须**在数字旁边写清分母**，否则会互相看起来像算错了。建议字段命名固定为 `weightOfAssets` / `weightOfMarketValue`。
 
-**降到目标仓位的卖出数量**（按手向上取整，`data.js:107`）：
+**降到目标仓位的卖出数量**（按手向上取整，`data.js:133`）：
 
 ```
 sellTo(code, target%) = max(100, ceil((mv − totalAssets × target/100) / price / 100) × 100)
@@ -139,7 +141,7 @@ sellTo(code, target%) = max(100, ceil((mv − totalAssets × target/100) / price
 前三行业合计  top3Sector = Σ w(前 3)
 ```
 
-实现：`data.js:135`。基准为**沪深 300 全收益**，指数点位归一。
+实现：`data.js:161`。基准为**沪深 300 全收益**，指数点位归一。
 
 ## 8. 波动合成假设（再平衡清单的调整前后对比）
 
@@ -154,7 +156,7 @@ sellTo(code, target%) = max(100, ceil((mv − totalAssets × target/100) / price
 
 ## 9. 市场时钟
 
-以真实系统时间判断，不含节假日表（`data.js:299`）：
+以真实系统时间判断，不含节假日表（`data.js:325`）：
 
 | 时段 | 状态 | 是否 live |
 |---|---|---|
@@ -189,4 +191,4 @@ sellTo(code, target%) = max(100, ceil((mv − totalAssets × target/100) / price
 - 百分比：`pct(v)` → 正数带 `+`、负数带 `-`、零不带符号，两位小数。
 - 涨跌类名：`dirClass(v)` → `up / down / flat`；`up` 红、`down` 绿（A 股惯例）。
 - 所有数字 `tabular-nums` 等宽；代码、价格、时间走 `--font-mono`。
-- ⚠️ `up/down` 类目前被复用于「合规/违规」「买入/卖出」「好/坏」等非涨跌语义（如 `holdings.html:442`、`:397`）。在红涨绿跌的产品里这会误导读者，需要引入 `--ok / --danger / --warn` 的中性别名。
+- ⚠️ `up/down` 类目前被复用于「合规/违规」「买入/卖出」「好/坏」等非涨跌语义（如 `holdings.html:433`、`:388`）。在红涨绿跌的产品里这会误导读者，需要引入 `--ok / --danger / --warn` 的中性别名。

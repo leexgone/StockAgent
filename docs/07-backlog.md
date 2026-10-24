@@ -1,39 +1,14 @@
 # 07 · 已知问题与待决策
 
-分三级：**阻断**（现在就是坏的）、**一致性**（数字/口径互相打架）、**待决策**（需要人拍板）。`06-roadmap.md` 的 P1 就是清掉前两级。
+分四级：**阻断**（现在就是坏的）、**一致性**（数字/口径互相打架）、**待决策**（需要人拍板）、**已修复**（存档，保留验证方式）。`06-roadmap.md` 的 P1 就是清掉前两级。
 
 ## 阻断
 
-### A1 · `analysis.html` 打开即报错，后半屏空白
-
-共享数据层没有产出 `weight`，也没有 `totalMvAll`，但分析页在用它们：
-
-- `analysis.html:283`、`:386` 读 `h.weight` —— `QW.holdings[].weight` 实测为 `undefined`（派生代码在 `data.js:69`，未包含该字段，但 `design/README.md` 的数据契约表声称它是派生字段）
-- `analysis.html:369` 调 `D.totalMvAll()` —— 该函数定义在 `holdings.html:196`，是页面自己往全局补的，分析页不会加载
-
-后果：`render()` 在 `analysis.html:317`（执行计划）抛 `TypeError` 中断，**执行计划、风险自陈、历史建议、30 日 K 线、建议排序表全部不渲染**。`600519`（持有）在 `:386` 就崩，`002594`/`113650`（减仓）在 `:369` 崩；首页「今天需要你决定」的第一条恰好链到 `analysis.html?code=002594`。持仓页看起来正常，只是因为它把这两个都补上了。
-
-验证：在 Node 里加载 `data.js`，`window.QW.holdings[0].weight === undefined`、`typeof window.QW.totalMvAll === 'undefined'`。
-
-**修法**：把 `weight` 加进 `data.js:69` 的派生循环，把 `totalMvAll()` 作为函数导出到 `QW`，并让 `holdings.html` 不再自行定义。**不要**在分析页加 `|| 0` 兜底——那会把报错变成静默显示 0.0%，更难发现。
-
 ### A2 · 首笔持仓没有入口
 
-所有界面假设账户里已经有 10 只标的。真实用户第一次打开时持仓为空，`totalAssets = cash`，`hhi`、`perf`、`sellTo` 都会退化甚至除零。需要「录入第一笔」的空态与引导路径（`.empty` 样式已存在，见 `ui.css:465` 分区）。
+所有界面假设账户里已经有 10 只标的。真实用户第一次打开时持仓为空，`totalAssets = cash`。除零防护已随 A1/B1 修复做进 `recalc()`（空持仓时各比率为 0，不再是 NaN，已在沙箱验证），但「录入第一笔」的空态与引导路径仍然缺失（`.empty` 样式已存在，见 `ui.css:465` 分区）；`dashboard.html` 的头图与收盘摘要、`index.html` 的问候语在空持仓下会因取 `holdings[0]` 报错，也要一并处理。关联决策 C5。
 
 ## 一致性
-
-### B1 · 行情跳动后同一屏内数字自相矛盾
-
-`tickPrices()`（`data.js:461`）会**改动共享状态** `holdings[].price / dayChg`，但不更新 `dayVal / mv / pnl / pnlPct / weight`，也不更新加载时算好的常量 `totalAssets / dayPnl / totalPnl / sectors / hhi / exposure / P`。三个页面各自装了自动跳动定时器，重算范围却不一样：
-
-| 页面 | 定时器 | 跳动后重算了什么 | 结果 |
-|---|---|---|---|
-| `holdings.html:458` | 每 6s | `refreshDerived()` 重算逐笔 + 页内汇总用 `totalMvAll()` 现算 | 页内自洽，但顶栏行情条的「我的总资产」仍是 `chrome()` 时用旧 `totalAssets` 渲染的一次性 HTML（`data.js:393`）→ 同一屏两个总资产 |
-| `dashboard.html:308` | 每 5s | 只 `renderEquity()`，而它读的是 `equity.nav`（不随价格变化） | 持仓表价格变了，当日盈亏归因、资产配置、净值曲线、行情条全部停在加载值 → 首屏五个模块互相对不上 |
-| 其他页面 | 无 | — | 手动点顶栏刷新按钮（`data.js:435`）同样触发 `tickPrices(true)`，一样只动价格 |
-
-根因是契约层缺一个「重算入口」（见 `04` 第 3 条）：汇总指标必须是函数或有 `recalc()`，不能是加载时算一次的常量。接真实行情前这条必须解决，否则真实数据的第一次更新就会复现同样的分裂。
 
 ### B2 · 涨跌停口径三处偏差
 
@@ -41,31 +16,31 @@
 
 ### B3 · 过户费文案过时
 
-代码对所有股票收取过户费（`holdings.html:332`，注释却写「沪市」）。2022-04-29 起沪深两市均收，**代码对、文案错**：改 `design/README.md` 与 `holdings.html:111` 的提示文字。
+代码对所有股票收取过户费（`holdings.html:323`，注释却写「沪市」）。2022-04-29 起沪深两市均收，**代码对、文案错**：改 `design/README.md` 与 `holdings.html:111` 的提示文字。
 
 ### B4 · 可转债小数位不统一
 
-抽屉按 `kind === 'etf' ? 3 : 2`（`:287`），流水按 `price < 10 ? 3 : 2`（`:398`）。转债在抽屉里显示 `126.72`，在流水里可能显示 `122.800`。
+抽屉按 `kind === 'etf' ? 3 : 2`（`:278`），流水按 `price < 10 ? 3 : 2`（`:389`）。转债在抽屉里显示 `126.72`，在流水里可能显示 `122.800`。
 
 ### B5 · `up / down` 类被复用于非涨跌语义
 
-`holdings.html:442` 用 `up` 表示「已触及纪律上限」、`:397` 用 `up/down` 表示买入/卖出、`analysis.html:312` 用它们表示维度得分高低、`charts.js:158` 的 gauge 用它们表示分数。在红涨绿跌的产品里，「红色 = 危险」和「红色 = 上涨」会同时出现且互相冲突。需要引入 `--ok/--warn/--danger` 的用法并逐处替换。
+`holdings.html:433` 用 `up` 表示「已触及纪律上限」、`:388` 用 `up/down` 表示买入/卖出、`analysis.html:315` 用它们表示维度得分高低、`charts.js:158` 的 gauge 用它们表示分数。在红涨绿跌的产品里，「红色 = 危险」和「红色 = 上涨」会同时出现且互相冲突。需要引入 `--ok/--warn/--danger` 的用法并逐处替换。
 
 ### B6 · 演示数字靠正则改写中文句子维持一致
 
-`data.js:232` 用 `replace(/当前 [\d.]+%/g, …)` 把写死在文案里的百分比覆盖成计算值。目前能对齐，但只匹配「当前 X%」「占总资产 X%」两种句式——`advice` 里还有「减 200 股」「回落到 25% 以下」等句子不受保护。接真实数据后应改为模板插值。
+`data.js:259` 用 `replace(/当前 [\d.]+%/g, …)` 把写死在文案里的百分比覆盖成计算值。目前能对齐，但只匹配「当前 X%」「占总资产 X%」两种句式——`advice` 里还有「减 200 股」「回落到 25% 以下」等句子不受保护。接真实数据后应改为模板插值。
 
 ### B7 · 交易所靠代码首字母猜
 
-`analysis.html:281` 用 `code[0] === '6' ? 'SH' : 'SZ'`，而 `holdings` 已有显式 `mkt` 字段。`588000`（科创板 ETF，SH）能被猜对是巧合，`002415`（SZ）也是；`5` 开头的深市 ETF 会猜错。用 `mkt`。
+`analysis.html:284` 用 `code[0] === '6' ? 'SH' : 'SZ'`，而 `holdings` 已有显式 `mkt` 字段。`588000`（科创板 ETF，SH）能被猜对是巧合，`002415`（SZ）也是；`5` 开头的深市 ETF 会猜错。用 `mkt`。同样的猜测还出现在 `holdings.html` 交易提交处新建持仓的 `mkt` 字段。
 
 ### B8 · 死代码
 
-`holdings.html:437` 的 `r.inverse ? c / r.v * 100 : c / r.v * 100` 两个分支完全相同，「现金最低保留」的进度条因此按「越大越好」画，与另外三条规则的视觉语义相反。
+`holdings.html:428` 的 `r.inverse ? c / r.v * 100 : c / r.v * 100` 两个分支完全相同，「现金最低保留」的进度条因此按「越大越好」画，与另外三条规则的视觉语义相反。
 
 ### B9 · 历史建议与 `advice` 无关
 
-`analysis.html:326` 的 `buildHistory()` 用的是页面内生成的样本，没有数据层的建议留档结构。接真实数据后「回看当时怎么说的」需要 `adviceHistory`（见 `04` 第 6 条），届时这块文案与来源都要重做。
+`analysis.html:329` 的 `buildHistory()` 用的是页面内生成的样本，没有数据层的建议留档结构。接真实数据后「回看当时怎么说的」需要 `adviceHistory`（见 `04` 第 6 条），届时这块文案与来源都要重做。
 
 ## 待决策
 
@@ -82,3 +57,24 @@
 | C9 | 数据存储位置 | 本地 SQLite 还是 JSON 文件；持仓是敏感数据，涉及备份与同步策略 |
 | C10 | 许可与版权 | `LICENSE` 是 Apache-2.0 正文，缺少先常见的版权声明附录段落；要不要补 `NOTICE` |
 | C11 | `design/README.md` 与 `docs/` 收敛 | 内容重叠（业务规则、数据契约、设计约定）。建议 `design/README.md` 保留「怎么打开原型」，其余改为指向 `docs/` 的链接 |
+
+## 已修复（存档）
+
+### A1 · `analysis.html` 打开即报错，后半屏空白 —— 2026-10-24 修复
+
+**原现象**：共享数据层不产出 `weight`，也没有 `totalMvAll()`，两者都是 `holdings.html` 页内自己补的全局（旧版 `:192`/`:196`）。分析页独立加载时 `render()` 在构建执行计划处抛 `TypeError`，**执行计划、风险自陈、历史建议、30 日 K 线、建议排序表全部不渲染**；首页「今天需要你决定」第一条恰好链到 `analysis.html?code=002594`。
+
+**修复**：收进契约层——`recalc()` 统一派生 `h.weight`（`data.js:109`，与 `wp()` 同分母），`totalMvAll()` 由 `data.js:125` 导出；删除 `holdings.html` 的本地定义。分析页**没有**加 `|| 0` 兜底（那会把报错变成静默的 0.0%）。
+
+**验证**：vm 沙箱加载 `data.js`，复现原崩溃表达式可正常求值；每只持仓 `weight` 存在且 `Σweight === exposure`、`weight.toFixed(1) === wp(code)`；七个页面内联脚本全部通过语法编译。
+
+### B1 · 行情跳动后同一屏内数字自相矛盾 —— 2026-10-24 修复
+
+**原现象**：`tickPrices()` 只改 `price/dayChg`；`totalAssets / dayPnl / sectors / hhi / exposure` 等是加载时算一次的常量；各页定时器重算范围不同（holdings 每 6s 重算逐笔、dashboard 每 5s 只重绘净值、其余页面不动），行情条「我的总资产」永远是加载值 → 同一屏多个模块互相对不上。
+
+**修复**：
+- `data.js`：汇总改为 `agg` 快照，`recalc()` 统一重算（含逐笔派生与 `weight`）并 `publish()` 回 `QW`（`data.js:76-123`）；`tickPrices()` 内部调用 `recalc()`、重绘行情条，并**返回价格是否真的变动**（`data.js:492`），休市时自动跳动直接跳过；`chrome()` 新增 `onRefresh` 回调，顶栏刷新按钮跳动后通知页面重绘。
+- 页面：dashboard 收拢出 `renderAll()`（头条/净值/配置/归因/持仓表/摘要一起重绘，删掉了只重绘净值的冗余 60s 定时器）；holdings 定时器与刷新回调走同一组渲染函数；analysis `render()`、index `renderHead()`、chat `renderCtx()`、diagnosis `renderAll()` 接入 `onRefresh`。wechat 页不接（其卡片是历史推送样式，非实时视图）。
+- 现金改动的唯一源头是 `ws.cash`（交易页提交处），`recalc()` 后重新发布为 `QW.cash`，不再直接写 `D.cash`。
+
+**验证**：vm 沙箱断言「交易改动 → `recalc()` → 导出快照同步」「手动 tick → 聚合与逐笔自洽」「休市自动 tick 返回 `false` 且价格不动」「空持仓无 NaN」，25 项全部通过（脚本在 `.file-versions/check-contract.js`，该目录被 gitignore，不入库）。
