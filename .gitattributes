@@ -1,0 +1,23 @@
+# 统一换行与编码：仓库内一律 LF + UTF-8，避免 Windows 上 diff 全是换行噪音
+* text=auto eol=lf
+
+*.html text eol=lf
+*.css  text eol=lf
+*.js   text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.py   text eol=lf
+
+# 二进制，不做文本处理
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+
+# 差异对比
+*.html diff
+*.js   diff
+*.css  diff

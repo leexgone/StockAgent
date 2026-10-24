@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AI 分析建议 · 青梧股票智能助理</title>
+<link rel="stylesheet" href="assets/ui.css" />
+<style>
+  .a-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .pick { display: flex; flex-direction: column; gap: 1px; }
+  .pick button {
+    display: flex; align-items: center; gap: 9px; padding: 9px 12px; border: 0; background: transparent;
+    text-align: left; border-radius: var(--r-sm); color: var(--fg-2); font-size: 13px; transition: background .13s;
+  }
+  .pick button:hover { background: var(--surface-2); }
+  .pick button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 550; }
+  .pick .c { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); margin-left: auto; }
+  .verdict { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+  .verdict-tag {
+    font-family: var(--font-display); font-size: 30px; font-weight: 590; letter-spacing: -.03em;
+    padding: 10px 18px; border-radius: var(--r-md); line-height: 1;
+  }
+  .vt-buy, .vt-add { background: var(--up-soft); color: var(--up); }
+  .vt-reduce, .vt-sell { background: var(--down-soft); color: var(--down); }
+  .vt-hold, .vt-dca { background: var(--accent-soft); color: var(--accent); }
+  .dim { display: grid; grid-template-columns: 76px 1fr; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .dim:last-child { border-bottom: 0; }
+  .dim-k { font-size: 13px; font-weight: 550; }
+  .dim-s { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .dim-t { font-size: 12.5px; line-height: 1.7; color: var(--fg-2); max-width: 62ch; }
+  .plan-step { display: grid; grid-template-columns: 26px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px dashed var(--border); }
+  .plan-step:last-child { border-bottom: 0; }
+  .plan-no { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--border-2); display: grid; place-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
+  @media (max-width: 1000px) { .a-layout { grid-template-columns: minmax(0,1fr); } .pick { flex-direction: row; overflow-x: auto; padding-bottom: 4px; } .pick button { flex: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" data-od-id="analysis-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">AI 分析建议</div>
+          <h1 class="page-title">结论、依据、以及怎么执行</h1>
+          <p class="page-desc">每只标的给出一个动作（买入 / 加仓 / 持有 / 减仓 / 卖出 / 定投），并把结论拆成四个维度：你能看到它是根据什么得出的，也能看到它可能错在哪。</p>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="group" aria-label="重新分析范围" id="scope">
+            <button type="button" data-s="hold" aria-pressed="true">我的持仓</button>
+            <button type="button" data-s="watch">自选</button>
+          </div>
+          <button class="btn" id="rerun">重新分析</button>
+        </div>
+      </div>
+
+      <div class="a-layout">
+        <!-- 左：标的选择 -->
+        <div>
+          <section class="card" data-od-id="analysis-picker">
+            <div class="card-head"><div class="card-title" style="font-size:13px">选择标的</div></div>
+            <div class="card-body tight" style="padding:8px"><div class="pick" id="pick"></div></div>
+          </section>
+          <section class="card" data-od-id="analysis-rank" style="margin-top:16px">
+            <div class="card-head"><div><div class="card-title" style="font-size:13px">建议排序</div><div class="card-sub">按综合得分</div></div></div>
+            <div class="card-body tight" style="padding:0 0 6px"><div class="tbl-wrap"><table class="tbl" id="rank">
+              <thead><tr><th class="txt">标的</th><th>得分</th><th>动作</th></tr></thead><tbody></tbody>
+            </table></div></div>
+          </section>
+        </div>
+
+        <!-- 右：分析结果 -->
+        <div class="grid" style="gap:16px">
+          <section class="card" data-od-id="verdict-card">
+            <div class="card-head">
+              <div>
+                <div class="card-title" id="a-name" style="font-size:17px">—</div>
+                <div class="card-sub"><span class="num" id="a-code">—</span> · <span id="a-meta">—</span></div>
+              </div>
+              <div class="head-actions">
+                <span class="pill" id="a-conf">—</span>
+                <button class="btn btn-sm" id="ask-more">就这只问我</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="verdict">
+                <div class="verdict-tag" id="a-tag">—</div>
+                <div>
+                  <div class="metric-label">建议动作</div>
+                  <div style="font-size:13.5px;font-weight:550;margin-top:6px" id="a-action-line">—</div>
+                  <div class="hint" id="a-reason" style="max-width:52ch"></div>
+                </div>
+                <div style="margin-left:auto;text-align:center" id="a-gauge"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-top:20px" id="a-facts"></div>
+            </div>
+          </section>
+
+          <section class="card" data-od-id="kline-card">
+            <div class="card-head">
+              <div><div class="card-title">30 日 K 线与均线</div><div class="card-sub" id="k-sub">—</div></div>
+              <div class="head-actions">
+                <div class="seg" id="k-period"><button type="button" data-p="1" aria-pressed="true">日 K</button><button type="button" data-p="5">周 K</button></div>
+              </div>
+            </div>
+            <div class="card-body"><div class="chart-hold" id="kline" style="height:260px"></div>
+              <div class="legend" style="margin-top:8px">
+                <span><i style="background:var(--up)"></i>阳线（涨）</span>
+                <span><i style="background:var(--down)"></i>阴线（跌）</span>
+                <span><i style="background:var(--accent)"></i>MA5</span>
+                <span><i style="background:var(--muted)"></i>MA20</span>
+                <span style="margin-left:auto" class="num" id="k-read"></span>
+              </div>
+            </div>
+          </section>
+
+          <div class="grid g-2">
+            <section class="card" data-od-id="dims-card">
+              <div class="card-head"><div><div class="card-title">依据拆解</div><div class="card-sub">四个维度各自的分数与观察</div></div></div>
+              <div class="card-body" id="dims"></div>
+            </section>
+            <div class="grid" style="gap:16px">
+              <section class="card" data-od-id="plan-card">
+                <div class="card-head"><div><div class="card-title">执行计划</div><div class="card-sub">分笔，不是一次性梭哈</div></div>
+                  <div class="head-actions"><button class="btn btn-sm btn-primary" id="apply-plan">写入持仓试算</button></div></div>
+                <div class="card-body" id="plan"></div>
+              </section>
+              <section class="card" data-od-id="risk-card">
+                <div class="card-head"><div><div class="card-title">这个结论可能错在哪</div><div class="card-sub">助理自己列的风险</div></div></div>
+                <div class="card-body"><ul id="risks" style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.75;color:var(--fg-2)"></ul></div>
+              </section>
+            </div>
+          </div>
+
+          <section class="card" data-od-id="history-card">
+            <div class="card-head"><div><div class="card-title">该标的的历史建议</div><div class="card-sub">每次数据更新后重算，可回看当时怎么说的</div></div>
+              <div class="head-actions"><span class="pill" id="fb-note">未反馈</span></div></div>
+            <div class="card-body tight"><div class="tbl-wrap"><table class="tbl" id="hist">
+              <thead><tr><th class="txt">日期</th><th class="txt">动作</th><th>得分</th><th>当时价格</th><th class="txt">理由摘要</th><th>至今验证</th></tr></thead>
+              <tbody></tbody></table></div></div>
+            <div class="card-foot" style="justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <span class="hint" style="margin:0">反馈会用于调整后续建议的置信度（演示：仅本地记录）。</span>
+              <span style="display:flex;gap:8px">
+                <button class="btn btn-sm" data-fb="yes">有帮助</button>
+                <button class="btn btn-sm" data-fb="no">没帮助</button>
+              </span>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="footnote" data-od-id="a-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>得分与动作由模型基于<b>演示样本数据</b>生成，置信度反映的是样本内信号一致性，不代表未来胜率。本页面不构成投资建议，不代为执行任何真实委托。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW, C = window.QWC;
+  D.chrome({ active: 'analysis.html', crumb: '工作台 / <b>AI 分析建议</b>' });
+
+  const TAG = { 买入: 'vt-buy', 加仓: 'vt-add', 持有: 'vt-hold', 减仓: 'vt-reduce', 卖出: 'vt-sell', 定投: 'vt-dca' };
+  const params = new URLSearchParams(location.search);
+  let scope = 'hold', code = params.get('code') || '300750';
+  const all = () => scope === 'hold'
+    ? D.holdings.map(h => ({ code: h.code, name: h.name, kind: h.kind, sector: h.sector, h }))
+    : D.watchlist.map(w => ({ code: w.code, name: w.name, kind: w.code[0] === '5' ? 'etf' : 'stock', sector: w.sector, w }));
+  // 自选没有分析库时，生成一份保守的「观察中」结论
+  function adviceFor(c) {
+    if (D.advice[c]) return D.advice[c];
+    const w = D.watchlist.find(x => x.code === c) || {};
+    return {
+      score: 58, action: '观察', horizon: '等待触发', conf: 0.5, position: '未持有 → 建议观察后再定',
+      target: null, stop: null, reason: `自选标的，当前仅 ${w.dayChg > 0 ? '放量上行' : '缩量整理'}，未触发你的建仓条件，先不动。`,
+      dims: [
+        { k: '技术面', s: 60, t: '未突破前期平台，等待量能确认。' },
+        { k: '基本面', s: 58, t: '需接入财报数据后重算，当前沿用行业均值。' },
+        { k: '资金面', s: 55, t: '主力流向中性。' },
+        { k: '消息面', s: 52, t: '无与你持仓相关的增量信息。' },
+      ],
+      risks: ['自选标的缺少你的成本与仓位上下文，建议先小仓位试错，别用观察名单直接下重手。'],
+      watchOnly: true,
+    };
+  }
+
+  /* ---------- 确定性 OHLC ---------- */
+  function rng(seedStr) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < seedStr.length; i++) { h ^= seedStr.charCodeAt(i); h = Math.imul(h, 16777619); }
+    let x = h >>> 0;
+    return () => { x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  }
+  function candles(item) {
+    const last = item.h ? item.h.price : item.w.price;
+    const prev = item.h ? item.h.prev : last / (1 + (item.w.dayChg || 0) / 100);
+    const vol = item.kind === 'cb' ? 0.010 : item.kind === 'etf' ? 0.013 : 0.022;
+    const r = rng(item.code + 'k'), n = 30;
+    const closes = [last * (1 - (r() - 0.35) * 0.10)];
+    for (let i = 1; i < n; i++) closes.push(closes[i - 1] * (1 + (r() - 0.5) * vol * 1.5));
+    const k = last / closes[n - 1];
+    for (let i = 0; i < n; i++) closes[i] *= k;
+    closes[n - 2] = prev; closes[n - 1] = last;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const c = closes[i], o = i === 0 ? c * (1 + (r() - 0.5) * vol) : closes[i - 1];
+      out.push({ o, c, h: Math.max(o, c) * (1 + r() * vol * 0.7), l: Math.min(o, c) * (1 - r() * vol * 0.7) });
+    }
+    return out;
+  }
+  const ma = (arr, k) => arr.map((_, i) => i < k - 1 ? null : arr.slice(i - k + 1, i + 1).reduce((s, x) => s + x.c, 0) / k);
+
+  let period = 1, cache = null;
+  function drawK(item) {
+    const daily = candles(item);
+    let data = daily;
+    if (period === 5) {
+      data = [];
+      for (let i = 0; i < daily.length; i += 5) {
+        const g = daily.slice(i, i + 5); if (!g.length) continue;
+        data.push({ o: g[0].o, c: g[g.length - 1].c, h: Math.max(...g.map(x => x.h)), l: Math.min(...g.map(x => x.l)) });
+      }
+    }
+    const m5 = ma(data, Math.min(5, data.length)), m20 = data.length >= 20 ? ma(data, 20) : [];
+    const el = document.getElementById('kline');
+    const w = Math.max(320, el.clientWidth || 720), h = 250, padT = 12, padB = 16;
+    const iw = w, ih = h - padT - padB;
+    const lo = Math.min(...data.map(x => x.l)), hi = Math.max(...data.map(x => x.h));
+    const rg = (hi - lo) || hi * 0.02;
+    const y = v => ih - (v - (lo - rg * .06)) / (rg * 1.12) * ih + padT;
+    const step = iw / data.length, bw = Math.max(3, step * 0.56);
+    let s = `<svg class="chart" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`;
+    for (let g = 0; g <= 3; g++) {
+      const v = (lo - rg * .06) + (rg * 1.12) * g / 3, yy = y(v);
+      s += `<line class="grid-line" x1="0" x2="${w}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"/>`;
+      s += `<text x="3" y="${(yy - 4).toFixed(1)}">${D.fmt(v, last2(item))}</text>`;
+    }
+    data.forEach((k, i) => {
+      const cx = step * i + step / 2, up = k.c >= k.o, col = C.color(up ? '--up' : '--down');
+      s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(k.h).toFixed(1)}" y2="${y(k.l).toFixed(1)}" stroke="${col}" stroke-width="1.2"/>`;
+      const top = y(Math.max(k.o, k.c)), hh = Math.max(1.4, Math.abs(y(k.o) - y(k.c)));
+      s += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="1" fill="${up ? 'none' : col}" stroke="${col}" stroke-width="1.2"/>`;
+    });
+    const lineOf = (arr, col, wd) => {
+      const pts = arr.map((v, i) => v == null ? null : [step * i + step / 2, y(v)]).filter(Boolean);
+      if (pts.length < 2) return '';
+      return `<path d="${C.smooth(pts)}" fill="none" stroke="${col}" stroke-width="${wd}" opacity=".9"/>`;
+    };
+    s += lineOf(m5, C.color('--accent'), 1.4) + lineOf(m20, C.color('--muted'), 1.2);
+    s += '</svg>';
+    el.innerHTML = s;
+    const last = data[data.length - 1], first = data[0];
+    document.getElementById('k-read').textContent =
+      `${period === 1 ? '日' : '周'}线 ${data.length} 根 · 区间 ${(last.c / first.o - 1) * 100 >= 0 ? '+' : ''}${((last.c / first.o - 1) * 100).toFixed(2)}% · MA5 ${D.fmt(m5[m5.length - 1] || last.c, last2(item))}`;
+    document.getElementById('k-sub').textContent =
+      `${period === 1 ? '每日' : '每周'} OHLC 为演示样本，末根锚定现价 ${D.fmt(last.c, last2(item))}`;
+  }
+  function last2(item) { return item.kind === 'etf' ? 3 : 2; }
+
+  /* ---------- 渲染 ---------- */
+  function render() {
+    const items = all();
+    if (!items.find(x => x.code === code)) code = items[0].code;
+    const item = items.find(x => x.code === code);
+    const A = adviceFor(code);
+    document.getElementById('pick').innerHTML = items.map(x => `
+      <button type="button" data-code="${x.code}" aria-pressed="${x.code === code}">
+        <span>${x.name}</span><span class="c">${x.code}</span>
+      </button>`).join('');
+
+    const h = item.h, price = h ? h.price : item.w.price, chg = h ? h.dayChg : item.w.dayChg;
+    document.getElementById('a-name').textContent = item.name;
+    document.getElementById('a-code').textContent = item.code + ' · ' + (item.code[0] === '6' ? 'SH' : 'SZ');
+    document.getElementById('a-meta').textContent =
+      `${D.kindLabel[item.kind]} · ${item.sector}${h ? ` · 持有 ${D.fmt(h.shares, 0)} ${h.kind === 'cb' ? '张' : h.kind === 'etf' ? '份' : '股'} · 占组合 ${(h.weight || 0).toFixed(1)}%` : ' · 未持有（自选观察）'}`;
+    const tag = document.getElementById('a-tag');
+    const tagText = A.action;
+    tag.textContent = tagText;
+    tag.className = 'verdict-tag ' + (TAG[A.action] || 'vt-hold');
+    document.getElementById('a-action-line').innerHTML =
+      `现价 <b class="num">${D.fmt(price, last2(item))}</b> <span class="${D.dirClass(chg)} num">${D.pct(chg)}</span> · ${A.horizon} · ${A.position}`;
+    document.getElementById('a-reason').textContent = A.reason;
+    const conf = document.getElementById('a-conf');
+    conf.className = 'pill ' + (A.conf >= 0.68 ? 'accent' : '');
+    conf.textContent = `模型置信度 ${(A.conf * 100).toFixed(0)}%`;
+    C.gauge('#a-gauge', A.score, '综合得分');
+
+    const facts = [
+      ['现价 / 昨收', `${D.fmt(price, last2(item))} / ${D.fmt(h ? h.prev : price / (1 + chg / 100), last2(item))}`],
+      ['成本 / 盈亏', h ? `${D.fmt(h.cost, last2(item))} / ${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}` : '— / —'],
+      ['目标区间', A.target ? `${A.target[0]} — ${A.target[1]}` : '未设'],
+      ['止损 / 支撑', A.stop ? D.fmt(A.stop, last2(item)) : '未设'],
+      ['建议仓位', A.position.split('→')[1] ? A.position.split('→')[1].trim() : '—'],
+      ['信号一致度', `${Math.round(A.conf * 100)} / 100`],
+    ];
+    document.getElementById('a-facts').innerHTML = facts.map((f, i) => `
+      <div style="background:var(--surface);padding:12px 14px" data-od-id="fact-${i}">
+        <div class="k" style="font-size:11.5px;color:var(--muted)">${f[0]}</div>
+        <div class="num" style="font-size:14px;font-weight:550;margin-top:5px">${f[1]}</div></div>`).join('');
+
+    document.getElementById('dims').innerHTML = A.dims.map((d, i) => `
+      <div class="dim" data-od-id="dim-${i}">
+        <div><div class="dim-k">${d.k}</div><div class="dim-s">${d.s} / 100</div>
+          <div class="progress" style="margin-top:8px"><i style="width:${d.s}%;background:${d.s >= 65 ? 'var(--up)' : d.s >= 45 ? 'var(--accent)' : 'var(--down)'}"></i></div></div>
+        <div class="dim-t">${d.t}</div>
+      </div>`).join('');
+
+    // 执行计划
+    const plan = buildPlan(item, A);
+    document.getElementById('plan').innerHTML = plan.map((p, i) => `
+      <div class="plan-step" data-od-id="plan-step-${i}"><div class="plan-no">${i + 1}</div>
+      <div><div style="font-size:13px;font-weight:550">${p.t}</div>
+      <div class="hint" style="margin-top:4px">${p.d}</div></div></div>`).join('');
+
+    document.getElementById('risks').innerHTML = A.risks.map((r, i) => `<li data-od-id="risk-${i}" style="margin-bottom:8px">${r}</li>`).join('');
+
+    // 历史建议
+    const hist = buildHistory(item, A, price);
+    document.querySelector('#hist tbody').innerHTML = hist.map((x, i) => `
+      <tr data-od-id="hist-row-${i}">
+        <td class="txt num" style="color:var(--muted);font-size:11.5px">${x.date}</td>
+        <td class="txt"><span class="pill ${TAG[x.action] ? (x.action === '减仓' || x.action === '卖出' ? 'down' : x.action === '持有' || x.action === '定投' ? '' : 'up') : ''}">${x.action}</span></td>
+        <td class="num">${x.score}</td>
+        <td class="num">${D.fmt(x.price, last2(item))}</td>
+        <td class="txt" style="white-space:normal;max-width:34ch;font-size:12px;color:var(--muted)">${x.note}</td>
+        <td class="num ${D.dirClass(x.verify)}">${x.verify == null ? '—' : D.pct(x.verify)}</td>
+      </tr>`).join('');
+    document.getElementById('fb-note').textContent = '未反馈';
+    document.getElementById('fb-note').className = 'pill';
+
+    cache = { item, A };
+    drawK(item);
+
+    // 建议排序表
+    const ranked = items.map(x => ({ code: x.code, name: x.name, a: adviceFor(x.code) }))
+      .sort((x, y) => y.a.score - x.a.score);
+    document.querySelector('#rank tbody').innerHTML = ranked.map(r => `
+      <tr data-clickable data-code="${r.code}" data-od-id="rank-row-${r.code}"${r.code === code ? ' style="background:var(--accent-soft)"' : ''}>
+        <td class="txt"><div class="name">${r.name}</div><div class="sub code">${r.code}</div></td>
+        <td class="num strong">${r.a.score}</td>
+        <td style="text-align:right"><span class="pill ${r.a.score >= 70 ? 'up' : r.a.score >= 55 ? '' : 'down'}">${r.a.action}</span></td>
+      </tr>`).join('') || '<tr><td colspan="3"><div class="empty">该范围内没有标的</div></td></tr>';
+  }
+  document.getElementById('rank').addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-code]'); if (tr) { code = tr.dataset.code; render(); }
+  });
+
+  function buildPlan(item, A) {
+    const h = item.h;
+    const prec = last2(item);
+    if (A.watchOnly) return [
+      { t: '先不动，设一个触发条件', d: `突破 ${D.fmt(item.w.price * 1.03, prec)} 且成交额 > 20 日均量 1.5 倍时提醒你；在此之前不建仓。` },
+      { t: '若要试仓，上限 3%', d: `${D.money(item.w.price * (item.code[0] === '6' ? 100 : 100), 0)} 起（1 手），试错仓位不影响主组合判断。` },
+    ];
+    if (A.action === '减仓' || A.action === '卖出') {
+      const total = h.shares, lot = item.kind === 'cb' ? 10 : 100;
+      const q1 = Math.max(lot, Math.floor(total * 0.4 / lot) * lot);
+      const q2 = Math.max(lot, Math.floor(total * 0.2 / lot) * lot);
+      const unit = item.kind === 'cb' ? '张' : item.kind === 'etf' ? '份' : '股';
+      return [
+        { t: `今日 ${D.fmt(h.price, prec)} 附近减 ${D.fmt(q1, 0)} ${unit}`, d: `先处理最急的部分：把单票占比从 ${(h.weight || 0).toFixed(1)}% 压到约 ${((h.mv - q1 * h.price) / (D.totalMvAll() + D.cash) * 100).toFixed(1)}%。` },
+        { t: `若明日反弹不过 60 日线，再减 ${D.fmt(q2, 0)} ${unit}`, d: '用「反弹不过均线」作条件，比直接追跌出更好的价格；挂条件单后微信会推给你。' },
+        { t: '回收资金去向', d: A.action === '减仓' ? `先回现金，等 ${D.holdings.find(x => x.code === '600276').name} 回踩 5 日线再补，别当场换股。` : '清仓资金进现金池，本周内不重复建仓同一行业。' },
+      ];
+    }
+    if (A.action === '加仓' || A.action === '买入') {
+      const px = h ? h.price : item.w.price;
+      const budget = Math.min(D.cash * 0.4, h ? h.mv * 0.35 : D.cash * 0.3);
+      const qty = Math.max(100, Math.floor(budget / px / 100) * 100);
+      const use = qty * px;
+      return [
+        { t: `首笔 ${D.fmt(qty, 0)} 股 @ ${D.fmt(px, prec)} 附近`, d: `约 ${D.money(use, 0)}，占可用现金 ${(use / D.cash * 100).toFixed(0)}%，留足第二笔弹药。` },
+        { t: '回踩不破 5 日线补第二笔', d: '两笔之间至少隔 2 个交易日，避免在同一个价格区间重复下注。' },
+        { t: '写下失效条件', d: A.stop ? `跌破 ${D.fmt(A.stop, prec)} 说明判断错了，无条件回到原仓位。` : '本次不设施损，以时间换空间。' },
+      ];
+    }
+    return [
+      { t: '维持现有仓位，不动', d: `当前 ${(h ? h.weight : 0).toFixed(1)}% 在纪律范围内，没有需要处理的风险点。` },
+      { t: '下一次重算时间', d: '每日 15:05 盘后复盘 + 财报/公告事件触发时即时重算，结果会推到微信。' },
+    ];
+  }
+
+  function buildHistory(item, A, price) {
+    const dates = ['10-24', '10-17', '10-10', '09-26', '09-19'];
+    const acts = [A.action, '持有', '持有', '加仓', '持有'];
+    const notes = ['本次：' + A.reason, '量能萎缩，维持不动。', '行业估值修复，维持。', '回踩 60 日线企稳，建议补。', '中报业绩低于预期但已反映在价格里。'];
+    const r = rng(item.code + 'h');
+    return dates.map((d, i) => {
+      const p = price * (1 - i * 0.018 + (r() - 0.5) * 0.02);
+      return { date: '2026-' + d, action: acts[i], score: Math.round(A.score - i * 2 + (r() - .5) * 8), price: p, note: notes[i], verify: i === 0 ? null : (price / p - 1) * 100 };
+    });
+  }
+
+  document.getElementById('pick').addEventListener('click', e => {
+    const b = e.target.closest('[data-code]'); if (!b) return; code = b.dataset.code; render();
+  });
+  document.getElementById('scope').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
+    scope = b.dataset.s; render();
+  });
+  document.getElementById('k-period').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
+    period = +b.dataset.p; if (cache) drawK(cache.item);
+  });
+  document.getElementById('rerun').addEventListener('click', () => {
+    render(); D.toast('已按最新样本重算 · ' + new Date().toTimeString().slice(0, 8), 'check');
+  });
+  document.getElementById('ask-more').addEventListener('click', () => {
+    if (!cache) return;
+    location.href = 'chat.html?code=' + cache.item.code + '&q=' + encodeURIComponent(`${cache.item.name}建议「${cache.A.action}」的理由再具体一点，我该在什么价格动手？`);
+  });
+  document.getElementById('apply-plan').addEventListener('click', () => {
+    if (!cache) return;
+    const { item, A } = cache;
+    if (!item.h) { D.toast('自选标的需先建仓，已在持仓页准备好新增表单', 'info'); location.href = 'holdings.html?code=' + item.code + '&side=buy'; return; }
+    const sell = A.action === '减仓' || A.action === '卖出';
+    const lot = item.kind === 'cb' ? 10 : 100;
+    const qty = Math.max(lot, Math.floor(item.h.shares * (sell ? 0.4 : 0.25) / lot) * lot);
+    D.toast(`已把「${A.action} ${item.name}」第一笔 ${qty} 送到持仓页试算`, 'check');
+    setTimeout(() => { location.href = 'holdings.html?code=' + item.code + '&side=' + (sell ? 'sell' : 'buy') + '&qty=' + qty; }, 420);
+  });
+  document.querySelectorAll('[data-fb]').forEach(b => b.addEventListener('click', () => {
+    const yes = b.dataset.fb === 'yes';
+    const note = document.getElementById('fb-note');
+    note.textContent = yes ? '已反馈：有帮助' : '已反馈：没帮助（会降低同类信号权重）';
+    note.className = 'pill ' + (yes ? 'up' : 'warn');
+  }));
+  let resizeT; window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => cache && drawK(cache.item), 150); });
+  render();
+})();
+</script>
+</body>
+</html>

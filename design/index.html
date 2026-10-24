@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>青梧 · 股票智能助理 — 工作台</title>
+<meta name="description" content="个人股票智能助理：持仓管理、行情追踪、AI 分析与买卖建议、组合诊断、微信推送接入。" />
+<link rel="stylesheet" href="assets/ui.css" />
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" id="main" data-od-id="home-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow" id="greet-eyebrow">个人投研工作台</div>
+          <h1 class="page-title" id="greet-title">工作台</h1>
+          <p class="page-desc" id="greet-desc"></p>
+        </div>
+        <div class="page-actions">
+          <a class="btn" href="chat.html?q=%E4%BB%8A%E5%A4%A9%E8%AF%A5%E5%81%9A%E4%BB%80%E4%B9%88%EF%BC%9F">问一句</a>
+          <a class="btn btn-primary" href="dashboard.html">进入总览仪表盘</a>
+        </div>
+      </div>
+
+      <!-- 今日快照 -->
+      <section class="card" data-od-id="home-snapshot" style="margin-bottom:16px">
+        <div class="card-body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:22px 26px">
+          <div data-od-id="home-snapshot-assets">
+            <div class="metric-label">总资产（含现金）</div>
+            <div class="metric-value num" id="s-assets">—</div>
+            <div class="metric-meta"><span id="s-exposure"></span></div>
+          </div>
+          <div data-od-id="home-snapshot-day">
+            <div class="metric-label">当日盈亏</div>
+            <div class="metric-value num" id="s-day">—</div>
+            <div class="metric-meta"><span id="s-day-pct"></span></div>
+          </div>
+          <div data-od-id="home-snapshot-total">
+            <div class="metric-label">累计盈亏</div>
+            <div class="metric-value num" id="s-total">—</div>
+            <div class="metric-meta"><span id="s-total-pct"></span></div>
+          </div>
+          <div data-od-id="home-snapshot-alerts">
+            <div class="metric-label">待处理预警</div>
+            <div class="metric-value num" id="s-alerts">—</div>
+            <div class="metric-meta"><a href="dashboard.html#alerts" style="text-decoration:underline;text-underline-offset:2px">查看清单</a></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 六个界面 -->
+      <h2 style="font-size:15px;margin:26px 0 12px" data-od-id="home-screens-title">界面导航</h2>
+      <div class="grid g-even" id="screens" data-od-id="home-screens"></div>
+
+      <!-- 助理今天做了什么 -->
+      <div class="grid g-2" style="margin-top:16px">
+        <section class="card" data-od-id="home-timeline">
+          <div class="card-head">
+            <div><div class="card-title">助理最近的动作</div><div class="card-sub">盘中监控 · 盘后复盘 · 微信应答</div></div>
+            <div class="head-actions"><a class="btn btn-sm" href="wechat.html">接入设置</a></div>
+          </div>
+          <div class="card-body"><div class="tl" id="home-tl"></div></div>
+        </section>
+        <section class="card" data-od-id="home-attention">
+          <div class="card-head"><div><div class="card-title">今天需要你决定</div><div class="card-sub">按紧迫度排序，只有 3 件</div></div></div>
+          <div class="list" id="home-attention"></div>
+        </section>
+      </div>
+
+      <div class="footnote" data-od-id="home-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>本页行情与持仓均为<b>演示样本</b>，用于验证界面与信息架构。所有「买入 / 持有 / 卖出」结论由模型基于样本数据生成，<b>不构成投资建议</b>；接入真实行情后仍需你本人确认每一笔委托。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW;
+  D.chrome({ active: 'index.html', crumb: '<b>工作台</b>' });
+
+  // 问候语随真实时段变化
+  const c = D.marketClock();
+  const h = new Date().getHours();
+  const hello = h < 11 ? '早上好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+  document.getElementById('greet-title').textContent = hello;
+  document.getElementById('greet-eyebrow').textContent =
+    new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + c.state;
+  const pend = D.alerts.filter(a => !a.done);
+  document.getElementById('greet-desc').textContent =
+    `${c.state === '已收盘' ? '今日已收盘' : c.live ? '现在' + c.state : c.next}。${pend.length} 条预警待处理，`
+    + `${D.holdings.find(x => x.code === '002594').name} 浮亏扩大至 ${D.pct(D.holdings.find(x => x.code === '002594').pnlPct)}，`
+    + `组合最大单票占资产 ${(D.holdings.reduce((m, x) => Math.max(m, x.mv), 0) / D.totalAssets * 100).toFixed(1)}%。`;
+  document.getElementById('s-assets').textContent = D.money(D.totalAssets);
+  document.getElementById('s-exposure').innerHTML = `<span class="muted">持仓市值 ${D.money(D.totalMv)} · 仓位 ${D.exposure.toFixed(1)}%</span>`;
+  const day = document.getElementById('s-day');
+  day.textContent = (D.dayPnl > 0 ? '+' : '') + D.fmt(D.dayPnl, 2);
+  day.className = 'metric-value num ' + D.dirClass(D.dayPnl);
+  document.getElementById('s-day-pct').innerHTML = `<span class="delta ${D.dirClass(D.dayPnl)}">${D.pct(D.dayPnlPct)} 相对昨日</span>`;
+  const tot = document.getElementById('s-total');
+  tot.textContent = (D.totalPnl > 0 ? '+' : '') + D.fmt(D.totalPnl, 0);
+  tot.className = 'metric-value num ' + D.dirClass(D.totalPnl);
+  document.getElementById('s-total-pct').innerHTML = `<span class="delta ${D.dirClass(D.totalPnl)}">${D.pct(D.totalPnlPct)}</span> <span>投入成本 ${D.money(D.costTotal)}</span>`;
+  document.getElementById('s-alerts').textContent = pend.length;
+
+  /* 界面入口 */
+  const SCREENS = [
+    { href: 'dashboard.html', icon: 'grid', name: '总览仪表盘', desc: '资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。', stat: () => `${D.equity.dates.length} 日净值 · ${D.alerts.length} 条预警` },
+    { href: 'holdings.html', icon: 'wallet', name: '持仓管理', desc: '股票 / ETF / 可转债分组明细，加减仓会实时重算摊薄成本与仓位。', stat: () => `${D.holdings.length} 只标的 · ${D.money(D.cash)} 现金` },
+    { href: 'analysis.html', icon: 'spark', name: 'AI 分析建议', desc: '买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。', stat: () => `已覆盖 ${Object.keys(D.advice).length} 只标的` },
+    { href: 'chat.html', icon: 'chat', name: '智能问答', desc: '用大白话问股，回答会引用你的持仓、行情与公告原文。', stat: () => `${D.qa.length} 个示例问题 · 3 段历史会话` },
+    { href: 'diagnosis.html', icon: 'shield', name: '组合诊断', desc: '行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。', stat: () => `HHI ${D.hhi.toFixed(3)} · 回撤 ${D.P.mdd.toFixed(1)}%` },
+    { href: 'wechat.html', icon: 'wechat', name: '微信助理接入', desc: '绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。', stat: () => '1 个微信账号 · 6 类推送' },
+  ];
+  document.getElementById('screens').innerHTML = SCREENS.map((s, i) => `
+    <a class="card" href="${s.href}" data-od-id="screen-card-${i}" style="display:block;padding:18px;transition:border-color .14s, box-shadow .14s"
+       onmouseover="this.style.borderColor='var(--accent-line)';this.style.boxShadow='var(--shadow-md)'"
+       onmouseout="this.style.borderColor='var(--border)';this.style.boxShadow='var(--shadow-sm)'">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="ic">${D.ICONS[s.icon]}</span>
+        <span style="font-family:var(--font-display);font-size:15px;font-weight:590;letter-spacing:-.015em">${s.name}</span>
+        <span style="margin-left:auto;color:var(--muted);display:grid;place-items:center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:15px;height:15px"><path d="M9 6l6 6-6 6"/></svg></span>
+      </div>
+      <p style="margin-top:11px;font-size:12.5px;line-height:1.6;color:var(--muted)">${s.desc}</p>
+      <p class="num" style="margin-top:12px;font-size:11.5px;color:var(--fg-2);letter-spacing:0">${s.stat()}</p>
+    </a>`).join('');
+
+  /* 时间线 */
+  document.getElementById('home-tl').innerHTML = D.sessions.concat([
+    { t: '今日 08:30', who: '定时任务', text: '盘前要闻 6 条已生成，其中 1 条与你持仓相关', reply: '博威转债强赎提示', read: true },
+  ]).slice(0, 5).map(s => `
+    <div class="tl-item ${s.read ? '' : 'hot'}">
+      <div class="tl-time">${s.t} · ${s.who}</div>
+      <div class="tl-title">${s.text}</div>
+      ${s.reply ? `<div class="tl-body">${s.reply}</div>` : ''}
+    </div>`).join('');
+
+  /* 待决事项 */
+  const ATT = [
+    { t: '把比亚迪仓位降到 15% 附近', d: '减 200 股（整手）即可，不必拆很多笔', href: 'analysis.html?code=002594', pill: '减仓', cls: 'down' },
+    { t: '科创50ETF 触及 +12% 止盈线', d: '可分批止盈 3,000 份，或把止盈线上移到 +18%', href: 'holdings.html', pill: '止盈', cls: 'warn' },
+    { t: '11-20 前处理博威转债', d: '强赎最后交易日前卖出或转股，逾期将承担额外损失', href: 'analysis.html?code=113650', pill: '限期', cls: 'up' },
+  ];
+  document.getElementById('home-attention').innerHTML = ATT.map((a, i) => `
+    <a class="list-item" href="${a.href}" data-od-id="attention-item-${i}">
+      <span class="li-main"><span class="li-title">${a.t}</span><span class="li-desc">${a.d}</span></span>
+      <span class="li-right"><span class="pill ${a.cls}">${a.pill}</span></span>
+    </a>`).join('');
+})();
+</script>
+</body>
+</html>

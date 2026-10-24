@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>微信助理接入 · 青梧股票智能助理</title>
+<link rel="stylesheet" href="assets/ui.css" />
+<style>
+  .wx-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+  .chan { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .chan:last-child { border-bottom: 0; }
+  .chan .ic { width: 34px; height: 34px; border-radius: 9px; background: var(--surface-2); display: grid; place-items: center; color: var(--fg-2); }
+  .chan .ic svg { width: 18px; height: 18px; stroke-width: 1.7; }
+  .qr { display: grid; place-items: center; padding: 18px 18px 6px; }
+  .qr svg { border: 1px solid var(--border); border-radius: var(--r-md); }
+  .switch-row { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
+  .switch-row:last-child { border-bottom: 0; }
+  .switch-row .t { font-size: 13px; font-weight: 550; }
+  .switch-row .d { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.5; max-width: 46ch; }
+  /* 推送卡片预览（中性样式，不复制任何品牌界面） */
+  .wxcard { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
+  .wxcard .hd { padding: 11px 13px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 550; }
+  .wxcard .hd svg { width: 15px; height: 15px; stroke-width: 1.8; }
+  .wxcard .bd { padding: 13px; }
+  .wxcard .bd h5 { font-size: 13.5px; font-family: var(--font-ui); font-weight: 550; letter-spacing: 0; margin: 0 0 6px; }
+  .wxcard .bd p { font-size: 12px; color: var(--fg-2); line-height: 1.65; }
+  .wxcard .ft { display: flex; border-top: 1px solid var(--border); }
+  .wxcard .ft button { flex: 1; height: 34px; border: 0; background: transparent; font-size: 12px; color: var(--accent); border-right: 1px solid var(--border); }
+  .wxcard .ft button:last-child { border-right: 0; color: var(--muted); }
+  .wxcard .ft button:hover { background: var(--surface-2); }
+  @media (max-width: 1100px) { .wx-layout { grid-template-columns: minmax(0,1fr); } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" data-od-id="wechat-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">微信助理接入</div>
+          <h1 class="page-title">让预警和建议送到手机上</h1>
+          <p class="page-desc">盘中不打开电脑也能收到。接入只负责「推送 + 回答」，不读取券商账户、不接管下单；推什么、什么时候推，都在这一页里控制。</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" id="test-push">发送测试推送</button>
+          <button class="btn btn-primary" id="save-cfg">保存接入配置</button>
+        </div>
+      </div>
+
+      <div class="wx-layout">
+        <div class="grid" style="gap:16px">
+          <!-- 通道 -->
+          <section class="card" data-od-id="wx-channel-card">
+            <div class="card-head"><div><div class="card-title">接入通道</div><div class="card-sub">主通道失败时自动改用备用通道重试一次</div></div>
+              <div class="head-actions"><span class="pill up" id="chan-status">—</span></div></div>
+            <div id="channels"></div>
+          </section>
+
+          <!-- 推送订阅 -->
+          <section class="card" id="push" data-od-id="wx-push-card">
+            <div class="card-head"><div><div class="card-title">推送订阅</div><div class="card-sub">推什么、什么时候推</div></div>
+              <div class="head-actions"><button class="btn btn-sm" id="reset-push">恢复默认</button></div></div>
+            <div id="subs"></div>
+            <div class="card-body" style="border-top:1px solid var(--border)">
+              <div class="grid g-2" style="gap:0 14px">
+                <div class="field" style="margin:0">
+                  <label for="t-from">推送时段 · 开始</label>
+                  <input class="input" type="time" id="t-from" value="08:30" />
+                </div>
+                <div class="field" style="margin:0">
+                  <label for="t-to">推送时段 · 结束</label>
+                  <input class="input" type="time" id="t-to" value="21:00" />
+                </div>
+              </div>
+              <div class="field" style="margin:16px 0 0">
+                <label for="quiet">静音标的（可多选，Ctrl / ⌘ 加选）</label>
+                <select class="select" id="quiet" multiple size="4"></select>
+                <div class="hint">静音只影响价格预警；公告与强赎这类限期事件仍会推送 —— 那类错过是有代价的。</div>
+              </div>
+              <div class="switch-row" style="padding:12px 0 0;border-bottom:0">
+                <div style="flex:1"><div class="t">非交易时段不推送</div><div class="d">收盘后与周末只保留 08:30 盘前摘要与 20:40 复盘日报。</div></div>
+                <span class="switch"><input type="checkbox" id="off-hours" checked><span class="track"></span></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 接入配置 -->
+          <section class="card" data-od-id="wx-config-card">
+            <div class="card-head"><div><div class="card-title">服务号 / 推送参数</div><div class="card-sub">仅保存在本机浏览器，用于本地调试与自建推送</div></div></div>
+            <div class="card-body">
+              <div class="grid g-2" style="gap:0 14px">
+                <div class="field" id="f-appid"><label for="c-appid">AppID</label>
+                  <input class="input num" id="c-appid" placeholder="wx…" value="wx7f3c9d21ab4e55c8">
+                  <div class="err">AppID 需以 wx 开头、共 18 位十六进制字符</div>
+                  <div class="hint">服务号后台「设置与开发 → 基本配置」里复制</div></div>
+                <div class="field" id="f-token"><label for="c-token">消息校验 Token</label>
+                  <input class="input num" id="c-token" value="QingWu-2026-Stock">
+                  <div class="err">Token 至少 4 个字符</div><div class="hint">需与服务号后台填写值完全一致</div></div>
+                <div class="field" style="grid-column:1/-1" id="f-hook"><label for="c-hook">备用推送 Webhook（可选）</label>
+                  <input class="input num" id="c-hook" placeholder="https://…/send?key=…">
+                  <div class="err">请填写以 https:// 开头的合法地址，或留空</div>
+                  <div class="hint">留空则只走微信通道；密钥请勿提交到代码仓库。</div></div>
+              </div>
+              <div class="switch-row" style="padding:12px 0 0;border-bottom:0">
+                <div style="flex:1"><div class="t">推送内容包含具体价格</div><div class="d">关闭后只推送「触及了你设的条件」这类描述，适合在共享屏幕或他人代看时使用。</div></div>
+                <span class="switch"><input type="checkbox" id="c-price" checked><span class="track"></span></span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- 右栏 -->
+        <div class="grid" style="gap:16px">
+          <section class="card" data-od-id="wx-bind-card">
+            <div class="card-head"><div><div class="card-title">我的微信</div><div class="card-sub" id="bind-sub">—</div></div>
+              <div class="head-actions"><span class="pill" id="bind-badge">—</span></div></div>
+            <div class="qr" id="qr-box"></div>
+            <div class="card-body" style="text-align:center">
+              <p class="hint" style="margin:0">扫码即可在当前微信上收消息 · 二维码 <span class="num" id="qr-ttl">120</span> 秒后自动更换（演示码，不可真实登录）</p>
+              <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+                <button class="btn btn-sm" id="qr-refresh">换一个</button>
+                <button class="btn btn-sm btn-danger" id="unbind-btn">解绑微信</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" data-od-id="wx-preview-card">
+            <div class="card-head"><div><div class="card-title">推送长这样</div><div class="card-sub">模板预览 · 按钮可点</div></div>
+              <div class="head-actions"><button class="btn btn-sm" id="try-send">试发</button></div></div>
+            <div class="card-body"><div class="wxcard" id="card-preview"></div></div>
+          </section>
+
+          <section class="card" data-od-id="wx-log-card">
+            <div class="card-head"><div><div class="card-title">推送日志</div><div class="card-sub">最近 6 条</div></div></div>
+            <div class="list" id="push-log"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="footnote" data-od-id="wx-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>接入仅做<b>消息推送与问答</b>，不读取券商账户、不代为提交委托。演示环境中的 AppID / Token / Webhook 为占位样例，请替换为你自己的参数；推送内容同样不构成投资建议。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<div class="scrim" id="scrim"></div>
+<div class="modal" id="unbind-modal" role="dialog" aria-modal="true" aria-labelledby="um-title">
+  <div class="drawer-head"><div class="card-title" id="um-title">解绑微信？</div>
+    <button class="icon-btn" id="um-x" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div class="card-body"><p id="um-body" style="font-size:13px;line-height:1.7;color:var(--fg-2)">解绑后不再向微信推送预警与日报，网页端功能与持仓数据不受影响。</p>
+    <p class="hint" style="margin-top:12px">随时可以重新扫码绑定，绑定关系只保存在本机。</p></div>
+  <div class="drawer-foot" style="justify-content:flex-end"><button class="btn" id="um-no">取消</button><button class="btn btn-danger" id="um-yes">确认解绑</button></div>
+</div>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW;
+  D.chrome({ active: 'wechat.html', crumb: '工作台 / <b>微信助理接入</b>' });
+  const KEY = 'qingwu:wechat:v2';
+
+  const DEFAULTS = {
+    bound: true,
+    channels: [
+      { id: 'mp', name: '微信服务号（主）', desc: '主动推送预警与日报，也可在微信里直接提问', on: true, ok: true, last: '今日 15:05' },
+      { id: 'desk', name: '浏览器桌面通知（备用）', desc: '服务号发送失败时改用本机通知，需要浏览器授权', on: true, ok: true, last: '今日 08:55' },
+    ],
+    subs: [
+      { id: 'price', t: '价格与条件预警', d: '触及止盈止损线、放量突破、跌破成本', on: true },
+      { id: 'pnl', t: '持仓盈亏变动', d: '单票日内波动超过 3%，或浮亏明显扩大时提醒', on: true },
+      { id: 'news', t: '公告与事件', d: '强赎、停牌、业绩、减持等与我持仓相关的公告', on: true },
+      { id: 'advice', t: 'AI 建议更新', d: '分析结论变化时推送，附「采纳 / 忽略」按钮', on: true },
+      { id: 'daily', t: '盘前摘要 + 复盘日报', d: '08:30 与 20:40 各一条，周末只发日报', on: true },
+      { id: 'confirm', t: '委托试算确认提醒', d: '网页端发起的加减仓试算，20 分钟未确认时提醒一次', on: false },
+    ],
+    quiet: [], offHours: true, withPrice: true,
+  };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { saved = {}; }
+  const state = Object.assign({}, DEFAULTS, saved);
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  /* ---------- 通道 ---------- */
+  function renderChannels() {
+    document.getElementById('channels').innerHTML = state.channels.map((c, i) => `
+      <div class="chan" data-od-id="channel-${i}">
+        <span class="ic">${c.id === 'desk' ? D.ICONS.bell : D.ICONS.wechat}</span>
+        <div><div style="font-size:13px;font-weight:550">${c.name}
+          <span class="pill ${c.on ? (c.ok ? 'up' : 'warn') : ''}" style="margin-left:6px">${c.on ? (c.ok ? '正常' : '异常') : '未启用'}</span></div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${c.desc} · 最近发送 ${c.last}</div></div>
+        <span style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm" data-chan-test="${i}">测一下</button>
+          <span class="switch"><input type="checkbox" data-chan="${i}" ${c.on ? 'checked' : ''}><span class="track"></span></span>
+        </span>
+      </div>`).join('');
+    const usable = state.channels.filter(c => c.on && c.ok).length;
+    const badge = document.getElementById('chan-status');
+    badge.textContent = `${usable} / ${state.channels.length} 可用`;
+    badge.className = 'pill ' + (usable >= 1 ? 'up' : 'warn');
+  }
+
+  /* ---------- 订阅 ---------- */
+  const sel = document.getElementById('quiet');
+  sel.innerHTML = D.holdings.map(h => `<option value="${h.code}">${h.name} ${h.code}</option>`).join('');
+  function syncQuiet() { [...sel.options].forEach(o => o.selected = state.quiet.includes(o.value)); }
+  function renderSubs() {
+    document.getElementById('subs').innerHTML = state.subs.map((s, i) => `
+      <div class="switch-row" data-od-id="sub-${i}">
+        <div style="flex:1"><div class="t">${s.t}</div><div class="d">${s.d}</div></div>
+        <span class="switch"><input type="checkbox" data-sub="${i}" ${s.on ? 'checked' : ''}><span class="track"></span></span>
+      </div>`).join('');
+  }
+
+  /* ---------- 绑定状态 ---------- */
+  function renderBind() {
+    const badge = document.getElementById('bind-badge');
+    badge.textContent = state.bound ? '已绑定' : '未绑定';
+    badge.className = 'pill ' + (state.bound ? 'up' : 'warn');
+    document.getElementById('bind-sub').textContent = state.bound
+      ? `${D.ws.wechat} · 最近同步 今日 15:05`
+      : '扫码重新绑定即可恢复推送';
+    document.querySelector('#unbind-btn').classList.toggle('btn-danger', state.bound);
+    document.getElementById('unbind-btn').textContent = state.bound ? '解绑微信' : '去绑定';
+  }
+
+  /* ---------- 二维码（本地生成，非真实登录码） ---------- */
+  function qr(seedStr) {
+    let x = 2166136261 >>> 0;
+    for (let i = 0; i < seedStr.length; i++) { x ^= seedStr.charCodeAt(i); x = Math.imul(x, 16777619) >>> 0; }
+    const rnd = () => { x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+    const N = 25, S = 6, size = N * S;
+    let modules = '';
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const inF = (r < 8 && c < 8) || (r < 8 && c > N - 9) || (r > N - 9 && c < 8);
+      if (inF) continue;
+      if (rnd() > 0.52) modules += `<rect x="${c * S}" y="${r * S}" width="${S}" height="${S}" fill="#1b1b1d"/>`;
+    }
+    const finder = (cx, cy) =>
+      `<rect x="${cx * S}" y="${cy * S}" width="${7 * S}" height="${7 * S}" rx="${S}" fill="#1b1b1d"/>`
+      + `<rect x="${(cx + 1) * S}" y="${(cy + 1) * S}" width="${5 * S}" height="${5 * S}" rx="${S * .7}" fill="#fff"/>`
+      + `<rect x="${(cx + 2) * S}" y="${(cy + 2) * S}" width="${3 * S}" height="${3 * S}" rx="${S * .5}" fill="#1b1b1d"/>`;
+    const c0 = (N / 2 - 3) * S;
+    return `<svg viewBox="0 0 ${size} ${size}" width="168" height="168" role="img" aria-label="微信绑定二维码（演示用，不可真实登录）">
+      <rect width="${size}" height="${size}" fill="#fff"/>${modules}${finder(0, 0)}${finder(N - 7, 0)}${finder(0, N - 7)}
+      <rect x="${c0}" y="${c0}" width="${6 * S}" height="${6 * S}" rx="${S}" fill="#fff"/>
+      <rect x="${c0 + S * .6}" y="${c0 + S * .6}" width="${6 * S - S * 1.2}" height="${6 * S - S * 1.2}" rx="${S * .8}" fill="var(--accent)"/>
+    </svg>`;
+  }
+  let ttl = 120;
+  function renderQr() { ttl = 120; document.getElementById('qr-box').innerHTML = qr('qingwu-bind-' + Math.floor(Date.now() / 1000)); }
+  document.getElementById('qr-refresh').addEventListener('click', () => { renderQr(); D.toast('二维码已刷新，旧码立即失效', 'check'); });
+  setInterval(() => {
+    ttl = Math.max(0, ttl - 1);
+    const el = document.getElementById('qr-ttl'); if (el) el.textContent = ttl;
+    if (!ttl) renderQr();
+  }, 1000);
+
+  /* ---------- 卡片预览 ---------- */
+  const b = D.holdings.find(h => h.code === '002594');
+  const A = D.advice['002594'];
+  function renderPreview() {
+    const priceLine = state.withPrice
+      ? `现价 ${D.fmt(b.price, 2)}，成本 ${D.fmt(b.cost, 2)}，浮亏 ${D.pct(b.pnlPct)}。`
+      : '已触及你设的「跌破成本」条件（价格已隐藏）。';
+    document.getElementById('card-preview').innerHTML = `
+      <div class="hd"><span>${D.ICONS.bell}</span>青梧 · 持仓预警<span class="num" style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">10:32</span></div>
+      <div class="bd"><h5>${b.name} 跌破成本，建议把仓位降到 15%</h5>
+        <p>${priceLine}${A.dims[0].t.slice(0, 36)}。<br>整手卖出即可，不用拆成很多笔。</p></div>
+      <div class="ft"><button data-pv="open">查看详情</button><button data-pv="later">今天先不动</button><button data-pv="mute">静音此标的</button></div>`;
+  }
+
+  /* ---------- 日志 ---------- */
+  const LOG = [
+    { t: '15:05', name: '复盘日报 → 我的微信', ok: true },
+    { t: '14:47', name: '科创50ETF 止盈提醒', ok: true },
+    { t: '10:32', name: '宁德时代 放量突破', ok: true },
+    { t: '09:58', name: '比亚迪 跌破成本', ok: true },
+    { t: '08:55', name: '博威转债 强赎提示', ok: false },
+    { t: '08:30', name: '盘前摘要 → 桌面通知', ok: true },
+  ];
+  function renderLog() {
+    document.getElementById('push-log').innerHTML = LOG.slice(0, 6).map((l, i) => `
+      <div class="list-item" data-od-id="pushlog-${i}">
+        <span style="width:8px;height:8px;border-radius:50%;flex:none;background:var(--${l.ok ? 'ok' : 'warn'})"></span>
+        <span class="li-main"><span class="li-title" style="font-weight:450">${l.name}</span>
+        <span class="li-desc">${l.ok ? '已送达' : '服务号返回 48001，已改用桌面通知重发'}</span></span>
+        <span class="li-right num" style="font-size:11px;color:var(--muted)">${l.t}</span>
+      </div>`).join('');
+  }
+
+  /* ---------- 交互 ---------- */
+  document.addEventListener('change', e => {
+    const c = e.target.closest('[data-chan]'), s = e.target.closest('[data-sub]');
+    if (c) {
+      const ch = state.channels[+c.dataset.chan]; ch.on = c.checked;
+      if (ch.on) { ch.ok = true; ch.last = '刚刚 ' + new Date().toTimeString().slice(0, 5); }
+      renderChannels(); save(); D.toast(`${ch.name} 已${ch.on ? '启用' : '停用'}`, 'check');
+    }
+    if (s) { const su = state.subs[+s.dataset.sub]; su.on = s.checked; save(); D.toast(`「${su.t}」已${su.on ? '开启' : '关闭'}`, 'check'); }
+    if (e.target === sel) { state.quiet = [...sel.selectedOptions].map(o => o.value); save(); D.toast(`已静音 ${state.quiet.length} 只标的的价格预警`, 'check'); }
+    if (e.target.id === 'off-hours') { state.offHours = e.target.checked; save(); D.toast('推送时段已更新', 'check'); }
+    if (e.target.id === 'c-price') { state.withPrice = e.target.checked; renderPreview(); save(); }
+    if (e.target.id === 't-from' || e.target.id === 't-to') {
+      const f = document.getElementById('t-from').value, t = document.getElementById('t-to').value;
+      if (f >= t) { e.target.classList.add('invalid'); D.toast('结束时间需晚于开始时间', 'info'); }
+      else { e.target.classList.remove('invalid'); D.toast(`推送时段 ${f}–${t} 已生效`, 'check'); }
+    }
+  });
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-chan-test]');
+    if (t) {
+      const ch = state.channels[+t.dataset.chanTest];
+      LOG.unshift({ t: new Date().toTimeString().slice(0, 5), name: `测试消息 → ${ch.name}`, ok: ch.on });
+      renderLog();
+      D.toast(ch.on ? `${ch.name} 测试消息已发送，请在手机上确认` : '该通道未启用，先打开开关', 'info');
+      return;
+    }
+    const pv = e.target.closest('[data-pv]');
+    if (pv) {
+      const kind = pv.dataset.pv;
+      if (kind === 'mute') { if (!state.quiet.includes(b.code)) state.quiet.push(b.code); syncQuiet(); save(); D.toast(`已把 ${b.name} 加入静音列表`, 'check'); }
+      else if (kind === 'later') { LOG.unshift({ t: new Date().toTimeString().slice(0, 5), name: '「今天先不动」→ 明日 09:15 再提醒', ok: true }); renderLog(); D.toast('已记录，明日 09:15 再提醒一次', 'check'); }
+      else { D.toast('已在网页端打开这条建议的完整分析', 'check'); setTimeout(() => location.href = 'analysis.html?code=' + b.code, 420); }
+    }
+  });
+
+  function closeModal() { document.getElementById('scrim').classList.remove('on'); document.getElementById('unbind-modal').classList.remove('on'); }
+  document.getElementById('um-x').addEventListener('click', closeModal);
+  document.getElementById('um-no').addEventListener('click', closeModal);
+  document.getElementById('scrim').addEventListener('click', closeModal);
+  document.getElementById('unbind-btn').addEventListener('click', () => {
+    if (!state.bound) { renderQr(); D.toast('用微信扫码即可重新绑定', 'info'); return; }
+    document.getElementById('scrim').classList.add('on');
+    document.getElementById('unbind-modal').classList.add('on');
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  document.getElementById('um-yes').addEventListener('click', () => {
+    state.bound = false; save(); renderBind(); closeModal();
+    D.toast('已解绑微信，网页端不受影响；扫码可随时重新绑定', 'check');
+  });
+
+  document.getElementById('test-push').addEventListener('click', () => {
+    if (!state.bound) { D.toast('微信未绑定，请先扫码绑定或启用桌面通知', 'info'); return; }
+    const usable = state.channels.filter(c => c.on && c.ok);
+    if (!usable.length) { D.toast('没有可用通道，请先在「接入通道」里启用一条', 'info'); return; }
+    LOG.unshift({ t: new Date().toTimeString().slice(0, 5), name: `测试推送 → ${usable[0].name}`, ok: true });
+    renderLog(); D.toast(`测试推送已通过「${usable[0].name}」发出`, 'check');
+  });
+  document.getElementById('try-send').addEventListener('click', () => {
+    LOG.unshift({ t: new Date().toTimeString().slice(0, 5), name: `卡片模板试发 → ${b.name}`, ok: true });
+    renderLog(); D.toast('模板卡片已试发，手机微信一般 1 分钟内到达', 'check');
+  });
+  document.getElementById('reset-push').addEventListener('click', () => {
+    state.subs.forEach(s => s.on = s.id !== 'confirm');
+    state.quiet = []; syncQuiet(); renderSubs(); save();
+    D.toast('推送订阅已恢复默认', 'check');
+  });
+
+  /* ---------- 配置校验 ---------- */
+  document.getElementById('save-cfg').addEventListener('click', () => {
+    const appid = document.getElementById('c-appid'), token = document.getElementById('c-token'), hook = document.getElementById('c-hook');
+    const checks = [
+      ['f-appid', /^wx[0-9a-f]{16}$/.test(appid.value.trim())],
+      ['f-token', token.value.trim().length >= 4],
+      ['f-hook', hook.value.trim() === '' || /^https:\/\/.+/.test(hook.value.trim())],
+    ];
+    let bad = 0;
+    checks.forEach(([id, ok]) => { document.getElementById(id).classList.toggle('invalid', !ok); if (!ok) bad++; });
+    if (bad) { D.toast(`${bad} 项参数不合法，未保存`, 'info'); return; }
+    save(); D.toast('接入配置已保存到本机（不写入任何远端）', 'check');
+  });
+
+  document.getElementById('off-hours').checked = state.offHours;
+  document.getElementById('c-price').checked = state.withPrice;
+  renderChannels(); renderSubs(); syncQuiet(); renderBind(); renderQr(); renderPreview(); renderLog();
+})();
+</script>
+</body>
+</html>

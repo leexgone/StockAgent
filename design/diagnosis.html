@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>组合诊断 · 青梧股票智能助理</title>
+<link rel="stylesheet" href="assets/ui.css" />
+<style>
+  .kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+  .kpi > div { background: var(--surface); padding: 14px 16px; }
+  .kpi .k { font-size: 11.5px; color: var(--muted); letter-spacing: .02em; display: flex; align-items: center; gap: 5px; }
+  .kpi .v { font-family: var(--font-display); font-size: 24px; font-weight: 590; letter-spacing: -.025em; margin-top: 7px; font-variant-numeric: tabular-nums; }
+  .kpi .s { font-size: 11.5px; color: var(--muted); margin-top: 4px; font-family: var(--font-mono); }
+  .fix { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--border); align-items: start; }
+  .fix:last-child { border-bottom: 0; }
+  .fix .no { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; background: var(--surface-2); color: var(--fg-2); border: 1px solid var(--border); }
+  .fix.p1 .no { background: var(--up); color: #fff; border-color: var(--up); }
+  .fix.p2 .no { background: var(--warn); color: #fff; border-color: var(--warn); }
+  .fix h4 { font-size: 13.5px; font-family: var(--font-ui); font-weight: 550; letter-spacing: 0; }
+  .fix p { font-size: 12.5px; color: var(--fg-2); line-height: 1.65; margin-top: 5px; max-width: 64ch; }
+  .fix .calc { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+  .stack { display: flex; height: 12px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+  .stack > i { display: block; height: 100%; }
+  .legend-dots { display: flex; flex-wrap: wrap; gap: 5px 14px; font-size: 11.5px; color: var(--muted); margin-top: 11px; }
+  .legend-dots i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" data-od-id="diagnosis-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">组合诊断</div>
+          <h1 class="page-title">风险、集中度，和它跑赢了谁</h1>
+          <p class="page-desc">诊断只看一件事：这个组合在你没看住的时候，会不会让你难受。下面的每个指标都由你的持仓与净值样本算出，不是装饰数字。</p>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="group" aria-label="回测区间" id="window">
+            <button type="button" data-n="20">近一月</button>
+            <button type="button" data-n="45">近两月</button>
+            <button type="button" data-n="90" aria-pressed="true">近一季</button>
+          </div>
+          <button class="btn" id="report-btn">生成诊断报告</button>
+        </div>
+      </div>
+
+      <div class="kpi" id="kpi" data-od-id="diag-kpi"></div>
+
+      <div class="grid g-main" style="margin-top:16px">
+        <section class="card" data-od-id="diag-curve-card">
+          <div class="card-head"><div><div class="card-title">组合 vs 沪深 300</div><div class="card-sub" id="curve-sub">—</div></div></div>
+          <div class="card-body"><div class="chart-hold" id="curve" style="height:250px"></div>
+            <div class="legend" style="margin-top:10px">
+              <span><i style="background:var(--accent)"></i>我的组合（含现金）</span>
+              <span><i style="background:var(--muted)"></i>沪深 300（归一）</span>
+              <span style="margin-left:auto" class="num" id="curve-read"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card" data-od-id="diag-conc-card">
+          <div class="card-head"><div><div class="card-title">行业集中度</div><div class="card-sub">按市值占持仓（不含现金）</div></div>
+            <div class="head-actions"><span class="pill" id="hhi-badge">—</span></div></div>
+          <div class="card-body">
+            <div class="stack" id="stack" title="行业分布"></div>
+            <div class="legend-dots" id="stack-legend"></div>
+            <div style="margin-top:18px" class="bar-row" id="sector-bars"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid g-main" style="margin-top:16px">
+        <section class="card" data-od-id="diag-fix-card">
+          <div class="card-head">
+            <div><div class="card-title">再平衡清单</div><div class="card-sub">按「影响大小 × 操作成本」排序，可逐条试算</div></div>
+            <div class="head-actions"><button class="btn btn-sm btn-primary" id="apply-all">一键试算全部</button></div>
+          </div>
+          <div id="fixes"></div>
+          <div class="card-foot" style="justify-content:space-between">
+            <span class="hint" style="margin:0" id="fix-sum">—</span>
+            <span class="hint" style="margin:0">假设：跨行业相关系数 0.35，同行业 0.62</span>
+          </div>
+        </section>
+
+        <div class="grid" style="gap:16px">
+          <section class="card" data-od-id="diag-drawdown-card">
+            <div class="card-head"><div><div class="card-title">回撤在水下多久</div><div class="card-sub">距前高的百分比，越接近 0 越好</div></div></div>
+            <div class="card-body"><div class="chart-hold" id="underwater" style="height:150px"></div></div>
+          </section>
+          <section class="card" data-od-id="diag-window-table">
+            <div class="card-head"><div><div class="card-title">分区间对比</div><div class="card-sub">样本内测算</div></div></div>
+            <div class="card-body tight"><div class="tbl-wrap"><table class="tbl" id="wtable">
+              <thead><tr><th class="txt">区间</th><th>组合</th><th>沪深300</th><th>超额</th><th>最大回撤</th><th>相关系数</th></tr></thead>
+              <tbody></tbody></table></div></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="footnote" data-od-id="diag-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>波动率、相关系数与「调整前 / 后」对比为<b>样本内测算</b>：日波动由各标的 30 日走势估计，组合波动按上述相关系数假设合成，未考虑极端行情下的相关性抬升。回测不预示未来表现，本页内容不构成投资建议。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW, C = window.QWC;
+  D.chrome({ active: 'diagnosis.html', crumb: '工作台 / <b>组合诊断</b>' });
+  let win = 90;
+
+  /* ---------- 工具 ---------- */
+  function rets(a) { const r = []; for (let i = 1; i < a.length; i++) r.push(a[i] / a[i - 1] - 1); return r; }
+  function std(a) { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); }
+  function corr(a, b) {
+    const n = Math.min(a.length, b.length), x = a.slice(-n), y = b.slice(-n);
+    const mx = x.reduce((s, v) => s + v, 0) / n, my = y.reduce((s, v) => s + v, 0) / n;
+    let sxy = 0, sx = 0, sy = 0;
+    for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sx += (x[i] - mx) ** 2; sy += (y[i] - my) ** 2; }
+    return sxy / (Math.sqrt(sx * sy) || 1);
+  }
+  function mdd(a) { let p = a[0], m = 0; a.forEach(v => { p = Math.max(p, v); m = Math.min(m, (v - p) / p); }); return m * 100; }
+  const under = a => { let p = a[0]; return a.map(v => { p = Math.max(p, v); return (v / p - 1) * 100; }); };
+
+  // 各标的日波动（由 30 日走势估计）
+  const vols = {};
+  D.holdings.forEach(h => { if (h.spark) vols[h.code] = std(rets(h.spark)); });
+  function portVol(items) {
+    const RHO_X = 0.35, RHO_SAME = 0.62;
+    let v = 0;
+    items.forEach((a, i) => items.forEach((b, j) => {
+      const rho = a.code === b.code ? 1 : (a.sector === b.sector ? RHO_SAME : RHO_X);
+      v += a.w * b.w * (vols[a.code] || 0.012) * (vols[b.code] || 0.012) * rho;
+    }));
+    return Math.sqrt(v) * Math.sqrt(244) * 100;
+  }
+
+  const mvTotal = () => D.holdings.reduce((s, h) => s + h.mv, 0);
+  const heldItems = () => D.holdings.map(h => ({ code: h.code, sector: h.sector, w: h.mv / mvTotal() }));
+
+  /* ---------- KPI ---------- */
+  function kpis() {
+    const nav = D.equity.nav.slice(-win), bench = D.equity.bench.slice(-win);
+    const r = rets(nav), rb = rets(bench);
+    const cum = (nav[nav.length - 1] / nav[0] - 1) * 100, bcum = (bench[bench.length - 1] / bench[0] - 1) * 100;
+    const vol = std(r) * Math.sqrt(244) * 100, bvol = std(rb) * Math.sqrt(244) * 100;
+    const beta = corr(r, rb) * std(r) / std(rb);
+    const win_ = r.filter((x, i) => x > rb[i]).length / r.length * 100;
+    return { nav, bench, r, rb, cum, bcum, ex: cum - bcum, vol, bvol, m1: mdd(nav), m2: mdd(bench), rho: corr(r, rb), beta, winRate: win_, sharpe: (r.reduce((a, b) => a + b, 0) / r.length * 244) / (std(r) * Math.sqrt(244)) };
+  }
+  function renderKpi() {
+    const k = kpis();
+    const cells = [
+      ['区间收益', D.pct(k.cum), `基准 ${D.pct(k.bcum)}`, D.dirClass(k.cum)],
+      ['超额收益', D.pct(k.ex), k.ex >= 0 ? '跑赢基准' : '跑输基准', D.dirClass(k.ex)],
+      ['年化波动率', k.vol.toFixed(1) + '%', `基准 ${k.bvol.toFixed(1)}%`, k.vol > k.bvol ? 'up' : 'down'],
+      ['最大回撤', k.m1.toFixed(1) + '%', `基准 ${k.m2.toFixed(1)}%`, k.m1 < k.m2 ? 'up' : 'down'],
+      ['与基准相关系数', k.rho.toFixed(2), `Beta ${k.beta.toFixed(2)}`, ''],
+      ['日度跑赢频率', k.winRate.toFixed(0) + '%', `${k.r.length} 个交易日`, ''],
+    ];
+    document.getElementById('kpi').innerHTML = cells.map((c, i) => `
+      <div data-od-id="kpi-${i}"><div class="k">${c[0]}</div>
+      <div class="v ${c[3]}">${c[1]}</div><div class="s">${c[2]}</div></div>`).join('');
+    document.getElementById('curve-sub').textContent =
+      `区间 ${D.equity.dates.slice(-win)[0]} — ${D.equity.dates[D.equity.dates.length - 1]}（${win} 个交易日）· 夏普 ${k.sharpe.toFixed(2)}（样本内，无风险利率按 0 计）`;
+    document.getElementById('curve-read').textContent =
+      `组合 ${k.cum.toFixed(1)}% / 基准 ${k.bcum.toFixed(1)}% · 超额 ${k.ex >= 0 ? '+' : ''}${k.ex.toFixed(1)} pct`;
+  }
+
+  /* ---------- 曲线 ---------- */
+  function renderCurve() {
+    const k = kpis();
+    const base = k.nav[0];
+    C.line('#curve', {
+      height: 250, color: C.color('--accent'),
+      series: [{ data: k.nav, color: C.color('--accent') }, { data: k.bench, color: C.color('--muted'), area: false, dash: '4 4', width: 1.3, endDot: false }],
+      labels: D.equity.dates.slice(-win), yFmt: v => (v / 10000).toFixed(1) + ' 万',
+      tip: i => `<span class="k">${D.equity.dates.slice(-win)[i]}</span><br>组合 <b>${D.money(k.nav[i])}</b><br><span class="k">区间收益</span> <b>${D.pct((k.nav[i] / base - 1) * 100)}</b>`,
+    });
+    const u = under(k.nav);
+    C.line('#underwater', {
+      height: 150, color: C.color('--down'), pad: 0.05, crosshair: true,
+      series: [{ data: u, color: C.color('--down') }],
+      yFmt: v => v.toFixed(1) + '%',
+      tip: i => `<span class="k">${D.equity.dates.slice(-win)[i]}</span><br>水下 <b>${u[i].toFixed(2)}%</b>`,
+    });
+  }
+
+  /* ---------- 集中度 ---------- */
+  function renderConc() {
+    const mv = mvTotal();
+    const map = {};
+    D.holdings.forEach(h => { map[h.sector] = (map[h.sector] || 0) + h.mv; });
+    const list = Object.entries(map).map(([k, v]) => ({ k, v, w: v / mv * 100 })).sort((a, b) => b.v - a.v);
+    document.getElementById('stack').innerHTML = list.map((x, i) =>
+      `<i style="width:${x.w.toFixed(2)}%;background:${C.DONUT_COLORS[i % C.DONUT_COLORS.length]}" title="${x.k} ${x.w.toFixed(1)}%"></i>`).join('');
+    document.getElementById('stack-legend').innerHTML = list.map((x, i) =>
+      `<span><i style="background:${C.DONUT_COLORS[i % C.DONUT_COLORS.length]}"></i>${x.k} ${x.w.toFixed(1)}%</span>`).join('');
+    document.getElementById('sector-bars').innerHTML = C.hbars(list.map(x => ({ k: x.k, v: x.w, color: x.w > 35 ? 'var(--warn)' : undefined })), { id: 'sector-bar' });
+    const hhi = list.reduce((s, x) => s + x.w * x.w, 0) / 10000;
+    const badge = document.getElementById('hhi-badge');
+    badge.textContent = `HHI ${hhi.toFixed(3)} · ${hhi > 0.22 ? '偏集中' : hhi > 0.15 ? '中等' : '分散'}`;
+    badge.className = 'pill ' + (hhi > 0.22 ? 'warn' : '');
+    return { list, hhi };
+  }
+
+  /* ---------- 再平衡清单 ---------- */
+  function fixes() {
+    const mv = mvTotal(), ta = mv + D.cash;
+    const out = [];
+    // 单票
+    D.holdings.forEach(h => {
+      const w = h.mv / ta * 100;
+      if (w > 25) out.push({
+        p: 1, t: `把 ${h.name} 从 ${w.toFixed(1)}% 降到 22%`,
+        d: `这是组合里最大的一只，超出你设的 25% 上限。减 ${D.fmt(Math.floor((h.mv - ta * 0.22) / h.price / 100) * 100, 0)} 股即可，不必清仓。`,
+        c: () => `卖出金额约 ${D.money(h.mv - ta * 0.22, 0)} · 回收后现金占比升至 ${((D.cash + h.mv - ta * 0.22) / ta * 100).toFixed(1)}%`,
+        code: h.code, side: 'sell',
+      });
+    });
+    // 行业
+    const map = {};
+    D.holdings.forEach(h => { map[h.sector] = (map[h.sector] || 0) + h.mv; });
+    Object.entries(map).forEach(([s, v]) => {
+      if (v / mv * 100 > 35) out.push({
+        p: 2, t: `${s} 占持仓 ${((v / mv) * 100).toFixed(1)}%，超过 35% 上限`,
+        d: `同一行业里的标的在坏消息面前是同一个风险。当前持仓里 ${s} 涉及 ${D.holdings.filter(h => h.sector === s).map(h => h.name).join('、')}。`,
+        c: () => `压到 32% 需减约 ${D.money(v - mv * 0.32, 0)}，可从最大单票里出`,
+      });
+    });
+    // 现金
+    const cashW = D.cash / ta * 100;
+    if (cashW < 10) out.push({
+      p: 3, t: `现金只有 ${cashW.toFixed(1)}%，跌起来没有补的余地`,
+      d: `按你的风格（均衡成长）与持仓页的「仓位纪律」，现金下限是 10%。下次有标的触发止盈时，优先把资金留在现金池而不是当场换股。`,
+      c: () => `补到 10% 需要 ${D.money(ta * 0.1 - D.cash)} 现金`,
+    });
+    // 波动测算
+    const before = portVol(heldItems());
+    const after = heldItems().map(x => ({ ...x }));
+    const big = after.reduce((m, x) => x.w > m.w ? x : m, after[0]);
+    if (big) {
+      const cut = Math.max(0, big.w - 0.22 * (ta / mv));
+      big.w -= cut;
+      const afterVol = portVol(after);
+      out.push({
+        p: 2, t: `只做这一件事，组合年化波动大约从 ${before.toFixed(1)}% 降到 ${afterVol.toFixed(1)}%`,
+        d: '测算方式：各标的 30 日收益标准差按权重合成，跨行业相关系数取 0.35、同行业取 0.62。它不是预测，只是把「分散」这个词变成能比较的数字。',
+        c: () => `波动变化 ${(afterVol - before).toFixed(1)} pct · 最大单票占持仓 ${(big.w + cut).toFixed(1)}% → ${(big.w * 100).toFixed(1)}%（卖出部分计入现金）`,
+      });
+    }
+    // 亏损标的
+    const loser = [...D.holdings].sort((a, b) => a.pnlPct - b.pnlPct)[0];
+    if (loser && loser.pnl < 0) out.push({
+      p: 3, t: `${loser.name} 浮亏 ${D.pct(loser.pnlPct)}，但还没有止损线`,
+      d: `亏不可怕，没有边界才可怕。给它一个失效价：跌破 ${D.fmt(loser.price * 0.93, 2)} 无条件减半，写进「仓位纪律」里，微信会盯着。`,
+      c: () => `按 7% 止损计算，最大追加亏损约 ${D.money(loser.mv * 0.07, 0)}（占总资产 ${(loser.mv * 0.07 / ta * 100).toFixed(2)}%）`,
+      code: loser.code, side: 'sell',
+    });
+    return out;
+  }
+  let renderConcCached = null;
+  function renderFixes() {
+    const list = fixes();
+    document.getElementById('fixes').innerHTML = list.map((f, i) => `
+      <div class="fix p${f.p}" data-od-id="fix-${i}">
+        <span class="no">${i + 1}</span>
+        <div><h4>${f.t}</h4><p>${f.d}</p><div class="calc">${f.c()}</div></div>
+        <div style="display:flex;gap:6px;flex-direction:column;align-items:flex-end">
+          ${f.p === 1 ? '<span class="pill up">优先</span>' : f.p === 2 ? '<span class="pill warn">建议</span>' : '<span class="pill">可选</span>'}
+          ${f.code ? `<a class="btn btn-sm" href="holdings.html?code=${f.code}&side=${f.side || 'sell'}&qty=100">试算</a>` : `<button class="btn btn-sm" data-fix-ack="${i}">知道了</button>`}
+        </div>
+      </div>`).join('');
+    document.getElementById('fix-sum').textContent =
+      `${list.length} 条待处理 · 其中 ${list.filter(f => f.p === 1).length} 条已触及你的纪律上限`;
+    return list;
+  }
+
+  /* ---------- 分区间表 ---------- */
+  function renderTable() {
+    document.querySelector('#wtable tbody').innerHTML = [20, 45, 90].map(n => {
+      const nav = D.equity.nav.slice(-n), bench = D.equity.bench.slice(-n);
+      const cum = (nav[nav.length - 1] / nav[0] - 1) * 100, bc = (bench[bench.length - 1] / bench[0] - 1) * 100;
+      return `<tr data-od-id="wt-${n}">
+        <td class="txt">${n === 20 ? '近一月' : n === 45 ? '近两月' : '近一季'} <span class="sub">${n} 交易日</span></td>
+        <td class="num ${D.dirClass(cum)}">${D.pct(cum)}</td>
+        <td class="num ${D.dirClass(bc)}">${D.pct(bc)}</td>
+        <td class="num ${D.dirClass(cum - bc)}">${D.pct(cum - bc)}</td>
+        <td class="num down">${mdd(nav).toFixed(1)}%</td>
+        <td class="num">${corr(rets(nav), rets(bench)).toFixed(2)}</td></tr>`;
+    }).join('');
+  }
+
+  function renderAll() { renderKpi(); renderCurve(); renderConcCached = renderConc(); renderFixes(); renderTable(); }
+  renderAll();
+
+  document.getElementById('window').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
+    win = +b.dataset.n; renderAll();
+  });
+  document.getElementById('fixes').addEventListener('click', e => {
+    const b = e.target.closest('[data-fix-ack]'); if (!b) return;
+    b.closest('.fix').style.opacity = '.45';
+    b.replaceWith(Object.assign(document.createElement('span'), { className: 'pill', textContent: '已确认' }));
+    D.toast('已标记为知悉，下次盘后复盘不再重复提醒', 'check');
+  });
+  document.getElementById('apply-all').addEventListener('click', () => {
+    const list = renderFixes();
+    const first = list.find(f => f.code);
+    D.toast(`按清单生成 1 组委托试算，送到持仓页确认`, 'check');
+    if (first) setTimeout(() => location.href = `holdings.html?code=${first.code}&side=${first.side || 'sell'}`, 420);
+  });
+  document.getElementById('report-btn').addEventListener('click', () => {
+    const k = kpis();
+    D.toast(`诊断报告已生成：${win} 日超额 ${k.ex >= 0 ? '+' : ''}${k.ex.toFixed(1)} pct，回撤 ${k.m1.toFixed(1)}%，已推送到微信`, 'check');
+  });
+  window.addEventListener('resize', () => renderCurve());
+})();
+</script>
+</body>
+</html>

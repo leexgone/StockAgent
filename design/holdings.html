@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>持仓管理 · 青梧股票智能助理</title>
+<link rel="stylesheet" href="assets/ui.css" />
+<style>
+  /* 本页专用：持仓汇总条 + 抽屉预览 */
+  .sumbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+  .sumbar > div { background: var(--surface); padding: 13px 16px; }
+  .sumbar .k { font-size: 11.5px; color: var(--muted); letter-spacing: .02em; }
+  .sumbar .v { font-family: var(--font-display); font-size: 18px; font-weight: 590; letter-spacing: -.02em; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .preview { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 15px; }
+  .preview .row { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; padding: 5px 0; }
+  .preview .row + .row { border-top: 1px dashed var(--border); }
+  .preview .row .k { color: var(--muted); }
+  .preview .row .v { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .arrow-mock { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .filter-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-2); cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+  @media (max-width: 900px) { .sumbar { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" data-od-id="holdings-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">持仓管理</div>
+          <h1 class="page-title">个股明细与加减仓</h1>
+          <p class="page-desc" id="h-desc"></p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" id="export-btn">导出明细</button>
+          <button class="btn btn-primary" id="trade-btn">＋ 记一笔加减仓</button>
+        </div>
+      </div>
+
+      <div class="sumbar" id="sumbar" data-od-id="holdings-summary"></div>
+
+      <section class="card" data-od-id="holdings-table-card" style="margin-top:16px">
+        <div class="card-head">
+          <div><div class="card-title">全部持仓</div><div class="card-sub" id="h-count">—</div></div>
+          <div class="head-actions">
+            <div class="seg" role="group" aria-label="按类型筛选" id="kind-filter">
+              <button type="button" data-k="all" aria-pressed="true">全部</button>
+              <button type="button" data-k="stock">股票</button>
+              <button type="button" data-k="etf">ETF / 基金</button>
+              <button type="button" data-k="cb">可转债</button>
+            </div>
+          </div>
+        </div>
+        <div class="filter-row">
+          <label class="search" style="margin-left:0;width:220px">
+            <span data-icon="search"></span><input id="h-search" placeholder="筛选代码或名称" autocomplete="off" />
+          </label>
+          <span class="hint" style="margin:0">列标题可点击排序 · 数字均为等宽对齐</span>
+          <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);cursor:pointer">
+              <span class="switch"><input type="checkbox" id="show-weight" checked><span class="track"></span></span>显示仓位占比条
+            </label>
+          </span>
+        </div>
+        <div class="card-body tight">
+          <div class="tbl-wrap"><table class="tbl" id="h-table">
+            <thead><tr>
+              <th class="txt">标的</th>
+              <th class="txt">行业 / 类型</th>
+              <th class="sortable" data-sort="shares"><span class="tbl-sort">持仓数量</span></th>
+              <th class="sortable" data-sort="cost"><span class="tbl-sort">成本价</span></th>
+              <th class="sortable" data-sort="price"><span class="tbl-sort">现价</span></th>
+              <th class="sortable" data-sort="dayChg"><span class="tbl-sort">今日涨跌</span></th>
+              <th class="sortable" data-sort="mv"><span class="tbl-sort">市值</span></th>
+              <th class="sortable" data-sort="pnl"><span class="tbl-sort">浮动盈亏</span></th>
+              <th class="sortable" data-sort="weight"><span class="tbl-sort">占组合</span></th>
+              <th>操作</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </div>
+        <div class="card-foot" style="justify-content:space-between">
+          <span class="hint" style="margin:0" id="h-foot-sum">—</span>
+          <span class="hint" style="margin:0">加减仓会即时重算摊薄成本与仓位占比</span>
+        </div>
+      </section>
+
+      <div class="grid g-2" style="margin-top:16px">
+        <section class="card" data-od-id="order-log-card">
+          <div class="card-head"><div><div class="card-title">委托 / 成交流水</div><div class="card-sub">本账户记录，不含真实券商成交回报</div></div></div>
+          <div class="card-body tight"><div class="tbl-wrap"><table class="tbl" id="log-table">
+            <thead><tr><th class="txt">时间</th><th class="txt">标的</th><th class="txt">方向</th><th>数量</th><th>价格</th><th>费用</th><th>已实现盈亏</th></tr></thead>
+            <tbody></tbody>
+          </table></div></div>
+        </section>
+
+        <section class="card" data-od-id="rule-card">
+          <div class="card-head"><div><div class="card-title">仓位纪律</div><div class="card-sub">触发即预警，并在微信推送里给出建议动作</div></div></div>
+          <div class="card-body" id="rules"></div>
+        </section>
+      </div>
+
+      <div class="footnote" data-od-id="h-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>费用按「佣金万 2.5（单笔最低 5 元）+ 卖出印花税 0.05% + 沪市过户费 0.001%」估算，可转债免印花税，实际以券商结算为准。演示数据不构成投资建议。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<!-- 加减仓抽屉 -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="trade-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" data-od-id="trade-drawer">
+  <div class="drawer-head">
+    <div style="flex:1">
+      <div class="card-title" id="drawer-title">加减仓</div>
+      <div class="card-sub" id="drawer-sub">—</div>
+    </div>
+    <button class="icon-btn" id="drawer-close" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="drawer-body">
+    <div class="seg" role="group" aria-label="方向" id="side-seg" style="width:100%;margin-bottom:18px">
+      <button type="button" data-side="buy" aria-pressed="true" style="flex:1">买入 / 加仓</button>
+      <button type="button" data-side="sell" style="flex:1">卖出 / 减仓</button>
+    </div>
+
+    <div class="field" id="f-code">
+      <label for="sel-code">标的</label>
+      <select class="select" id="sel-code"></select>
+      <div class="hint" id="code-hint">—</div>
+    </div>
+
+    <div class="field" id="f-qty">
+      <label for="in-qty">数量</label>
+      <div class="with-suffix"><input class="input num" id="in-qty" inputmode="numeric" placeholder="例如 200"><span class="suffix" id="unit">股</span></div>
+      <div class="err" id="err-qty">请填写有效数量</div>
+      <div class="hint" id="lot-hint">股票 / ETF 需为 100 的整数倍，可转债为 10 张的整数倍</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap" id="qty-quick"></div>
+    </div>
+
+    <div class="field" id="f-price">
+      <label for="in-price">委托价格</label>
+      <div class="with-suffix"><input class="input num" id="in-price" inputmode="decimal"><span class="suffix">元</span></div>
+      <div class="err" id="err-price">价格需在合理区间</div>
+      <div class="hint">默认使用最新价；实盘请改为你的挂单价。涨跌停价： <span class="num" id="limit-txt">—</span></div>
+    </div>
+
+    <div class="preview" id="preview" data-od-id="trade-preview"></div>
+
+    <div class="field" style="margin-top:16px">
+      <label for="in-note">备注（可选，会写入流水）</label>
+      <input class="input" id="in-note" placeholder="例如：按助理建议降到 15%">
+    </div>
+    <label style="display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--muted);line-height:1.5">
+      <span class="switch" style="margin-top:-1px"><input type="checkbox" id="confirm-flag"><span class="track"></span></span>
+      <span>我已确认这是自己下的决定，助理的建议仅作参考，不代为执行真实委托。</span>
+    </label>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn" id="drawer-cancel" style="flex:none">取消</button>
+    <button class="btn btn-primary" id="drawer-submit" style="flex:1" disabled>记入持仓</button>
+  </div>
+</aside>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW, C = window.QWC;
+  D.chrome({ active: 'holdings.html', crumb: '工作台 / <b>持仓管理</b>' });
+  document.getElementById('h-search').previousElementSibling.outerHTML = D.ICONS.search;
+
+  const lots = { stock: 100, etf: 100, cb: 10 };
+  const units = { stock: '股', etf: '份', cb: '张' };
+  let sortKey = 'mv', sortDir = -1, filterKind = 'all', query = '';
+
+  /* ---------- 汇总条 ---------- */
+  function refreshDerived() {
+    D.holdings.forEach(h => {
+      h.dayChg = (h.price - h.prev) / h.prev * 100;
+      h.dayVal = (h.price - h.prev) * h.shares;
+      h.mv = h.price * h.shares;
+      h.pnl = (h.price - h.cost) * h.shares;
+      h.pnlPct = (h.price - h.cost) / h.cost * 100;
+      h.weight = h.mv / (D.totalMvAll() + D.cash) * 100;
+      if (!h.spark) h.spark = new Array(30).fill(h.price);
+    });
+  }
+  D.totalMvAll = () => D.holdings.reduce((s, h) => s + h.price * h.shares, 0);
+  refreshDerived();
+
+  function renderSummary() {
+    const mv = D.totalMvAll(), ta = mv + D.cash;
+    const day = D.holdings.reduce((s, h) => s + h.dayVal, 0);
+    const pnl = D.holdings.reduce((s, h) => s + h.pnl, 0);
+    const cost = D.holdings.reduce((s, h) => s + h.cost * h.shares, 0);
+    const win = D.holdings.filter(h => h.pnl > 0).length;
+    const rows = [
+      ['总资产', D.money(ta), ''],
+      ['持仓市值', D.money(mv), `仓位 ${(mv / ta * 100).toFixed(1)}%`],
+      ['当日浮动盈亏', (day > 0 ? '+' : '') + D.fmt(day, 2), D.pct(day / (ta - day) * 100)],
+      ['累计盈亏', (pnl > 0 ? '+' : '') + D.fmt(pnl, 0), D.pct(pnl / cost * 100)],
+      ['可用现金', D.money(D.cash), `占总资产 ${(D.cash / ta * 100).toFixed(1)}%`],
+      ['盈利标的', win + ' / ' + D.holdings.length, '胜率 ' + (win / D.holdings.length * 100).toFixed(0) + '%'],
+    ];
+    document.getElementById('sumbar').innerHTML = rows.map((r, i) => `
+      <div data-od-id="sum-${i}"><div class="k">${r[0]}</div>
+      <div class="v ${i === 2 ? D.dirClass(day) : i === 3 ? D.dirClass(pnl) : ''}">${r[1]}</div>
+      <div class="hint" style="margin:5px 0 0">${r[2]}</div></div>`).join('');
+    document.getElementById('h-foot-sum').textContent =
+      `共 ${D.holdings.length} 只标的 · 投入成本 ${D.money(cost)} · 市值 ${D.money(mv)} · 现金 ${D.money(D.cash)}`;
+    document.getElementById('h-desc').textContent =
+      `组合里最大的一只占总资产 ${Math.max(...D.holdings.map(h => h.weight)).toFixed(1)}%，`
+      + `前三大合计 ${D.holdings.map(h => h.weight).sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0).toFixed(1)}%。`
+      + `点「加减仓」试算一笔委托，摊薄成本与占比会即时重算。`;
+  }
+
+  /* ---------- 表格 ---------- */
+  function moneyShort(v) { return (Math.abs(v) >= 10000 ? (v / 10000).toFixed(2) + ' 万' : D.fmt(v, 0)); }
+  function render() {
+    let list = D.holdings.filter(h => filterKind === 'all' || h.kind === filterKind);
+    if (query) list = list.filter(h => (h.code + h.name + h.sector).toLowerCase().includes(query.toLowerCase()));
+    list.sort((a, b) => (a[sortKey] > b[sortKey] ? 1 : a[sortKey] < b[sortKey] ? -1 : 0) * sortDir);
+    const showBar = document.getElementById('show-weight').checked;
+    document.querySelector('#h-table tbody').innerHTML = list.length ? list.map(h => `
+      <tr data-od-id="hrow-${h.code}">
+        <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt}</div></td>
+        <td class="txt"><span class="pill plain" style="border-color:var(--border)">${h.sector}</span><div class="sub">${D.kindLabel[h.kind]}</div></td>
+        <td class="num">${D.fmt(h.shares, 0).replace(/,/g, ',')} <span style="color:var(--muted);font-size:11px">${units[h.kind]}</span></td>
+        <td class="num">${D.fmt(h.cost, h.kind === 'etf' ? 3 : 2)}</td>
+        <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, h.kind === 'etf' ? 3 : 2)}</span></td>
+        <td class="num ${D.dirClass(h.dayChg)}">${D.pct(h.dayChg)}</td>
+        <td class="num">${moneyShort(h.mv)}</td>
+        <td class="num ${D.dirClass(h.pnl)}">${(h.pnl > 0 ? '+' : '') + moneyShort(h.pnl)}<div class="sub ${D.dirClass(h.pnl)}">${D.pct(h.pnlPct)}</div></td>
+        <td class="num">${h.weight.toFixed(1)}%${showBar ? `<div class="tr" style="height:4px;margin-top:5px;width:70px;margin-left:auto;background:var(--surface-2);border-radius:2px;overflow:hidden"><i style="display:block;height:100%;width:${Math.min(100, h.weight / 30 * 100)}%;background:${h.weight > 25 ? 'var(--warn)' : 'var(--fg-2)'}"></i></div>` : ''}</td>
+        <td><div style="display:flex;gap:6px;justify-content:flex-end">
+          <button class="btn btn-sm" data-trade="${h.code}" data-side="buy">加仓</button>
+          <button class="btn btn-sm" data-trade="${h.code}" data-side="sell">减仓</button>
+          <a class="btn btn-sm" href="analysis.html?code=${h.code}">分析</a>
+        </div></td>
+      </tr>`).join('') : `<tr><td colspan="10"><div class="empty">没有匹配的持仓 · 试试搜索「宁德」或代码 300750</div></td></tr>`;
+    document.getElementById('h-count').textContent = `显示 ${list.length} / ${D.holdings.length} 只 · 按${{ shares: '持仓数量', cost: '成本价', price: '现价', dayChg: '今日涨跌', mv: '市值', pnl: '浮动盈亏', weight: '占组合' }[sortKey] || sortKey}${sortDir < 0 ? '降序' : '升序'}`;
+    document.querySelectorAll('#h-table .tbl-sort').forEach(s => {
+      const th = s.closest('th');
+      th.setAttribute('aria-sort', th.dataset.sort === sortKey ? (sortDir < 0 ? 'descending' : 'ascending') : 'none');
+      s.innerHTML = s.textContent + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:10px;height:10px"><path d="${th.dataset.sort === sortKey && sortDir > 0 ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}"/></svg>`;
+    });
+  }
+
+  document.getElementById('h-table').addEventListener('click', e => {
+    const th = e.target.closest('th.sortable');
+    if (th) {
+      const k = th.dataset.sort;
+      if (k === sortKey) sortDir *= -1; else { sortKey = k; sortDir = -1; }
+      render(); return;
+    }
+    const b = e.target.closest('[data-trade]');
+    if (b) openTrade(b.dataset.trade, b.dataset.side);
+  });
+  document.getElementById('kind-filter').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
+    filterKind = b.dataset.k; render();
+  });
+  document.getElementById('h-search').addEventListener('input', e => { query = e.target.value; render(); });
+  document.getElementById('show-weight').addEventListener('change', render);
+  document.getElementById('export-btn').addEventListener('click', () => D.toast('已生成 holdings-2026-10-24.csv（演示，不落盘）', 'check'));
+  document.getElementById('trade-btn').addEventListener('click', () => openTrade('002594', 'sell'));
+
+  /* ---------- 抽屉 ---------- */
+  const drawer = document.getElementById('trade-drawer'), scrim = document.getElementById('scrim');
+  let cur = null, side = 'buy';
+  const sel = document.getElementById('sel-code');
+  sel.innerHTML = D.holdings.map(h => `<option value="${h.code}">${h.name} ${h.code} · ${D.kindLabel[h.kind]}</option>`).join('')
+    + D.watchlist.map(w => `<option value="${w.code}">${w.name} ${w.code} · 自选未持有</option>`).join('');
+
+  function find(code) { return D.holdings.find(h => h.code === code) || D.watchlist.find(h => h.code === code); }
+  function meta(h) {
+    const kind = h.kind || 'stock';
+    return { kind, lot: lots[kind], unit: units[kind], prec: kind === 'etf' ? 3 : 2, prev: h.prev || h.price / (1 + (h.dayChg || 0) / 100) };
+  }
+  function openTrade(code, s) {
+    cur = find(code); if (!cur) return;
+    side = s || 'buy';
+    const m = meta(cur);
+    document.querySelectorAll('#side-seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.side === side));
+    sel.value = cur.code;
+    document.getElementById('in-price').value = D.fmt(cur.price, m.prec);
+    document.getElementById('in-qty').value = '';
+    document.getElementById('in-note').value = '';
+    document.getElementById('confirm-flag').checked = false;
+    document.getElementById('drawer-submit').disabled = true;
+    document.getElementById('unit').textContent = m.unit;
+    document.getElementById('lot-hint').textContent = `${D.kindLabel[m.kind]}最小单位 1 手 = ${m.lot} ${m.unit}，数量需为 ${m.lot} 的整数倍`;
+    document.getElementById('limit-txt').textContent = `${D.fmt(m.prev * (m.kind === 'cb' ? 0.8 : 0.9), 2)} — ${D.fmt(m.prev * 1.1, 2)}`;
+    document.getElementById('code-hint').textContent = cur.shares
+      ? `当前持有 ${D.fmt(cur.shares, 0)} ${m.unit} · 成本 ${D.fmt(cur.cost, m.prec)} · 现价 ${D.fmt(cur.price, m.prec)}`
+      : '尚未持有，买入后将新建持仓。';
+    document.getElementById('drawer-sub').textContent = `${cur.name} ${cur.code} · ${D.kindLabel[m.kind]}`;
+    drawer.classList.add('on'); scrim.classList.add('on');
+    calc(); setTimeout(() => document.getElementById('in-qty').focus(), 260);
+  }
+  function close() { drawer.classList.remove('on'); scrim.classList.remove('on'); }
+  document.getElementById('drawer-close').addEventListener('click', close);
+  document.getElementById('drawer-cancel').addEventListener('click', close);
+  scrim.addEventListener('click', close);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  document.getElementById('side-seg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    side = b.dataset.side;
+    [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
+    calc();
+  });
+  sel.addEventListener('change', () => { cur = find(sel.value); openTrade(sel.value, side); });
+  ['in-qty', 'in-price'].forEach(id => document.getElementById(id).addEventListener('input', calc));
+  document.getElementById('qty-quick').addEventListener('click', e => {
+    const b = e.target.closest('[data-q]'); if (!b) return;
+    document.getElementById('in-qty').value = b.dataset.q; calc();
+  });
+  document.getElementById('confirm-flag').addEventListener('change', e => document.getElementById('drawer-submit').disabled = !e.target.checked);
+
+  function fee(amount, kind, side) {
+    let f = Math.max(5, amount * 0.00025);
+    if (side === 'sell' && kind !== 'cb' && kind !== 'etf') f += amount * 0.0005;   // 印花税
+    if (kind === 'stock') f += amount * 0.00001;                                    // 过户费（沪市，估算）
+    return f;
+  }
+  function calc() {
+    if (!cur) return;
+    const m = meta(cur), lot = m.lot;
+    const qty = parseInt(document.getElementById('in-qty').value.replace(/\D/g, ''), 10) || 0;
+    const price = parseFloat(document.getElementById('in-price').value) || cur.price;
+    const held = cur.shares || 0;
+
+    // 快捷数量（随方向变化）
+    const baseQty = Math.max(lot, held || lot * 10);
+    document.getElementById('qty-quick').innerHTML = [0.1, 0.25, 0.5].map(f => {
+      const q = Math.max(lot, Math.floor(baseQty * f / lot) * lot);
+      return `<button class="btn btn-sm" data-q="${q}">${side === 'sell' ? '减' : '加'} ${(f * 100).toFixed(0)}% · ${D.fmt(q, 0)} ${m.unit}</button>`;
+    }).join('') + (side === 'sell' && held ? `<button class="btn btn-sm" data-q="${held}">全部清仓</button>` : '');
+
+    const fQty = document.getElementById('f-qty'), fPrice = document.getElementById('f-price');
+    let errQ = '';
+    if (qty && qty % lot) errQ = `数量需为 ${lot} 的整数倍（当前 ${qty}）`;
+    else if (qty && side === 'sell' && qty > held) errQ = `最多可卖 ${D.fmt(held, 0)} ${m.unit}`;
+    fQty.classList.toggle('invalid', !!errQ);
+    document.getElementById('err-qty').textContent = errQ || '请填写有效数量';
+
+    const hi = m.prev * 1.1001, lo = m.prev * (m.kind === 'cb' ? 0.799 : 0.899);
+    const bad = price && (price > hi || price < lo);
+    fPrice.classList.toggle('invalid', !!bad);
+    document.getElementById('err-price').textContent = bad ? `价格超出涨跌停合理区间 ${D.fmt(lo, 2)} — ${D.fmt(hi, 2)}` : '';
+
+    const amount = qty * price, f = fee(amount, m.kind, side);
+    const afterShares = side === 'buy' ? held + qty : Math.max(0, held - qty);
+    const cashAfter = side === 'buy' ? D.cash - amount - f : D.cash + amount - f;
+    const others = D.holdings.filter(h => h !== cur).reduce((s, h) => s + h.mv, 0);
+    const taAfter = others + afterShares * price + cashAfter;
+    const afterW = taAfter ? afterShares * price / taAfter * 100 : 0;
+    let afterCost = cur.cost || price, realized = null;
+    if (side === 'buy' && afterShares) afterCost = ((cur.cost || 0) * held + amount + f) / afterShares;
+    if (side === 'sell' && cur.cost) realized = (price - cur.cost) * qty - f;
+    const overLimit = afterW > 25;
+
+    document.getElementById('preview').innerHTML = `
+      <div class="row"><span class="k">方向 / 数量</span><span class="v">${side === 'buy' ? '买入' : '卖出'} ${qty ? D.fmt(qty, 0) : '—'} ${m.unit}</span></div>
+      <div class="row"><span class="k">成交金额</span><span class="v">${qty ? D.money(amount) : '—'}</span></div>
+      <div class="row"><span class="k">估算费用</span><span class="v">${qty ? D.money(f) : '—'} <span class="arrow-mock">${f <= 5 ? '按最低 5 元佣金' : '佣金 + 税费'}</span></span></div>
+      <div class="row"><span class="k">持仓变动</span><span class="v">${D.fmt(held, 0)} → <b>${D.fmt(afterShares, 0)}</b></span></div>
+      <div class="row"><span class="k">摊薄成本</span><span class="v">${D.fmt(cur.cost || price, m.prec)} → <b>${D.fmt(afterCost, m.prec)}</b></span></div>
+      <div class="row"><span class="k">占组合（估）</span><span class="v">${((cur.weight || 0)).toFixed(1)}% → <b>${afterW.toFixed(1)}%</b></span></div>
+      <div class="row"><span class="k">现金余额</span><span class="v ${cashAfter < 0 ? 'down' : ''}">${D.money(cashAfter)}${cashAfter < 0 ? '（资金不足）' : ''}</span></div>
+      ${realized != null && qty ? `<div class="row"><span class="k">已实现盈亏</span><span class="v ${D.dirClass(realized)}">${cur.cost ? D.pct(realized / (cur.cost * qty) * 100) : '—'} · ${D.money(realized)}</span></div>` : ''}
+      ${qty && overLimit ? `<div class="row"><span class="k" style="color:var(--warn)">纪律提示</span><span class="v" style="color:var(--warn)">单票将超过 25% 上限</span></div>` : ''}`;
+    const ok = qty > 0 && !errQ && !bad && qty % lot === 0 && (side === 'buy' ? cashAfter >= 0 : qty <= held);
+    document.getElementById('drawer-submit').disabled = !(ok && document.getElementById('confirm-flag').checked);
+  }
+
+  const LOG = [
+    { t: '2026-10-20 09:42', code: '600276', name: '恒瑞医药', side: '买入', qty: 200, price: 55.30, fee: 5.00, rp: null },
+    { t: '2026-10-16 14:18', code: '110074', name: '精达转债', side: '买入', qty: 40, price: 122.800, fee: 5.00, rp: null },
+    { t: '2026-10-09 10:05', code: '510300', name: '沪深300ETF', side: '买入', qty: 2000, price: 4.118, fee: 5.00, rp: null },
+    { t: '2026-09-25 14:50', code: '002594', name: '比亚迪', side: '卖出', qty: 100, price: 271.60, fee: 34.28, rp: 680.00 },
+  ];
+  function renderLog() {
+    document.querySelector('#log-table tbody').innerHTML = LOG.map((l, i) => `
+      <tr data-od-id="log-row-${i}">
+        <td class="txt" style="font-family:var(--font-mono);font-size:11.5px;color:var(--muted)">${l.t}</td>
+        <td class="txt"><span class="name">${l.name}</span> <span class="code">${l.code}</span></td>
+        <td class="txt"><span class="pill ${l.side === '买入' ? 'up' : 'down'}">${l.side}</span></td>
+        <td class="num">${D.fmt(l.qty, 0)}</td><td class="num">${D.fmt(l.price, l.price < 10 ? 3 : 2)}</td>
+        <td class="num" style="color:var(--muted)">${D.fmt(l.fee, 2)}</td>
+        <td class="num ${l.rp == null ? '' : D.dirClass(l.rp)}">${l.rp == null ? '—' : (l.rp > 0 ? '+' : '') + D.fmt(l.rp, 2)}</td>
+      </tr>`).join('');
+  }
+  renderLog();
+
+  document.getElementById('drawer-submit').addEventListener('click', () => {
+    const m = meta(cur), qty = parseInt(document.getElementById('in-qty').value.replace(/\D/g, ''), 10);
+    const price = parseFloat(document.getElementById('in-price').value);
+    const amount = qty * price, f = fee(amount, m.kind, side);
+    let rp = null;
+    if (side === 'buy') {
+      if (cur.shares) { cur.cost = (cur.cost * cur.shares + amount + f) / (cur.shares + qty); cur.shares += qty; }
+      else {
+        const h = { code: cur.code, name: cur.name, mkt: cur.code[0] === '6' ? 'SH' : 'SZ', kind: m.kind, sector: cur.sector || '新建持仓', shares: qty, cost: (amount + f) / qty, price: cur.price, prev: m.prev };
+        D.holdings.push(h); cur = h;
+      }
+      D.cash -= amount + f;
+    } else {
+      cur.shares -= qty; rp = (price - cur.cost) * qty - f; D.cash += amount - f;
+      if (cur.shares <= 0) D.holdings.splice(D.holdings.indexOf(cur), 1);
+    }
+    LOG.unshift({ t: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-').slice(0, 16), code: cur.code, name: cur.name, side: side === 'buy' ? '买入' : '卖出', qty, price, fee: f, rp });
+    const note = document.getElementById('in-note').value;
+    refreshDerived(); renderSummary(); render(); renderLog(); renderRules(); close();
+    D.toast(`已记入：${side === 'buy' ? '买入' : '卖出'} ${cur.name} ${qty} ${m.unit} @ ${D.fmt(price, 2)}${note ? ' · ' + note : ''}`, 'check');
+  });
+
+  /* ---------- 仓位纪律 ---------- */
+  const RULES = [
+    { k: '单票占组合上限', v: 25, cur: () => Math.max(...D.holdings.map(h => h.weight)), unit: '%' },
+    { k: '单一行业占市值上限', v: 35, cur: () => Math.max(...Object.values(D.holdings.reduce((m, h) => (m[h.sector] = (m[h.sector] || 0) + h.mv, m), {})).map(x => x / D.totalMvAll() * 100)), unit: '%' },
+    { k: '可转债合计占组合', v: 12, cur: () => D.holdings.filter(h => h.kind === 'cb').reduce((s, h) => s + h.weight, 0), unit: '%' },
+    { k: '现金最低保留', v: 10, cur: () => D.cash / (D.totalMvAll() + D.cash) * 100, unit: '%', inverse: true },
+  ];
+  function renderRules() {
+    document.getElementById('rules').innerHTML = RULES.map((r, i) => {
+      const c = r.cur(), hit = r.inverse ? c < r.v : c > r.v;
+      const pctv = Math.min(100, r.inverse ? c / r.v * 100 : c / r.v * 100);
+      return `<div style="margin-bottom:${i === RULES.length - 1 ? 0 : 15}px" data-od-id="rule-${i}">
+        <div style="display:flex;align-items:baseline;gap:8px;font-size:12.5px">
+          <span>${r.k}</span>
+          <span class="num" style="margin-left:auto;color:var(--muted);font-size:11.5px">上限 ${r.v}${r.unit}</span>
+          <span class="num ${hit ? 'up' : 'down'}" style="font-weight:550">${c.toFixed(1)}${r.unit}</span>
+          <span class="pill ${hit ? 'warn' : ''}">${hit ? '已触及' : '安全'}</span>
+        </div>
+        <div class="progress" style="margin-top:7px"><i style="width:${pctv.toFixed(0)}%;background:${hit ? 'var(--warn)' : 'var(--accent)'}"></i></div>
+      </div>`;
+    }).join('');
+  }
+  renderSummary(); render(); renderRules();
+
+  // 从分析页「写入持仓试算」跳转过来时直接打开抽屉并预填
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('code')) {
+    openTrade(qp.get('code'), qp.get('side') === 'sell' ? 'sell' : 'buy');
+    if (qp.get('qty')) { document.getElementById('in-qty').value = qp.get('qty'); calc(); }
+  }
+
+  setInterval(() => { D.tickPrices(); refreshDerived(); renderSummary(); render(); renderRules(); }, 6000);
+})();
+</script>
+</body>
+</html>

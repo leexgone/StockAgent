@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>智能问答 · 青梧股票智能助理</title>
+<link rel="stylesheet" href="assets/ui.css" />
+<style>
+  .chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 16px; align-items: start; }
+  .thread { display: flex; flex-direction: column; gap: 18px; padding: 18px; max-height: calc(100dvh - 300px); min-height: 420px; overflow-y: auto; }
+  .msg { display: flex; gap: 12px; max-width: 78%; }
+  .msg.me { margin-left: auto; flex-direction: row-reverse; }
+  .av { width: 28px; height: 28px; border-radius: 8px; flex: none; display: grid; place-items: center; font-size: 11px; font-weight: 590; }
+  .av.ai { background: var(--fg); color: var(--surface); }
+  .av.ai svg { width: 15px; height: 15px; }
+  .av.hu { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line); }
+  .bub { border-radius: 4px 14px 14px 14px; background: var(--surface-2); border: 1px solid var(--border); padding: 13px 15px; min-width: 0; }
+  .msg.me .bub { border-radius: 14px 4px 14px 14px; background: var(--accent); border-color: var(--accent); color: #fff; }
+  .bub p { font-size: 13.5px; line-height: 1.72; }
+  .bub .lead { font-weight: 550; font-size: 14px; letter-spacing: -.01em; margin-bottom: 8px; }
+  .bub .sec { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+  .bub ol, .bub ul { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.75; color: var(--fg-2); }
+  .bub li { margin-bottom: 5px; }
+  .cite { display: flex; gap: 9px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); margin-top: 7px; font-size: 11.5px; line-height: 1.5; }
+  .cite .src { color: var(--muted); font-weight: 550; white-space: nowrap; }
+  .cite .txt { color: var(--fg-2); font-family: var(--font-mono); font-size: 11px; letter-spacing: -.005em; }
+  .mfoot { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .chips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+  .chips button { font-size: 12px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border-2); background: var(--surface); color: var(--fg-2); transition: border-color .14s, background .14s; }
+  .chips button:hover { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+  .typing span { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); margin-right: 4px; animation: bob 1.1s infinite; }
+  .typing span:nth-child(2) { animation-delay: .16s } .typing span:nth-child(3) { animation-delay: .32s }
+  @keyframes bob { 0%,60%,100% { transform: translateY(0); opacity: .45 } 30% { transform: translateY(-4px); opacity: 1 } }
+  .composer { border-top: 1px solid var(--border); padding: 14px 16px; display: flex; gap: 10px; align-items: flex-end; background: var(--surface); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+  .composer textarea { flex: 1; min-height: 40px; max-height: 140px; resize: none; border: 1px solid var(--border-2); border-radius: var(--r-md); padding: 10px 12px; font-size: 13.5px; line-height: 1.6; outline: 0; }
+  .composer textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .suggest { display: flex; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .suggest button { flex: none; font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px dashed var(--border-2); background: transparent; color: var(--muted); }
+  .suggest button:hover { color: var(--fg); border-color: var(--accent-line); }
+  .rail .row { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+  .rail .row:last-child { border-bottom: 0; }
+  .rail .row .v { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  @media (max-width: 1100px) { .chat-layout { grid-template-columns: minmax(0,1fr); } .thread { max-height: none; } }
+  @media (max-width: 640px) { .msg { max-width: 92%; } .thread { padding: 14px; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" data-od-id="chat-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">智能问答</div>
+          <h1 class="page-title">用大白话问，它拿你的持仓回答</h1>
+          <p class="page-desc">回答只引用你这个账户里的数据：持仓明细、行情快照、公告与你的仓位纪律。每条结论下面都写着来源，可以点开核对。</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" id="clear-btn">清空会话</button>
+          <button class="btn" id="push-last">把最后一条推送到微信</button>
+        </div>
+      </div>
+
+      <div class="chat-layout">
+        <section class="card" data-od-id="chat-thread-card" style="overflow:hidden">
+          <div class="suggest" id="suggest"></div>
+          <div class="thread" id="thread" role="log" aria-live="polite" aria-label="对话记录"></div>
+          <div class="composer">
+            <textarea id="input" rows="1" placeholder="例如：今天该做什么？／ 博威转债还剩几天强赎？"></textarea>
+            <button class="btn btn-primary btn-lg" id="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:15px;height:15px"><path d="M4 12l16-7-4 7 4 7-16-7z"/></svg><span>发送</span></button>
+          </div>
+        </section>
+
+        <div class="grid rail" style="gap:16px">
+          <section class="card" data-od-id="chat-context-card">
+            <div class="card-head"><div><div class="card-title">助理现在能看到什么</div><div class="card-sub" id="ctx-ws">—</div></div>
+              <div class="head-actions"><span class="pill">仅本账户</span></div></div>
+            <div class="card-body" id="ctx-body" style="padding-top:8px"></div>
+          </div>
+          <section class="card" data-od-id="chat-limit-card">
+            <div class="card-head"><div><div class="card-title">它不会做的事</div></div></div>
+            <div class="card-body">
+              <ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.8;color:var(--fg-2)">
+                <li>不代为下真实委托，只生成试算</li>
+                <li>不预测涨跌幅百分比，只给条件与区间</li>
+                <li>不引用你没授权的数据源</li>
+                <li>不预测明天涨跌，只给条件与应对</li>
+              </ul>
+            </div>
+          </section>
+          <section class="card" data-od-id="chat-sessions-card">
+            <div class="card-head"><div><div class="card-title">最近会话</div><div class="card-sub">含微信里的语音与文字</div></div></div>
+            <div class="list" id="recent"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="footnote" data-od-id="chat-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>本页为界面原型：回答由本地样本问答库生成，用于演示信息结构与引用样式，<b>未接入大模型与真实行情</b>。接入后同样需要你对每笔委托做最终确认。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW;
+  D.chrome({ active: 'chat.html', crumb: '工作台 / <b>智能问答</b>' });
+  const thread = document.getElementById('thread');
+  const input = document.getElementById('input');
+  const KEY = 'qingwu:chat:me';
+  let busy = false;
+
+  /* ---------- 上下文面板 ---------- */
+  document.getElementById('ctx-ws').textContent = `${D.ws.name} · ${D.ws.broker}`;
+  const top3 = [...D.holdings].sort((a, b) => b.mv - a.mv).slice(0, 3);
+  document.getElementById('ctx-body').innerHTML = `
+    <div class="row"><span>总资产</span><span class="v">${D.money(D.totalAssets)}</span></div>
+    <div class="row"><span>持仓只数</span><span class="v">${D.holdings.length} 只</span></div>
+    <div class="row"><span>可用现金</span><span class="v">${D.money(D.cash)}</span></div>
+    <div class="row"><span>仓位</span><span class="v">${(D.totalMv / (D.totalMv + D.cash) * 100).toFixed(1)}%</span></div>
+    <div class="row"><span>前三大</span><span class="v" style="font-size:11.5px">${top3.map(h => `${h.name} ${(h.mv / D.totalAssets * 100).toFixed(1)}%`).join(' · ')}</span></div>
+    <div class="row"><span>待处理预警</span><span class="v">${D.alerts.filter(a => !a.done).length} 条</span></div>
+    <div class="row"><span>数据时点</span><span class="v" style="font-size:11.5px">${new Date().toTimeString().slice(0, 8)}</span></div>`;
+  document.getElementById('recent').innerHTML = D.sessions.map((s, i) => `
+    <div class="list-item" data-od-id="recent-item-${i}">
+      <span class="li-main"><span class="li-title">${s.who}</span><span class="li-desc">${s.text}</span></span>
+      <span class="li-right"><span class="num" style="font-size:11px;color:var(--muted)">${s.t}</span>
+      ${s.read ? '' : '<span class="pill accent" style="display:block;margin-top:5px">未读</span>'}</span>
+    </div>`).join('');
+
+  /* ---------- 问答库 ---------- */
+  const byCode = c => D.holdings.find(h => h.code === c);
+  function match(q) {
+    const t = q.toLowerCase();
+    for (const item of D.qa) if (t.includes(item.q.slice(0, 6).toLowerCase()) || item.q === q) return item;
+    if (/今天|该做|复盘|总结/.test(q)) return { q, a: [
+      { t: `今天三件事：${D.alerts.filter(a => !a.done).map(a => a.name + ' ' + a.type).join('；')}。`, k: 'conclusion' },
+      { t: `组合${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元（${D.pct(D.dayPnlPct)}），仓位 ${(D.totalMv / (D.totalMv + D.cash) * 100).toFixed(1)}%，最大单票占资产 ${Math.max(...D.holdings.map(h => h.mv)) / D.totalAssets * 100 > 25 ? '已超过 25% 上限' : '仍在 25% 上限内'}。`, k: 'body' },
+      { t: '优先级：先处理有期限的（转债强赎），再处理仓位失衡的（减集中度），最后才看要不要补新标的。', k: 'plan' }
+    ], cites: [{ src: '预警清单', txt: D.alerts.filter(a => !a.done).map(a => `${a.time} ${a.name} ${a.type}`).join(' / ') }, { src: '持仓明细', txt: `现金 ${D.money(D.cash)} · 市值 ${D.money(D.totalMv)}` }] };
+    const hit = D.holdings.find(h => t.includes(h.name) || t.includes(h.code));
+    if (hit) {
+      const A = D.advice[hit.code];
+      return { q, a: [
+        { t: `${hit.name}当前建议「${A ? A.action : '持有'}」，${A ? A.position : '维持现仓位'}。`, k: 'conclusion' },
+        { t: A ? A.dims.map(d => `${d.k} ${d.s} 分：${d.t}`).join(' ') : '样本问答库中没有这只标的的完整分析，接入后可即时生成。', k: 'body' },
+        { t: A && A.target ? `参考区间 ${A.target[0]} — ${A.target[1]}，止损 ${A.stop}；按你现有 ${D.fmt(hit.shares, 0)} 股计算，跌破止损对总资产影响约 ${(Math.abs(hit.price - A.stop) * hit.shares / D.totalAssets * 100).toFixed(2)}%。` : '这只没有设目标价与止损位，建议先补上纪律参数。', k: 'plan' },
+      ], cites: [{ src: '持仓明细', txt: `${hit.code} ${hit.name} · ${D.fmt(hit.shares, 0)} · 成本 ${D.fmt(hit.cost, 2)} · 现价 ${D.fmt(hit.price, 2)} · ${D.pct(hit.dayChg)}` },
+        { src: 'AI 分析', txt: A ? `综合 ${A.score} 分 · 置信度 ${(A.conf * 100).toFixed(0)}% · ${A.horizon}` : '无' }],
+        chips: [`${hit.name}要不要止损？`, '把它设为微信预警'] };
+    }
+    if (/微信|推送|提醒/.test(q)) return { q, a: [
+      { t: '可以，预警和每日复盘都能直接推到你的微信上。', k: 'conclusion' },
+      { t: '这个账户已开启：价格条件、公告事件、盘后日报三类推送；推送时段 08:30–21:00，盘中只推「已触及」级别。', k: 'body' },
+      { t: '去「微信助理接入」页可以逐条开关，或把某只标的的提醒单独设成静音。', k: 'plan' }
+    ], cites: [{ src: '接入设置', txt: '本人微信已绑定 · 最近同步 今日 15:05' }], chips: ['打开微信接入设置'] };
+    return { q, a: [
+      { t: '这个问题我需要更多上下文才能给结论 —— 是想处理持仓、看行情，还是要一份复盘？', k: 'conclusion' },
+      { t: '我能直接回答的例子：某只要不要止损、今天该做什么、组合怎么调均衡、某条公告跟你有什么关系。', k: 'body' },
+      { t: '把标的代码或名称写在问题里会更快，比如「588000 今天要不要减」。', k: 'plan' }
+    ], cites: [{ src: '我的账户', txt: `${D.ws.name} · ${D.holdings.length} 只持仓 · 风格 ${D.ws.style}` }], chips: D.qa.map(x => x.q).slice(0, 2) };
+  }
+
+  /* ---------- 渲染 ---------- */
+  const KIND_LABEL = { conclusion: '结论', body: '为什么', plan: '怎么做' };
+  function renderMsg(m) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + (m.role === 'me' ? 'me' : 'ai');
+    el.dataset.odId = 'msg-' + m.id;
+    if (m.role === 'me') {
+      el.innerHTML = `<span class="av hu">${D.ws.init}</span><div class="bub"><p>${C0(m.text)}</p></div>`;
+    } else {
+      const blocks = m.msg.a.map(x => `
+        <div class="sec">${KIND_LABEL[x.k] || '说明'}</div>
+        <p ${x.k === 'conclusion' ? 'class="lead"' : 'style="color:var(--fg-2);font-size:13px;line-height:1.75"'}>${C0(x.t)}</p>`).join('');
+      const cites = (m.msg.cites || []).map(c => `
+        <div class="cite"><span class="src">${c.src}</span><span class="txt">${C0(c.txt)}</span></div>`).join('');
+      const chips = (m.msg.chips || []).map(c => `<button data-ask="${C0(c)}">${C0(c)}</button>`).join('');
+      el.innerHTML = `<span class="av ai">${D.ICONS.spark}</span>
+        <div class="bub" style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:12.5px;font-weight:550">青梧助理</span>
+            <span class="num" style="font-size:11px;color:var(--muted)">${m.time}</span>
+            <span class="pill" style="margin-left:auto" title="样本内信号一致性">置信度 ${m.conf}%</span>
+          </div>
+          ${blocks}
+          ${cites ? `<div class="sec">依据来源</div>${cites}` : ''}
+          ${chips ? `<div class="chips">${chips}</div>` : ''}
+          <div class="mfoot">
+            <button class="btn btn-sm btn-ghost" data-push="${m.id}">推送到微信</button>
+            <button class="btn btn-sm btn-ghost" data-open="${m.code || ''}">看完整分析</button>
+            <span>数据时点 ${m.time}（演示样本）</span>
+          </div>
+        </div>`;
+    }
+    return el;
+  }
+  const C0 = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+  let store = [];
+  try { store = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { store = []; }
+  if (!store.length) {
+    store = [{ role: 'ai', id: 'seed', time: '15:05', conf: 64, msg: {
+      a: [{ k: 'conclusion', t: '收盘了。今天组合 ' + (D.dayPnl >= 0 ? '盈利' : '亏损') + ' ' + D.fmt(Math.abs(D.dayPnl), 0) + ' 元，' + D.alerts.filter(a => !a.done).length + ' 条预警等你处理。' },
+        { k: 'body', t: `正贡献主要来自 ${[...D.holdings].sort((a, b) => b.dayVal - a.dayVal)[0].name}，拖累最大的是 ${[...D.holdings].sort((a, b) => a.dayVal - b.dayVal)[0].name}。比亚迪的浮亏扩大是今天唯一需要你决定的事。` },
+        { k: 'plan', t: '按紧急度排：博威转债（有最后交易日）→ 比亚迪减仓（可分两笔）→ 科创50ETF 止盈（可延后一天观察）。' }],
+      cites: [{ src: '当日归因', txt: [...D.holdings].sort((a, b) => b.dayVal - a.dayVal).slice(0, 3).map(h => `${h.name} ${h.dayVal > 0 ? '+' : ''}${D.fmt(h.dayVal, 0)}`).join(' · ') }],
+      chips: ['比亚迪要不要止损？', '帮我把组合调均衡一点', '今天该做什么？'],
+    } }];
+  }
+  function paint() {
+    thread.innerHTML = '';
+    store.forEach(m => thread.appendChild(renderMsg(m)));
+    thread.scrollTop = thread.scrollHeight;
+  }
+  paint();
+
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(store.slice(-30))); } catch (e) {} }
+
+  function ask(text) {
+    if (busy || !text.trim()) return;
+    const q = text.trim();
+    input.value = ''; autoGrow();
+    store.push({ role: 'me', id: 'm' + Date.now(), time: new Date().toTimeString().slice(0, 5), text: q });
+    paint(); save();
+    busy = true;
+    const dot = document.createElement('div');
+    dot.className = 'msg ai';
+    dot.innerHTML = `<span class="av ai">${D.ICONS.spark}</span><div class="bub"><span class="typing"><span></span><span></span><span></span></span> <span style="font-size:12px;color:var(--muted)">正在读取你的持仓与行情…</span></div>`;
+    thread.appendChild(dot); thread.scrollTop = thread.scrollHeight;
+
+    setTimeout(() => {
+      dot.remove();
+      const r = match(q);
+      const ai = { role: 'ai', id: 'm' + Date.now(), time: new Date().toTimeString().slice(0, 5), conf: 50 + Math.round(Math.random() * 24), msg: r, code: (D.holdings.find(h => q.includes(h.name) || q.includes(h.code)) || {}).code };
+      store.push(ai); save();
+      // 流式呈现：逐段插入
+      const el = renderMsg(ai);
+      const parts = Array.from(el.querySelectorAll('.bub > *')).slice(1);
+      parts.forEach(p => p.style.opacity = '0');
+      thread.appendChild(el);
+      parts.forEach((p, i) => setTimeout(() => { p.style.transition = 'opacity .2s'; p.style.opacity = '1'; thread.scrollTop = thread.scrollHeight; }, 110 * (i + 1)));
+      setTimeout(() => { busy = false; }, 110 * (parts.length + 1));
+    }, 700 + Math.random() * 500);
+  }
+
+  document.getElementById('send').addEventListener('click', () => ask(input.value));
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(input.value); }
+  });
+  function autoGrow() { input.style.height = 'auto'; input.style.height = Math.min(140, input.scrollHeight) + 'px'; }
+  input.addEventListener('input', autoGrow);
+  thread.addEventListener('click', e => {
+    const a = e.target.closest('[data-ask]');
+    if (a) { ask(a.dataset.ask); return; }
+    const p = e.target.closest('[data-push]');
+    if (p) { D.toast('已生成微信卡片并发送到你的微信', 'check'); return; }
+    const o = e.target.closest('[data-open]');
+    if (o) { location.href = 'analysis.html' + (o.dataset.open ? '?code=' + o.dataset.open : ''); }
+  });
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    store = []; save(); paint(); D.toast('会话已清空（仅存在本机浏览器）', 'check');
+  });
+  document.getElementById('push-last').addEventListener('click', () => D.toast('最后一条回答已推送到微信', 'check'));
+
+  const SUG = D.qa.map(x => x.q).concat(['588000 今天要不要减？', '科创50 和创业板指有什么关系？', '帮我留够下个月要用的钱']);
+  document.getElementById('suggest').innerHTML = SUG.map(s => `<button data-ask="${C0(s)}">${C0(s)}</button>`).join('');
+  document.getElementById('suggest').addEventListener('click', e => { const b = e.target.closest('[data-ask]'); if (b) ask(b.dataset.ask); });
+
+  // 支持 ?q= 直接进入一个具体问题
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('q')) setTimeout(() => ask(qp.get('q')), 300);
+  else if (qp.get('code')) {
+    const h = D.holdings.find(x => x.code === qp.get('code'));
+    if (h) setTimeout(() => ask(`${h.name}现在要不要动？`), 300);
+  }
+})();
+</script>
+</body>
+</html>

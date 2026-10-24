@@ -1,0 +1,48 @@
+# ── 系统与编辑器 ──────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# ── 依赖与构建产物（后续接行情/模型时用得到）──
+node_modules/
+dist/
+build/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# ── 本地密钥：微信 AppID / Token / Webhook、行情源 key 一律不要提交 ──
+.env
+.env.*
+!.env.example
+*.local
+secrets.*
+config.local.*
+
+# ── 数据导出与缓存（券商对账单、行情快照等）──
+*.csv
+*.sqlite
+*.sqlite3
+*.db
+exports/
+data/cache/
+cache/
+
+# ── 工具与临时目录 ────────────────────────────
+.file-versions/
+.od/
+screenshots/
+shots/
+*.log
+
+# ── Claude Code：本机设置含个人路径与权限，不提交（CLAUDE.md 要提交）──
+.claude/settings.local.json
+.claude/*.local.json

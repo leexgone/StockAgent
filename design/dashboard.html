@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>总览仪表盘 · 青梧股票智能助理</title>
+<link rel="stylesheet" href="assets/ui.css" />
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <div id="strip"></div>
+
+    <main class="page" data-od-id="dashboard-page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow" id="d-eyebrow">总览</div>
+          <h1 class="page-title">今天我的钱在哪里</h1>
+          <p class="page-desc" id="d-desc"></p>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="group" aria-label="时间区间" id="period">
+            <button type="button" data-n="5">近一周</button>
+            <button type="button" data-n="20">近一月</button>
+            <button type="button" data-n="90" aria-pressed="true">近一季</button>
+          </div>
+          <a class="btn" href="holdings.html">管理持仓</a>
+        </div>
+      </div>
+
+      <!-- 净值 + 今日概览 -->
+      <div class="grid g-main">
+        <section class="card" data-od-id="equity-card">
+          <div class="card-head">
+            <div>
+              <div class="card-title">资产净值 vs 沪深 300</div>
+              <div class="card-sub" id="equity-sub">再平衡前含现金，基准为沪深 300 全收益（指数点位归一）</div>
+            </div>
+            <div class="head-actions">
+              <span class="pill" id="equity-badge">—</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap;margin-bottom:14px">
+              <div>
+                <div class="metric-label">总资产</div>
+                <div class="metric-value lg num" id="d-assets">—</div>
+              </div>
+              <div>
+                <div class="metric-label">当日盈亏</div>
+                <div class="metric-value num" id="d-day" style="margin-top:6px">—</div>
+              </div>
+              <div>
+                <div class="metric-label">区间收益</div>
+                <div class="metric-value num" id="d-range" style="margin-top:6px">—</div>
+              </div>
+            </div>
+            <div class="chart-hold" id="equity-chart" style="height:262px"></div>
+            <div class="legend" style="margin-top:10px">
+              <span><i style="background:var(--accent)"></i>我的组合</span>
+              <span><i style="background:var(--muted);opacity:.7"></i>沪深 300（归一）</span>
+              <span style="margin-left:auto" id="d-hover">把指针放到图上查看某一天的净值</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="grid" style="gap:16px">
+          <section class="card" data-od-id="allocation-card">
+            <div class="card-head"><div><div class="card-title">钱在哪里</div><div class="card-sub">按市值拆分</div></div></div>
+            <div class="card-body">
+              <div style="display:flex;gap:18px;align-items:center">
+                <div id="alloc-donut" style="flex:none"></div>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:9px" id="alloc-list"></div>
+              </div>
+              <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:baseline">
+                <span class="metric-label">可用现金</span>
+                <span class="num" id="d-cash" style="margin-left:auto;font-size:15px;font-weight:550">—</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" data-od-id="attribution-card">
+            <div class="card-head">
+              <div><div class="card-title">当日盈亏归因</div><div class="card-sub">谁在拖、谁在拉</div></div>
+            </div>
+            <div class="card-body"><div class="bar-row" id="attribution"></div>
+              <p class="hint" id="attr-note" style="margin-top:12px"></p>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- 预警 -->
+      <section class="card" id="alerts" data-od-id="alerts-card" style="margin-top:16px">
+        <div class="card-head">
+          <div><div class="card-title">待处理预警</div><div class="card-sub">价格条件、公告与止盈止损，处理后不再出现在首屏</div></div>
+          <div class="head-actions">
+            <span class="pill warn" id="alert-count">—</span>
+            <button class="btn btn-sm" id="alert-all">全部标记已处理</button>
+          </div>
+        </div>
+        <div class="list" id="alert-list"></div>
+        <div class="card-foot" style="justify-content:space-between">
+          <span class="hint" style="margin:0">预警规则在「微信助理接入」里配置推送时段与方式。</span>
+          <a class="btn btn-sm" href="wechat.html#push">推送设置</a>
+        </div>
+      </section>
+
+      <!-- 持仓 + 自选 -->
+      <div class="grid g-main" style="margin-top:16px">
+        <section class="card" data-od-id="dash-holdings-card">
+          <div class="card-head">
+            <div><div class="card-title">我的持仓</div><div class="card-sub">点击任意一行查看该标的的分析建议</div></div>
+            <div class="head-actions"><a class="btn btn-sm" href="holdings.html">全部明细</a></div>
+          </div>
+          <div class="card-body tight">
+            <div class="tbl-wrap"><table class="tbl" id="dash-holdings">
+              <thead><tr>
+                <th class="txt">标的</th><th class="txt">30 日走势</th>
+                <th>现价</th><th>今日</th><th>持仓盈亏</th><th>占组合</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table></div>
+          </div>
+        </section>
+
+        <section class="card" data-od-id="watchlist-card">
+          <div class="card-head"><div><div class="card-title">自选观察</div><div class="card-sub">未买入，仅在条件触发时提醒</div></div>
+            <div class="head-actions"><button class="btn btn-sm" id="watch-add">＋ 添加</button></div></div>
+          <div class="list" id="watch-list"></div>
+          <div class="card-foot"><span class="hint" style="margin:0">提示：与现有行业重叠的标的会标注，避免「换了个名字加仓同一个风险」。</span></div>
+        </section>
+      </div>
+
+      <section class="card" data-od-id="daily-brief" style="margin-top:16px">
+        <div class="card-head"><div><div class="card-title">助理收盘摘要</div><div class="card-sub">15:05 自动生成，同时推送到已绑定微信</div></div>
+          <div class="head-actions"><span class="pill">今日 15:05</span></div></div>
+        <div class="card-body">
+          <div class="grid g-3" id="brief"></div>
+        </div>
+      </section>
+
+      <div class="footnote" data-od-id="dash-disclaimer">
+        <span style="color:var(--muted)">i</span>
+        <span>行情、净值与摘要为演示样本；沪深 300 基准由指数点位归一化后与含现金总资产对比，口径为「总资产 / 指数点位」，非严格收益对齐。任何结论均不构成投资建议。</span>
+      </div>
+    </main>
+  </div>
+</div>
+<nav class="mtabs" id="mtabs"></nav>
+
+<script src="assets/data.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function () {
+  const D = window.QW, C = window.QWC;
+  D.chrome({ active: 'dashboard.html', crumb: '<b>总览仪表盘</b>' });
+  const clock = D.marketClock();
+  document.getElementById('d-eyebrow').textContent =
+    new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + clock.state;
+  const worst = [...D.holdings].sort((a, b) => a.dayVal - b.dayVal)[0];
+  const best = [...D.holdings].sort((a, b) => b.dayVal - a.dayVal)[0];
+  document.getElementById('d-desc').textContent =
+    `${clock.state === '已收盘' || clock.live ? '今日' : '上一交易日'}组合 ${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元：`
+    + `主要是 ${best.name} ${D.pct(best.dayChg)}，${worst.name} ${D.pct(worst.dayChg)} 拖累最多。`
+    + `仓位 ${D.exposure.toFixed(1)}%，累计浮盈 ${D.pct(D.totalPnlPct)}。`;
+
+  /* ---------- 净值曲线 ---------- */
+  let n = 90;
+  function renderEquity() {
+    const s = D.equity.nav.slice(-n), b = D.equity.bench.slice(-n), L = D.equity.dates.slice(-n);
+    const from = s[0], to = s[s.length - 1];
+    const ret = (to / from - 1) * 100, bret = (b[b.length - 1] / b[0] - 1) * 100;
+    document.getElementById('d-assets').textContent = D.money(D.totalAssets);
+    const day = document.getElementById('d-day');
+    day.textContent = (D.dayPnl > 0 ? '+' : '') + D.fmt(D.dayPnl, 0);
+    day.className = 'metric-value num ' + D.dirClass(D.dayPnl);
+    const rg = document.getElementById('d-range');
+    rg.textContent = D.pct(ret);
+    rg.className = 'metric-value num ' + D.dirClass(ret);
+    const badge = document.getElementById('equity-badge');
+    badge.className = 'pill ' + (ret - bret >= 0 ? 'up' : 'down');
+    badge.textContent = `近 ${n} 交易日 ${ret - bret >= 0 ? '跑赢' : '跑输'} 沪深300 ${Math.abs(ret - bret).toFixed(2)} pct`;
+    let peak = s[0], dd = 0;
+    s.forEach(v => { peak = Math.max(peak, v); dd = Math.min(dd, (v - peak) / peak); });
+    document.getElementById('equity-sub').textContent =
+      `区间 ${L[0]} — ${L[L.length - 1]} · 本区间最大回撤 ${(dd * 100).toFixed(1)}%`;
+    C.line('#equity-chart', {
+      height: 250, color: C.color('--accent'),
+      series: [
+        { data: s, color: C.color('--accent') },
+        { data: b, color: C.color('--muted'), area: false, dash: '4 4', width: 1.3, endDot: false },
+      ],
+      labels: L, yFmt: v => (v / 10000).toFixed(1) + ' 万',
+      tip: i => `<span class="k">${L[i]}</span><br>组合 <b>${D.money(s[i])}</b> · 基准 <b>${(b[i] / 10000).toFixed(2)} 万</b><br><span class="k">区间</span> <b>${D.pct((s[i] / from - 1) * 100)}</b>`,
+    });
+  }
+  renderEquity();
+  document.getElementById('period').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b));
+    n = +b.dataset.n; renderEquity();
+  });
+  setInterval(() => renderEquity(), 60000);
+
+  /* ---------- 资产分布 ---------- */
+  const alloc = [
+    { k: '股票', v: D.mvStocks }, { k: 'ETF / 基金', v: D.mvEtf },
+    { k: '可转债', v: D.mvCb }, { k: '现金', v: D.cash },
+  ];
+  C.donut('#alloc-donut', alloc.map((a, i) => ({ name: a.k, v: a.v, color: C.DONUT_COLORS[i] })), { size: 132, thick: 16 });
+  document.getElementById('alloc-list').innerHTML = alloc.map((a, i) => `
+    <div style="display:flex;align-items:center;gap:8px;font-size:12.5px" data-od-id="alloc-row-${i}">
+      <i style="width:9px;height:9px;border-radius:3px;background:${C.DONUT_COLORS[i]};flex:none"></i>
+      <span>${a.k}</span>
+      <span class="num" style="margin-left:auto;color:var(--fg-2)">${D.fmt(a.v, 0)}</span>
+      <span class="num" style="width:46px;text-align:right;color:var(--muted)">${(a.v / D.totalAssets * 100).toFixed(1)}%</span>
+    </div>`).join('');
+  document.getElementById('d-cash').textContent = D.money(D.cash);
+
+  /* ---------- 当日归因 ---------- */
+  const att = D.holdings.map(h => ({ k: h.name, v: h.dayVal })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+  const maxAbs = Math.max(...att.map(a => Math.abs(a.v)));
+  document.getElementById('attribution').innerHTML = att.map(a => `
+    <div class="bar-line" data-od-id="attr-${a.k}">
+      <span class="lb">${a.k}</span>
+      <span class="tr" style="display:flex;align-items:center;gap:0">
+        <i style="width:${(Math.abs(a.v) / maxAbs * 100).toFixed(1)}%;background:${a.v >= 0 ? 'var(--up)' : 'var(--down)'};float:left"></i>
+      </span>
+      <span class="vl ${D.dirClass(a.v)}">${(a.v > 0 ? '+' : '') + D.fmt(a.v, 0)}</span>
+    </div>`).join('');
+  document.getElementById('attr-note').textContent =
+    `${att.filter(a => a.v > 0).length} 涨 / ${att.filter(a => a.v < 0).length} 跌，`
+    + `前两只贡献了今日 ${(( (att[0].v + att[1].v) / (D.dayPnl || 1)) * 100).toFixed(0)}% 的变动。`;
+
+  /* ---------- 预警 ---------- */
+  function renderAlerts() {
+    const open = D.alerts.filter(a => !a.done);
+    document.getElementById('alert-count').textContent = open.length ? `${open.length} 条待处理` : '已全部处理';
+    document.getElementById('alert-count').className = 'pill ' + (open.length ? 'warn' : '');
+    document.getElementById('alert-list').innerHTML = D.alerts.map((a, i) => `
+      <div class="list-item" data-od-id="alert-item-${i}" style="${a.done ? 'opacity:.55' : ''}">
+        <span class="dot ${a.level === 'up' ? 'live' : ''}" style="background:var(--${a.level === 'flat' ? 'muted' : a.level});width:8px;height:8px;border-radius:50%;flex:none"></span>
+        <span class="li-main">
+          <span class="li-title">${a.name} <span class="code num">${a.code}</span>
+            <span class="pill ${a.level === 'down' ? 'down' : a.level === 'up' ? 'up' : a.level === 'warn' ? 'warn' : ''}">${a.type}</span></span>
+          <span class="li-desc">${a.text}</span>
+        </span>
+        <span class="li-right" style="display:flex;flex-direction:column;align-items:flex-end;gap:7px">
+          <span class="num" style="font-size:11px;color:var(--muted)">${a.time}</span>
+          <span style="display:flex;gap:6px">
+            <a class="btn btn-sm" href="analysis.html?code=${a.code}">看建议</a>
+            <button class="btn btn-sm" data-done="${i}" ${a.done ? 'disabled' : ''}>${a.done ? '已处理' : '处理'}</button>
+          </span>
+        </span>
+      </div>`).join('');
+  }
+  renderAlerts();
+  document.getElementById('alert-list').addEventListener('click', e => {
+    const b = e.target.closest('[data-done]'); if (!b) return;
+    D.alerts[+b.dataset.done].done = true; renderAlerts();
+    D.toast('已标记处理，该预警不再出现在首屏', 'check');
+  });
+  document.getElementById('alert-all').addEventListener('click', () => {
+    D.alerts.forEach(a => a.done = true); renderAlerts(); D.toast('全部预警已归档', 'check');
+  });
+
+  /* ---------- 持仓表 ---------- */
+  const rows = [...D.holdings].sort((a, b) => b.mv - a.mv);
+  document.querySelector('#dash-holdings tbody').innerHTML = rows.map(h => `
+    <tr data-clickable data-href="analysis.html?code=${h.code}" data-od-id="dash-hrow-${h.code}">
+      <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt} · ${D.kindLabel[h.kind]}</div></td>
+      <td class="txt" style="width:110px">${C.spark(h.spark, h.dayChg, 100, 30)}</td>
+      <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, h.kind === 'etf' ? 3 : 2)}</span></td>
+      <td class="num ${D.dirClass(h.dayChg)}">${D.pct(h.dayChg)}</td>
+      <td class="num ${D.dirClass(h.pnl)}">${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}</td>
+      <td class="num" style="color:var(--muted)">${(h.mv / D.totalAssets * 100).toFixed(1)}%</td>
+    </tr>`).join('');
+  document.getElementById('dash-holdings').addEventListener('click', e => {
+    const tr = e.target.closest('tr[data-href]'); if (tr) location.href = tr.dataset.href;
+  });
+
+  /* ---------- 自选 ---------- */
+  document.getElementById('watch-list').innerHTML = D.watchlist.map((w, i) => `
+    <a class="list-item" href="analysis.html?code=${w.code}" data-od-id="watch-item-${i}">
+      <span class="li-main"><span class="li-title">${w.name} <span class="code num">${w.code}</span></span>
+      <span class="li-desc">${w.sector} · ${w.note}</span></span>
+      <span class="li-right"><span class="num" style="font-size:13px">${D.fmt(w.price, w.price < 10 ? 3 : 2)}</span>
+      <span class="num ${D.dirClass(w.dayChg)}" style="font-size:11.5px;display:block">${D.pct(w.dayChg)}</span></span>
+    </a>`).join('');
+  document.getElementById('watch-add').addEventListener('click', () => D.toast('在搜索框输入代码或名称即可加入自选（演示）', 'info'));
+
+  /* ---------- 收盘摘要 ---------- */
+  const brief = [
+    { t: '组合今天怎么了', b: `${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元（${D.pct(D.dayPnlPct)}）。银行、电力设备贡献正向，汽车仓位是唯一明显拖累。` },
+    { t: '仓位提醒', b: `贵州茅台占总资产 ${(rows[0].mv / D.totalAssets * 100).toFixed(1)}%，已接近你设的 25% 单票上限；有色金属因两只转债叠加到 ${D.sectors.find(s => s.name === '有色金属').w.toFixed(1)}%（行业口径）。` },
+    { t: '下个交易日要留意的', b: '博威转债强赎时间窗继续收窄；科创50ETF 已触发 +12% 止盈线，若低开建议先减一半；比亚迪按助理建议减 200 股，把单票压回上限以内。' },
+  ];
+  document.getElementById('brief').innerHTML = brief.map((x, i) => `
+    <div data-od-id="brief-item-${i}">
+      <div class="eyebrow">${String(i + 1).padStart(2, '0')} · ${x.t}</div>
+      <p style="margin-top:9px;font-size:13px;line-height:1.7;color:var(--fg-2);max-width:60ch">${x.b}</p>
+    </div>`).join('');
+
+  // 行情跳动（盘中每秒轻微 tick，非交易时段静止）
+  setInterval(() => { D.tickPrices(); renderEquity(); }, 5000);
+})();
+</script>
+</body>
+</html>
