@@ -1,6 +1,6 @@
 # 02 · 界面清单与模块职责
 
-七个页面，共享同一套外壳（侧栏 + 顶栏 + 行情条 + 移动端底部标签栏），外壳由 `QW.chrome({ active, crumb, onRefresh? })` 注入（`design/assets/data.js:380`）。`onRefresh` 是页面重绘回调：顶栏刷新完成跳动与重算后被调用，各页面用它把读汇总快照的区块重画一遍（见 `04` 行为函数表）。
+七个页面，共享同一套外壳（侧栏 + 顶栏 + 行情条 + 移动端底部标签栏），外壳由 `ZM.chrome({ active, crumb, onRefresh? })` 注入（`design/assets/data.js:380`）。`onRefresh` 是页面重绘回调：顶栏刷新完成跳动与重算后被调用，各页面用它把读汇总快照的区块重画一遍（见 `04` 行为函数表）。
 
 ## 全局导航与快捷键
 
@@ -39,11 +39,11 @@
 
 | 模块 | 内容 | 数据依赖 |
 |---|---|---|
-| `equity-card` | 净值 vs 沪深 300 折线，十字准星 tooltip，近一周/一月/一季切换 | `equity.dates/nav/bench`、`QWC.line` |
+| `equity-card` | 净值 vs 沪深 300 折线，十字准星 tooltip，近一周/一月/一季切换 | `equity.dates/nav/bench`、`ZMC.line` |
 | `allocation-card` | 钱在哪里：股票 / ETF / 转债 / 现金拆分 | `mvStocks / mvEtf / mvCb / cash` |
 | `attribution-card` | 当日盈亏归因：谁在拖、谁在拉 | `holdings[].dayVal` |
 | `alerts-card` | 待处理预警，可逐条归档（归档后不再出现在首屏） | `alerts[].done` |
-| `dash-holdings-card` | 持仓表 + 迷你走势线，点行跳到该标的的分析页 | `holdings[].spark`、`QWC.spark` |
+| `dash-holdings-card` | 持仓表 + 迷你走势线，点行跳到该标的的分析页 | `holdings[].spark`、`ZMC.spark` |
 | `watchlist-card` | 自选观察（未买入，仅条件触发时提醒） | `watchlist` |
 | `daily-brief` | 收盘摘要，15:05 自动生成并推微信 | `sessions`、派生指标 |
 
@@ -66,7 +66,7 @@
 | `analysis-picker` | 标的选择（持仓 + 自选，自选走 `watchOnly` 分支） | `holdings`、`watchlist` |
 | `analysis-rank` | 按综合得分排序的建议列表，点行切换 | `advice[].score` |
 | `verdict-card` | 结论标签（加仓/买入/持有/减仓/卖出/定投）、得分弧、置信度、目标与止损、现价与当日涨跌 | `advice[code]` |
-| `kline-card` | 30 日 OHLC 蜡烛 + MA5/MA20，日K/周K 切换，末根锚定现价 | `QW` 派生 + 本页 `candle()` |
+| `kline-card` | 30 日 OHLC 蜡烛 + MA5/MA20，日K/周K 切换，末根锚定现价 | `ZM` 派生 + 本页 `candle()` |
 | `dims-card` | 技术 / 基本面 / 资金 / 消息四维分数与观察 | `advice[].dims[4]` |
 | `plan-card` | 分笔执行计划（减仓三步、买入两笔 + 失效条件） | `buildPlan()`（`analysis.html:359`） |
 | `risk-card` | 「这个结论可能错在哪」 | `advice[].risks[]` |
@@ -85,16 +85,16 @@
 | 依据来源 | 每条回答下方列出引用的界面与原文（持仓明细 / 组合诊断 / 行情快照 / 公告） | `qa[].cites` |
 | 追问 chips | 三个后续问题快捷入口 | `qa[].chips` |
 
-会话存 `localStorage['qingwu:chat:me']`，最多保留最近 30 条。
+会话存 `localStorage['zimu:chat:me']`，最多保留最近 30 条。
 
 ## diagnosis.html — 组合诊断
 
 | 模块 | 内容 | 数据依赖 |
 |---|---|---|
-| `diag-kpi` | 年化波动、最大回撤、夏普、胜率、HHI 等指标条 | `QW.P`、`hhi` |
+| `diag-kpi` | 年化波动、最大回撤、夏普、胜率、HHI 等指标条 | `ZM.P`、`hhi` |
 | `diag-curve-card` | 组合 vs 沪深 300 滚动对比 | `equity` |
-| `diag-conc-card` | 行业集中度：环形图 + 权重条 | `sectors`、`QWC.donut` |
-| `diag-drawdown-card` | 回撤在水下多久（距前高百分比） | `QW.perf` 结果 |
+| `diag-conc-card` | 行业集中度：环形图 + 权重条 | `sectors`、`ZMC.donut` |
+| `diag-drawdown-card` | 回撤在水下多久（距前高百分比） | `ZM.perf` 结果 |
 | `diag-window-table` | 分区间对比（近一周/一月/一季，样本内测算） | `equity` 切片 |
 | `diag-fix-card` | 再平衡清单，按「影响大小 × 操作成本」排序，逐条试算调整前后波动 | 03 的波动合成公式 |
 
@@ -106,7 +106,7 @@
 | `wx-push-card` | 6 类推送订阅 + 推送时段 + 静音标的 | 本地状态 |
 | `wx-config-card` | 服务号 / 推送参数（AppID、Token、Webhook），**仅存本机浏览器** | `localStorage` |
 | `wx-bind-card` | 绑定二维码、绑定状态、解绑二次确认弹窗 | `sessions` |
-| `wx-preview-card` | 推送卡片模板预览（可点按钮） | `QW` 样本 |
+| `wx-preview-card` | 推送卡片模板预览（可点按钮） | `ZM` 样本 |
 | `wx-log-card` | 最近 6 条推送日志 | 本地状态 |
 
-状态存 `localStorage['qingwu:wechat:v2']`。参数输入要做校验，密钥类字段永远不进仓库（`.gitignore` 已覆盖 `.env`/`secrets.*`）。
+状态存 `localStorage['zimu:wechat:v2']`。参数输入要做校验，密钥类字段永远不进仓库（`.gitignore` 已覆盖 `.env`/`secrets.*`）。

@@ -1,4 +1,4 @@
-# 青梧 · 股票智能助理（StockAgent）
+# 子木 · 股票智能助理（StockAgent）
 
 面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险，并把结论推送到微信。
 
@@ -37,7 +37,7 @@ python -m http.server 8000 --directory design   # 或直接双击 design/index.h
 - `docs/01-vision-and-scope.md` —— 做什么、不做什么、合规边界
 - `docs/02-screens.md` —— 每屏模块与数据依赖
 - `docs/03-domain-rules.md` —— **口径手册**：整手、费用、摊薄成本、涨跌停、仓位纪律、波动测算
-- `docs/04-data-contract.md` —— `window.QW` 数据契约，接真实数据时唯一的替换边界
+- `docs/04-data-contract.md` —— `window.ZM` 数据契约，接真实数据时唯一的替换边界
 - `docs/05-design-system.md` —— 视觉令牌、红涨绿跌语义、断点
 - `docs/06-roadmap.md` / `docs/07-backlog.md` —— 阶段计划与已知问题
 - `docs/decisions/` —— 暂缓技术选型、数据源先用 mock 等决策的原委

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>微信助理接入 · 青梧股票智能助理</title>
+<title>微信助理接入 · 子木股票智能助理</title>
 <link rel="stylesheet" href="assets/ui.css" />
 <style>
   .wx-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
@@ -98,7 +98,7 @@
                   <div class="err">AppID 需以 wx 开头、共 18 位十六进制字符</div>
                   <div class="hint">服务号后台「设置与开发 → 基本配置」里复制</div></div>
                 <div class="field" id="f-token"><label for="c-token">消息校验 Token</label>
-                  <input class="input num" id="c-token" value="QingWu-2026-Stock">
+                  <input class="input num" id="c-token" value="ZiMu-2026-Stock">
                   <div class="err">Token 至少 4 个字符</div><div class="hint">需与服务号后台填写值完全一致</div></div>
                 <div class="field" style="grid-column:1/-1" id="f-hook"><label for="c-hook">备用推送 Webhook（可选）</label>
                   <input class="input num" id="c-hook" placeholder="https://…/send?key=…">
@@ -163,9 +163,9 @@
 <script src="assets/charts.js"></script>
 <script>
 (function () {
-  const D = window.QW;
+  const D = window.ZM;
   D.chrome({ active: 'wechat.html', crumb: '工作台 / <b>微信助理接入</b>' });
-  const KEY = 'qingwu:wechat:v2';
+  const KEY = 'zimu:wechat:v2';
 
   const DEFAULTS = {
     bound: true,
@@ -255,7 +255,7 @@
     </svg>`;
   }
   let ttl = 120;
-  function renderQr() { ttl = 120; document.getElementById('qr-box').innerHTML = qr('qingwu-bind-' + Math.floor(Date.now() / 1000)); }
+  function renderQr() { ttl = 120; document.getElementById('qr-box').innerHTML = qr('zimu-bind-' + Math.floor(Date.now() / 1000)); }
   document.getElementById('qr-refresh').addEventListener('click', () => { renderQr(); D.toast('二维码已刷新，旧码立即失效', 'check'); });
   setInterval(() => {
     ttl = Math.max(0, ttl - 1);
@@ -271,7 +271,7 @@
       ? `现价 ${D.fmt(b.price, 2)}，成本 ${D.fmt(b.cost, 2)}，浮亏 ${D.pct(b.pnlPct)}。`
       : '已触及你设的「跌破成本」条件（价格已隐藏）。';
     document.getElementById('card-preview').innerHTML = `
-      <div class="hd"><span>${D.ICONS.bell}</span>青梧 · 持仓预警<span class="num" style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">10:32</span></div>
+      <div class="hd"><span>${D.ICONS.bell}</span>子木 · 持仓预警<span class="num" style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">10:32</span></div>
       <div class="bd"><h5>${b.name} 跌破成本，建议把仓位降到 15%</h5>
         <p>${priceLine}${A.dims[0].t.slice(0, 36)}。<br>整手卖出即可，不用拆成很多笔。</p></div>
       <div class="ft"><button data-pv="open">查看详情</button><button data-pv="later">今天先不动</button><button data-pv="mute">静音此标的</button></div>`;

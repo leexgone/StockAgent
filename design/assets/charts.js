@@ -176,5 +176,5 @@
       </div>`).join('');
   }
 
-  W.QWC = { line, spark, bars, donut, gauge, hbars, smooth, path, scale, esc, DONUT_COLORS, color: css };
+  W.ZMC = { line, spark, bars, donut, gauge, hbars, smooth, path, scale, esc, DONUT_COLORS, color: css };
 })(window);

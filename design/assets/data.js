@@ -1,5 +1,5 @@
 /* ============================================================
- * 青梧 · 股票智能助理 — 共享数据层
+ * 子木 · 股票智能助理 — 共享数据层
  * 所有汇总指标（总资产 / 盈亏 / 权重 / 集中度 / 回撤）均由持仓
  * 反算得出，页面里不出现与数据自相矛盾的硬编码数字。
  * 行情与持仓为「演示样本」，用于验证界面与信息架构。
@@ -70,14 +70,14 @@
    * （自动跳动、手动刷新、记入交易、将来的真实数据推送）都必须调用它，
    * 保证页面数字与行情条永远来自同一份快照（backlog B1 的修复）。
    * agg 是唯一的汇总快照，recalc 后同步到导出对象，页面读 D.totalAssets 等即最新值。 */
-  let QW = null;                       // 导出对象，文件末尾组装
+  let ZM = null;                       // 导出对象，文件末尾组装
   let bySector = {};                   // 行业市值，wsec() 用
   const agg = {
     cash: 0, mvStocks: 0, mvEtf: 0, mvCb: 0, totalMv: 0, totalAssets: 0,
     dayPnl: 0, dayPnlPct: 0, totalPnl: 0, totalPnlPct: 0, costTotal: 0,
     exposure: 0, sectors: [], hhi: 0, top3Sector: 0,
   };
-  function publish() { if (QW) Object.assign(QW, agg); }
+  function publish() { if (ZM) Object.assign(ZM, agg); }
 
   function recalc() {
     // 逐笔派生：涨跌、市值、当日盈亏、累计盈亏；spark/bars 是演示曲线，只生成一次
@@ -384,7 +384,7 @@
       root.innerHTML = `
         <a class="brand" href="index.html">
           <span class="brand-mark">${ICONS.spark}</span>
-          <span><span class="brand-name">青梧 · 股票智能助理</span><span class="brand-sub">个人投研工作台</span></span>
+          <span><span class="brand-name">子木 · 股票智能助理</span><span class="brand-sub">个人投研工作台</span></span>
         </a>
         <div class="nav-group">工作台</div>
         ${NAV.map(n => `
@@ -522,12 +522,12 @@
     setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 220); }, 3200);
   }
 
-  QW = {
+  ZM = {
     fmt, money, pct, wan, dirClass, ICONS,
     ws, indices, holdings, kindLabel, watchlist, advice, alerts, qa, sessions,
     equity, P, wp, wsec, sellTo, weightAfter,
     marketClock, chrome, toast, tickPrices, stripHTML, recalc, totalMvAll,
   };
-  W.QW = QW;
+  W.ZM = ZM;
   publish(); // 把汇总快照（cash/totalAssets/sectors/hhi…）写入导出对象，此后每次 recalc() 自动同步
 })(window);

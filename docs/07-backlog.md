@@ -73,8 +73,8 @@
 **原现象**：`tickPrices()` 只改 `price/dayChg`；`totalAssets / dayPnl / sectors / hhi / exposure` 等是加载时算一次的常量；各页定时器重算范围不同（holdings 每 6s 重算逐笔、dashboard 每 5s 只重绘净值、其余页面不动），行情条「我的总资产」永远是加载值 → 同一屏多个模块互相对不上。
 
 **修复**：
-- `data.js`：汇总改为 `agg` 快照，`recalc()` 统一重算（含逐笔派生与 `weight`）并 `publish()` 回 `QW`（`data.js:76-123`）；`tickPrices()` 内部调用 `recalc()`、重绘行情条，并**返回价格是否真的变动**（`data.js:492`），休市时自动跳动直接跳过；`chrome()` 新增 `onRefresh` 回调，顶栏刷新按钮跳动后通知页面重绘。
+- `data.js`：汇总改为 `agg` 快照，`recalc()` 统一重算（含逐笔派生与 `weight`）并 `publish()` 回 `ZM`（`data.js:76-123`）；`tickPrices()` 内部调用 `recalc()`、重绘行情条，并**返回价格是否真的变动**（`data.js:492`），休市时自动跳动直接跳过；`chrome()` 新增 `onRefresh` 回调，顶栏刷新按钮跳动后通知页面重绘。
 - 页面：dashboard 收拢出 `renderAll()`（头条/净值/配置/归因/持仓表/摘要一起重绘，删掉了只重绘净值的冗余 60s 定时器）；holdings 定时器与刷新回调走同一组渲染函数；analysis `render()`、index `renderHead()`、chat `renderCtx()`、diagnosis `renderAll()` 接入 `onRefresh`。wechat 页不接（其卡片是历史推送样式，非实时视图）。
-- 现金改动的唯一源头是 `ws.cash`（交易页提交处），`recalc()` 后重新发布为 `QW.cash`，不再直接写 `D.cash`。
+- 现金改动的唯一源头是 `ws.cash`（交易页提交处），`recalc()` 后重新发布为 `ZM.cash`，不再直接写 `D.cash`。
 
 **验证**：vm 沙箱断言「交易改动 → `recalc()` → 导出快照同步」「手动 tick → 聚合与逐笔自洽」「休市自动 tick 返回 `false` 且价格不动」「空持仓无 NaN」，25 项全部通过（脚本在 `.file-versions/check-contract.js`，该目录被 gitignore，不入库）。

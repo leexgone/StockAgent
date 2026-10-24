@@ -43,4 +43,4 @@ B …
 | [0001](./0001-docs-before-code-scaffold.md) | 先固化文档与口径，不建代码骨架 | 接受 |
 | [0002](./0002-prototype-stays-buildless.md) | 原型保持零构建纯 HTML 形态 | 接受 |
 | [0003](./0003-defer-stack-choice.md) | 暂缓后端与前端框架选型 | 接受 |
-| [0004](./0004-demo-data-behind-contract.md) | 演示样本固定在 `QW` 契约后面 | 接受 |
+| [0004](./0004-demo-data-behind-contract.md) | 演示样本固定在 `ZM` 契约后面 | 接受 |

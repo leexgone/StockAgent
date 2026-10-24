@@ -6,12 +6,12 @@
 
 | 全局 | 来源 | 职责 |
 |---|---|---|
-| `window.QW` | `design/assets/data.js` | 数据、派生指标、格式化工具、外壳渲染、市场时钟 |
-| `window.QWC` | `design/assets/charts.js` | 纯 SVG 图表原语，不含业务数据 |
+| `window.ZM` | `design/assets/data.js` | 数据、派生指标、格式化工具、外壳渲染、市场时钟 |
+| `window.ZMC` | `design/assets/charts.js` | 纯 SVG 图表原语，不含业务数据 |
 
 页面通过 `<script src="assets/data.js">` + `assets/charts.js` 取用，顺序不能颠倒（图表层无数据依赖，数据层的 `chrome()` 会读 DOM）。
 
-## `QW` 契约全表
+## `ZM` 契约全表
 
 ### 工具
 
@@ -48,7 +48,7 @@
 | `holdings[].dayChg / dayVal / mv / pnl / pnlPct` | `recalc()`，`data.js:84` | 见 `03` 第 5 节 |
 | `holdings[].weight` | `recalc()`，`data.js:109` | `mv / totalAssets × 100`，与 `wp()` 同分母，保留数值供排序与纪律校验 |
 | `holdings[].spark / bars` | `recalc()`，`data.js:90` | 演示用确定性随机游走，只生成一次（价格跳动不重生成） |
-| `cash` | `ws.cash` | 直接透传；改现金只改 `ws.cash`（交易页提交处），`recalc()` 后同步为 `QW.cash` |
+| `cash` | `ws.cash` | 直接透传；改现金只改 `ws.cash`（交易页提交处），`recalc()` 后同步为 `ZM.cash` |
 | `mvStocks / mvEtf / mvCb / totalMv` | `data.js:95` | 分类市值 |
 | `totalAssets` | `data.js:99` | `totalMv + cash` |
 | `dayPnl / dayPnlPct` | `data.js:100` | 当日盈亏；百分比分母为昨日总资产 |
@@ -72,7 +72,7 @@
 | `toast(msg, kind)` | 轻提示（`kind: 'check'` 用勾图标） |
 | `tickPrices(manual)` | 演示用行情跳动；内部调用 `recalc()` 并重绘行情条，**返回价格是否真的变动**（非手动且非交易时段返回 `false` 并跳过，页面据此决定是否重绘）（`data.js:492`） |
 
-## `QWC` 契约
+## `ZMC` 契约
 
 | 函数 | 用途 | 关键参数 |
 |---|---|---|
@@ -96,14 +96,14 @@
 4. **时间要显式**：`equity.dates` 目前是「从今天往回推交易日」的中文短标签（`data.js:154`），且起点写死为 `2026-10-24`。真实数据要用带时区的日期 + 显示层格式化，`marketClock` 还要接交易日历（节假日/调休）。
 5. **代码 → 交易所的推断不要靠首字母**：页面里有 `code[0] === '6' ? 'SH' : 'SZ'`（`analysis.html:284`）这类猜测；契约里 `mkt` 是显式字段，请用它。
 6. **建议要可留档**：`advice` 现在只有一个当前快照，而 `analysis.html` 的历史建议表格用的是页面内样本。真实实现里建议必须带生成时间与输入数据版本，否则「回看当时怎么说的」这个卖点无法兑现。
-7. **禁止跨页补全局**：共享派生只能放在 `data.js`（A1 的教训：`weight` / `totalMvAll()` 曾定义在 `holdings.html` 页内，被 `analysis.html` 调用时直接抛 `TypeError`；已于 2026-10-24 收进契约层）。页面不得给 `QW` 赋值，也不得定义供其它页面使用的派生函数。
+7. **禁止跨页补全局**：共享派生只能放在 `data.js`（A1 的教训：`weight` / `totalMvAll()` 曾定义在 `holdings.html` 页内，被 `analysis.html` 调用时直接抛 `TypeError`；已于 2026-10-24 收进契约层）。页面不得给 `ZM` 赋值，也不得定义供其它页面使用的派生函数。
 8. **不要写死演示用的锚定值**：`walk()` 的末值锚定、`equity` 的 90 日长度、`advice` 文案里被正则覆盖的「当前 X%」（`data.js:259`）都属于样本阶段产物。这种正则打补丁方式很脆——接入真实数据后应当由模板插值，而不是对写死的中文句子做正则替换。
 
 ## 浏览器本地状态
 
 | 键 | 内容 | 出处 |
 |---|---|---|
-| `qingwu:chat:me` | 问答会话，最多 30 条 | `chat.html` |
-| `qingwu:wechat:v2` | 通道开关、订阅、静音标的、绑定状态、推送参数 | `wechat.html` |
+| `zimu:chat:me` | 问答会话，最多 30 条 | `chat.html` |
+| `zimu:wechat:v2` | 通道开关、订阅、静音标的、绑定状态、推送参数 | `wechat.html` |
 
-约定：键名统一 `qingwu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。
+约定：键名统一 `zimu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。

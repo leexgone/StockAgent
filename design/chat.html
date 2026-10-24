@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>智能问答 · 青梧股票智能助理</title>
+<title>智能问答 · 子木股票智能助理</title>
 <link rel="stylesheet" href="assets/ui.css" />
 <style>
   .chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 16px; align-items: start; }
@@ -111,11 +111,11 @@
 <script src="assets/charts.js"></script>
 <script>
 (function () {
-  const D = window.QW;
+  const D = window.ZM;
   D.chrome({ active: 'chat.html', crumb: '工作台 / <b>智能问答</b>', onRefresh: renderCtx });
   const thread = document.getElementById('thread');
   const input = document.getElementById('input');
-  const KEY = 'qingwu:chat:me';
+  const KEY = 'zimu:chat:me';
   let busy = false;
 
   /* ---------- 上下文面板 ---------- */
@@ -190,7 +190,7 @@
       el.innerHTML = `<span class="av ai">${D.ICONS.spark}</span>
         <div class="bub" style="flex:1">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-            <span style="font-size:12.5px;font-weight:550">青梧助理</span>
+            <span style="font-size:12.5px;font-weight:550">子木助理</span>
             <span class="num" style="font-size:11px;color:var(--muted)">${m.time}</span>
             <span class="pill" style="margin-left:auto" title="样本内信号一致性">置信度 ${m.conf}%</span>
           </div>

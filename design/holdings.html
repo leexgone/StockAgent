@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>持仓管理 · 青梧股票智能助理</title>
+<title>持仓管理 · 子木股票智能助理</title>
 <link rel="stylesheet" href="assets/ui.css" />
 <style>
   /* 本页专用：持仓汇总条 + 抽屉预览 */
@@ -173,7 +173,7 @@
 <script src="assets/charts.js"></script>
 <script>
 (function () {
-  const D = window.QW, C = window.QWC;
+  const D = window.ZM, C = window.ZMC;
   D.chrome({
     active: 'holdings.html', crumb: '工作台 / <b>持仓管理</b>',
     onRefresh: () => { renderSummary(); render(); renderRules(); },

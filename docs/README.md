@@ -7,7 +7,7 @@
 | 01 | [vision-and-scope](./01-vision-and-scope.md) | 给谁用、做什么、明确不做什么、合规边界 |
 | 02 | [screens](./02-screens.md) | 七个界面各自负责什么、依赖哪些数据 |
 | 03 | [domain-rules](./03-domain-rules.md) | **口径手册**：整手、费用、摊薄成本、涨跌停、仓位纪律、波动测算 |
-| 04 | [data-contract](./04-data-contract.md) | `window.QW` 契约，接真实数据时唯一的替换边界 |
+| 04 | [data-contract](./04-data-contract.md) | `window.ZM` 契约，接真实数据时唯一的替换边界 |
 | 05 | [design-system](./05-design-system.md) | 设计令牌、红涨绿跌语义、排版与断点 |
 | 06 | [roadmap](./06-roadmap.md) | 阶段划分与每阶段的完成标准 |
 | 07 | [backlog](./07-backlog.md) | 已知问题、待决策项、需要人拍板的事 |
