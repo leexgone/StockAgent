@@ -9,7 +9,7 @@
 | 03 | [domain-rules](./03-domain-rules.md) | **口径手册**：整手、费用、摊薄成本、涨跌停、仓位纪律、波动测算 |
 | 04 | [data-contract](./04-data-contract.md) | `window.ZM` 契约，接真实数据时唯一的替换边界 |
 | 05 | [design-system](./05-design-system.md) | 设计令牌、红涨绿跌语义、排版与断点 |
-| 06 | [roadmap](./06-roadmap.md) | 阶段划分与每阶段的完成标准 |
+| 06 | [roadmap](./06-roadmap.md) | 路线图与执行计划：阶段、任务分解（带编号）、决策闸门与完成标准 |
 | 07 | [backlog](./07-backlog.md) | 已知问题、待决策项、需要人拍板的事 |
 | — | [decisions/](./decisions/) | ADR 决策记录：每个取舍的理由 |
 
