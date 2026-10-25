@@ -41,6 +41,7 @@ B …
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | [0001](./0001-docs-before-code-scaffold.md) | 先固化文档与口径，不建代码骨架 | 接受 |
-| [0002](./0002-prototype-stays-buildless.md) | 原型保持零构建纯 HTML 形态 | 接受 |
-| [0003](./0003-defer-stack-choice.md) | 暂缓后端与前端框架选型 | 接受 |
+| [0002](./0002-prototype-stays-buildless.md) | 原型保持零构建纯 HTML 形态 | 已取代（by 0005） |
+| [0003](./0003-defer-stack-choice.md) | 暂缓后端与前端框架选型 | 已取代（by 0005） |
 | [0004](./0004-demo-data-behind-contract.md) | 演示样本固定在 `ZM` 契约后面 | 接受 |
+| [0005](./0005-tech-route-rust-robit-react-sidecar.md) | 技术路线：Rust + robit 基建、React 前端、Python 行情 sidecar | 接受 |

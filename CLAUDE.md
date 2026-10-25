@@ -1,6 +1,8 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**纯前端界面原型 + 规格文档**，无后端、无构建、无第三方依赖。
+个人股票助理程序。当前阶段：**界面原型 + 规格文档**（`design/` 零构建）；技术路线已定案——Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar（ADR-0005），代码骨架尚未创建。
+
+产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
 ## 现在这个仓库里有什么
 
@@ -24,10 +26,11 @@ docs/decisions/    ADR 决策记录
 
 ## 工程约定
 
-**技术形态（受 ADR-0002 / ADR-0003 约束，现阶段不要改变）**
-- 不引入打包器、框架、CDN 依赖、npm 包；保持 `html + css + js` 零构建。
-- 后端技术栈（Python/FastAPI vs Node/TS）**尚未决定**，不要提前建 `backend/`、`src/`、`package.json`、`pyproject.toml`。
-- 行情/持仓数据**全部是演示样本**，不要接入真实行情源，也不要把示例持仓换成任何真实账户数据后提交。
+**技术形态（受 ADR-0005 约束；0002/0003 已被其取代）**
+- `design/` 原型保持零构建（不引入打包器、框架、CDN、npm 包），直到 `frontend/` 迁移完成前它都是设计参照与验收基准。
+- 技术路线见 ADR-0005：`backend/`（Rust workspace，依赖 robit）、`frontend/`（React + TS + Vite）、`datafetch/`（Python sidecar，uv + FastAPI + akshare/baostock）。**目录随 `06-roadmap.md` P2 spike 启动时创建**，不要提前半建。
+- 两工程共同演进：框架级缺口先改 robit（`E:\Github\robit`，改动保持通用性、走它自己的发布流程），子木 pin tag/rev 消费（开发期可 path override）；痛点记入 `docs/07-backlog.md` R 系列，**不要写绕过 robit trait 的补丁**，领域逻辑不渗进 robit。
+- `design/` 原型只用演示样本；真实行情自 P2 起经 datafetch sidecar 进入。**真实持仓、券商账户数据、任何 API key 永不入库。**
 
 **代码规范**
 - 页面：每屏一个自执行 `<script>`，通过 `window.ZM`（数据/工具）与 `window.ZMC`（图表）取用共享能力；页面开头调用 `D.chrome({ active, crumb, onRefresh })` 渲染外壳，`onRefresh` 里重绘本页读汇总数据的区块（顶栏刷新按钮会先跳动行情并重算，再回调它）。

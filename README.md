@@ -1,8 +1,8 @@
 # 子木 · 股票智能助理（StockAgent）
 
-面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险，并把结论推送到微信。
+面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险。发布形态是**常驻 Web 服务**——浏览器访问全部界面，也可以通过微信 / QQ 与助理对话、接收预警与盘后复盘（与 robit 的桌面端定位不同）。
 
-**当前阶段：界面原型 + 规格文档。** 无后端、无构建、无外部依赖，断网可跑；行情、持仓、净值、分析结论全部来自演示样本。
+**当前阶段：界面原型 + 规格文档。** `design/` 原型零构建、无外部依赖、断网可跑，行情/持仓/净值/分析结论全部来自演示样本。技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite，代码骨架随路线图 P2 启动。
 
 ```bash
 python -m http.server 8000 --directory design   # 或直接双击 design/index.html
@@ -40,13 +40,13 @@ python -m http.server 8000 --directory design   # 或直接双击 design/index.h
 - `docs/04-data-contract.md` —— `window.ZM` 数据契约，接真实数据时唯一的替换边界
 - `docs/05-design-system.md` —— 视觉令牌、红涨绿跌语义、断点
 - `docs/06-roadmap.md` / `docs/07-backlog.md` —— 阶段计划与已知问题
-- `docs/decisions/` —— 暂缓技术选型、数据源先用 mock 等决策的原委
+- `docs/decisions/` —— ADR：文档先行、零构建原型、演示数据边界、技术路线（Rust + robit + React + sidecar）
 
 ## 三条硬约定
 
 1. **页面上不写死数字。** 总资产、盈亏、占比、集中度等一律从持仓与净值序列派生，避免文案与图表互相打架。
 2. **共享派生逻辑只能放在 `design/assets/data.js`。** 页面不得各自往全局对象上补函数（已有跨页引用踩坑，见 `docs/07-backlog.md`）。
-3. **不引入构建、框架与第三方依赖**，除非先补一条 ADR 说明理由。
+3. **`design/` 原型不引入构建、框架与第三方依赖**；正式前端按 ADR-0005 在 `frontend/`（React + Vite）另起，原型保留为参照直至迁移完成。
 
 ## 免责声明
 
