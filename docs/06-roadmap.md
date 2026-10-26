@@ -53,7 +53,7 @@
 
 | # | 任务 | 产出 | 估算 | 状态 |
 |---|---|---|---|---|
-| P2-T1 | `datafetch` spike：uv + FastAPI + akshare，取样本标的（股票/ETF/转债/指数各一）的实时行情与日线，记录字段、盘中频率、限频表现 | 与 `04` 契约的字段对照表（并入 `04` 附录）+ 可运行脚本 | 0.5–1d | ⬜ |
+| P2-T1 | `datafetch` spike：uv + FastAPI + akshare，取样本标的（股票/ETF/转债/指数各一）的实时行情与日线，记录字段、盘中频率、限频表现 | 与 `04` 契约的字段对照表（并入 `04` 附录）+ 可运行脚本 | 0.5–1d | ✅ 2026-10-26：三轮探测 + API 冒烟通过；主通道=新浪直连，东财间歇需熔断，baostock 登录失败待 P4 复测，详见 `04` 附录 |
 | P2-T2 | robit 集成 spike：`backend/` Cargo workspace + path override 指向本地 robit；最小 agent 会话接阿里云网关 qwen，注册一个 echo 领域工具 | `cargo run` 可对话 | 0.5–1d | ⬜ |
 | P2-T3 | axum + SSE spike：一个 REST 端点 + 把 robit-agent 事件流经 SSE 转出；同时评估「Web Frontend 桥」该不该进 robit（R 系列第一条候选） | 浏览器/curl 看到流式输出 | 0.5d | ⬜ |
 | P2-T4 | `frontend` spike：Vite + React + TS 脚手架，`ui.css` 设计令牌迁移（oklch、红涨绿跌、tabular-nums、断点），复刻 index 一屏静态版 | 与原型视觉可对照 | 0.5–1d | ⬜ |

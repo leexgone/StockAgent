@@ -107,3 +107,72 @@
 | `zimu:wechat:v2` | 通道开关、订阅、静音标的、绑定状态、推送参数 | `wechat.html` |
 
 约定：键名统一 `zimu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。
+
+## 附录 · 行情源实测与字段对照（P2-T1 spike，2026-10-26）
+
+环境：akshare 1.19.3 / pandas 3.1.0 / Python 3.13.1，周一盘后实测。复现：`cd datafetch && uv run spike_probe.py`（三轮，脚本带接口候选名自动发现，失败本身也是结论）。
+
+### 通道结论
+
+| 用途 | 首选 | 备选 | 实测 |
+|---|---|---|---|
+| 实时行情（股票/ETF/指数/转债，一次多标的） | 新浪 `hq.sinajs.cn` 直连（需 Referer 头） | 东财 `push2 ulist` 直连（**必须带浏览器 UA**） | ✅ 两者均通 |
+| 全市场扫描（低频） | akshare `stock_zh_a_spot`（新浪，全量翻页 ~20s） | 东财 push2 分页 | ✅ |
+| 股票日线 | 新浪 `stock_zh_a_daily`（qfq，全历史，含换手率/流通股本） | 东财 `stock_zh_a_hist`（多振幅/换手率列） | ✅ 新浪冒烟稳定（沪/深/创业板均通）；东财间歇被拦 |
+| ETF 日线 | akshare `fund_etf_hist_sina`（全历史） | — | ✅ |
+| 指数日线 | akshare `stock_zh_index_daily`（新浪，全历史） | — | ✅ |
+| 转债日线 | akshare `bond_zh_hs_cov_daily`（新浪，全历史） | — | ✅ |
+| 转债实时 | akshare `bond_zh_hs_cov_spot`（新浪，326 只在市） | 新浪 hq 直连 | ✅ |
+| 转债强赎/到期预警 | akshare `bond_cb_redeem_jsl`（集思录） | — | ✅ 字段全 |
+| 交易日历 | akshare `tool_trade_date_hist_sina`（1990 起 8797 天） | — | ✅ |
+| 代码-名称表 | akshare `stock_info_a_code_name`（~17s 分页） | — | ✅ |
+| 个股→行业（`sector`） | 新浪 `stock_sector_spot`（49 板块）+ `stock_sector_detail(label)` 成分股 → 建 code→sector 映射，周更存 SQLite | 东财个股信息（被拦，不用） | ✅ 已验证；成分股附带 PE/PB/市值/换手率，可作将来基本面原料 |
+| baostock 兜底（日线） | — | — | ❌ 登录失败（错误码 10002007「网络接收错误」）；兜底次序改为 **新浪系 → 东财直连**，baostock 是否保留 P4 复测再定 |
+
+### 关键风险（P4-T3 生产化必须处理）
+
+1. **东财对 akshare 封装做指纹反爬**：spike 期间 akshare 的东财实时系接口（`stock_zh_a_spot_em` / `stock_bid_ask_em` / `stock_individual_info_em` / `fund_etf_spot_em` / `stock_zh_index_spot_em` / ETF与指数日线 em）全部 `RemoteDisconnected`，连打 7 次均拒；而带浏览器 UA 直连 `push2.eastmoney.com` 返回 HTTP 200。**sidecar 的东财通道必须直连 + UA + 重试熔断，不得依赖 akshare 的东财封装。**且带 UA 的直连同样间歇（同一端点第二轮 200、第三轮被拒），熔断要快速触发并切新浪。
+2. **雪球源已死**：`stock_individual_spot_xq` 要求 `xq_a_token`（400016），不要规划进通道。
+3. **同花顺 ETF 表不适用**：`fund_etf_spot_ths` 是场外净值口径，场内实时价用新浪。
+4. **退市/停牌标的返回静默脏数据**：新浪 hq 对已退市转债返回 `open=0、volume=0、price=昨收定格`（110074），对已摘牌标的返回**空串**（127022）。适配器必须输出 `status` 字段区分（`ok / halted_or_delisted / empty_or_delisted`，见 `datafetch/app.py`），不得当正常行情喂给契约层。演示样本受此影响，见 `07-backlog.md` B10。
+5. **限频**：东财被拦期间快速失败（~0.4s），熔断可快速触发；新浪 hq 与新浪日线接口在三轮 spike 中多次调用无限频迹象。全市场快照类（20s+/次）只用于低频扫描，禁止进分钟级轮询。
+
+### 实时行情字段 → 契约对照（新浪 hq，逗号分隔位序）
+
+| 位 | 含义 | 契约字段 |
+|---|---|---|
+| f0 | 名称 | `name` |
+| f1 | 今开 | —（可存，用于日内） |
+| f2 | 昨收 | `prev` |
+| f3 | 现价 | `price` |
+| f4 / f5 | 最高 / 最低 | —（预警判定用） |
+| f8 | 成交量（股） | —（`bars`/量比来源） |
+| f9 | 成交额（元） | —（放量预警来源） |
+| f30 / f31 | 日期 / 时间 | 数据时点（适配器要求第 4 条「时间要显式」） |
+| 派生 | (f3−f2)/f2×100 | `dayChg` |
+
+`indices[]` 同布局（`sh000001` 等）：`v`←f3、`chg`←派生。东财备份通道字段为 ×100 缩放整数（`f2/100=price`、`f3/100=涨跌幅%`、`f18/100=prev`），指数缩放待第三轮确认。
+
+### 日线字段 → 契约对照
+
+| 源 | 列 | 映射 |
+|---|---|---|
+| 东财股票日线 | 日期/开盘/收盘/最高/最低/成交量/成交额/振幅/涨跌幅/涨跌额/换手率 | → `date/open/close/high/low/volume`；换手率可作量比原料 |
+| 新浪 ETF/指数/转债日线 | date,open,high,low,close,volume(,amount) | 同名直映 |
+| `equity.bench` | 指数日线 close 归一到与 `nav` 同起点 | 见 `03` 第 7 节 |
+
+### 转债特有字段（集思录强赎表 → alerts）
+
+`代码 / 名称 / 现价 / 最后交易日 / 到期日 / 转股价 / 强赎触发价 / 正股价 / 强赎天计数 / 强赎状态`（值如「已公告强赎」「临近到期」）——正文 `alerts` 里「强赎公告 / 最后交易日 11-20」这类样本的真实数据源；`bond_zh_cov`（比价表）偏发行期字段，正股实时溢价率需自算：`正股价/转股价×100` 与债现价推转股溢价率。
+
+### spike API 冒烟结果（`datafetch/app.py`，进程内 TestClient）
+
+- `/quote`（7 标的：沪股/深转债/沪转债/ETF/指数/退市转债/摘牌转债）全部归一返回；**状态三态识别在真实退市样本上验证通过**——存活 `ok`、退市定格 `halted_or_delisted`（110074，价停 222.81 零成交）、摘牌 `empty_or_delisted`（127022）。
+- `/kline` 四类（股票 600519/000001/300750、ETF 510300、指数 000001、转债 110076）全部 200，最新 bar 均为 2026-10-26 当日。
+- `/calendar` 返回含**未来**交易日（至 2026-12-31），`marketClock` 的「下一交易日」计算可直接用。
+
+### 盘中频率结论（P4-T7 预警轮询参数依据）
+
+- 新浪 hq 直连：单请求多标的（5 标的 ~0.3s），**持仓+自选合并成一次请求、每分钟一轮**完全可行。
+- 分钟级轮询禁止使用全市场快照类接口。
+- 东财备份通道被拦时快速失败，适合做熔断切换而非重试等待。

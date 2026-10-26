@@ -1,0 +1,12 @@
+[project]
+name = "zimu-datafetch"
+version = "0.0.1"
+description = "子木行情 sidecar（P2-T1 spike：验证 akshare 字段/频率/限频，产出 docs/04 附录字段对照表）"
+requires-python = ">=3.13"
+dependencies = [
+    "akshare",
+    "baostock>=0.9.4",
+    "fastapi",
+    "httpx>=0.28.1",
+    "uvicorn",
+]
