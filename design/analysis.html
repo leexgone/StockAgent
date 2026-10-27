@@ -136,10 +136,10 @@
           </div>
 
           <section class="card" data-od-id="history-card">
-            <div class="card-head"><div><div class="card-title">该标的的历史建议</div><div class="card-sub">每次数据更新后重算，可回看当时怎么说的</div></div>
-              <div class="head-actions"><span class="pill" id="fb-note">未反馈</span></div></div>
+            <div class="card-head"><div><div class="card-title">该标的的历史建议</div><div class="card-sub">演示样本 · 非真实留档——正式版需建议留档（生成时间 + 数据版本），P4 落地</div></div>
+              <div class="head-actions"><span class="pill warn">样本</span><span class="pill" id="fb-note">未反馈</span></div></div>
             <div class="card-body tight"><div class="tbl-wrap"><table class="tbl" id="hist">
-              <thead><tr><th class="txt">日期</th><th class="txt">动作</th><th>得分</th><th>当时价格</th><th class="txt">理由摘要</th><th>至今验证</th></tr></thead>
+              <thead><tr><th class="txt">生成时间</th><th class="txt">动作</th><th>得分</th><th>当时价格</th><th class="txt">理由摘要</th><th>至今验证</th></tr></thead>
               <tbody></tbody></table></div></div>
             <div class="card-foot" style="justify-content:space-between;gap:12px;flex-wrap:wrap">
               <span class="hint" style="margin:0">反馈会用于调整后续建议的置信度（演示：仅本地记录）。</span>
@@ -328,7 +328,7 @@
     const hist = buildHistory(item, A, price);
     document.querySelector('#hist tbody').innerHTML = hist.map((x, i) => `
       <tr data-od-id="hist-row-${i}">
-        <td class="txt num" style="color:var(--muted);font-size:11.5px">${x.date}</td>
+        <td class="txt num" style="color:var(--muted);font-size:11.5px">${x.generatedAt}<div class="sub" style="font-size:10.5px">${x.dataVersion}</div></td>
         <td class="txt"><span class="pill ${TAG[x.action] ? (x.action === '减仓' || x.action === '卖出' ? 'sell' : x.action === '持有' || x.action === '定投' ? '' : 'buy') : ''}">${x.action}</span></td>
         <td class="num">${x.score}</td>
         <td class="num">${D.fmt(x.price, D.priceDec(item.kind))}</td>
@@ -393,6 +393,11 @@
     ];
   }
 
+  /* 历史建议（B9 原型级处理，P1-T7）：数据层还没有 adviceHistory 留档（正式解在 P4-T2），
+     样本由页内确定性随机生成、卡片已显式标注；字段对齐未来契约——每条带
+     generatedAt（生成时间）与 dataVersion（输入数据版本），见 04 适配器要求第 6 条。
+     P4-T2 落地时：换数据源为 advice_history 表、删「样本」标注。 */
+  const DEMO_DATA_VERSION = 'demo-sample-v0';
   function buildHistory(item, A, price) {
     const dates = ['10-24', '10-17', '10-10', '09-26', '09-19'];
     const acts = [A.action, '持有', '持有', '加仓', '持有'];
@@ -400,7 +405,7 @@
     const r = rng(item.code + 'h');
     return dates.map((d, i) => {
       const p = price * (1 - i * 0.018 + (r() - 0.5) * 0.02);
-      return { date: '2026-' + d, action: acts[i], score: Math.round(A.score - i * 2 + (r() - .5) * 8), price: p, note: notes[i], verify: i === 0 ? null : (price / p - 1) * 100 };
+      return { generatedAt: '2026-' + d, dataVersion: DEMO_DATA_VERSION, action: acts[i], score: Math.round(A.score - i * 2 + (r() - .5) * 8), price: p, note: notes[i], verify: i === 0 ? null : (price / p - 1) * 100 };
     });
   }
 

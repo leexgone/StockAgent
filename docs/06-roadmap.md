@@ -41,7 +41,7 @@
 | P1-T4 | B5 `up/down` 语义分离：引入 `--ok/--danger` 令牌，逐处替换非涨跌语义 | `05` 令牌表更新、`03` 第 11 节 ⚠️ 消除 | 1d | ✅ 2026-10-28：三类分离——好坏轴 `.ok/.warn/.danger`（得分弧/维度条转红绿灯）、交易方向 `.buy/.sell`（`--up/--down` 别名令牌）、`up/down` 退回涨跌数字与标记；新增 `--ok-soft/--danger-soft/--buy/--sell` 令牌，frontend 镜像同步；`05` 令牌表与规则 3、`03` §11、`04` gauge 行更新 |
 | P1-T5 | B7 交易所用显式 `mkt` 字段（analysis 展示 + holdings 新建持仓路径） | 不再出现 `code[0]==='6'` | 0.25d | ✅ 2026-10-28：watchlist 补显式 `mkt`，分析页页头与 holdings 新建持仓改读 `mkt`，顺带删掉 analysis 试仓金额的 `? 100 : 100` 死 ternary（按 `kind` 取 1 手）；`04` 契约同步（watchlist 补 `mkt/kind/limitPct`、工具表补 `priceDec/limitPrices`） |
 | P1-T6 | B8 死 ternary 修复（现金规则进度条方向） | 进度条语义与另三条一致 | 0.1d | ✅ 2026-10-28：现金规则进度改 `v/c`（满格 = 降至下限，`c=0` 由 `min` 截断无 NaN），行标签按 `inverse` 显示「下限/上限」；四条统一「满格 = 触及限制」 |
-| P1-T7 | B9 原型级处理：历史建议标注为样本、结构对齐未来的 `adviceHistory`（正式解在 P4-T2） | `analysis` 页不再假装是真实留档 | 0.5d | ⬜ |
+| P1-T7 | B9 原型级处理：历史建议标注为样本、结构对齐未来的 `adviceHistory`（正式解在 P4-T2） | `analysis` 页不再假装是真实留档 | 0.5d | ✅ 2026-10-28：卡片加「演示样本 · 非真实留档」标注与样本 pill；样本字段对齐未来契约（每行带 `generatedAt` / `dataVersion=demo-sample-v0`），「日期」列改「生成时间」；`04` 第 6 条同步；正式解归 P4-T2 |
 | P1-T8 | C11 `design/README.md` 收敛：保留「怎么打开」，其余改链接指向 `docs/` | 无双源冲突 | 0.25d | ⬜ |
 | P1-T9 | 人工验收：按 CLAUDE.md 验证方式过 7 屏（`file://` + http.server、窄屏、真实时钟、刷新按钮） | 控制台零报错 | 0.5d | ⬜ |
 
