@@ -40,7 +40,7 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 | C8 | 分析结论由什么生成 | 🔶 架构已决（ADR-0005）：agent + 领域工具 + Skill 模板；打分方式（规则 / 模型 / 混合）仍未定，P4–P6 之间拍板，影响 `score`、`conf`、`dims` 的可解释性要求 |
 | C9 | 数据存储位置 | ✅ 已决（ADR-0005）：SQLite（rusqlite bundled），单文件、gitignored，备份 = 拷文件；持仓仍是敏感数据，永不入库（git 意义上的库） |
 | C10 | 许可与版权 | `LICENSE` 是 Apache-2.0 正文，缺少先常见的版权声明附录段落；要不要补 `NOTICE` |
-| C11 | `design/README.md` 与 `docs/` 收敛 | 内容重叠（业务规则、数据契约、设计约定）。建议 `design/README.md` 保留「怎么打开原型」，其余改为指向 `docs/` 的链接 |
+| C11 | `design/README.md` 与 `docs/` 收敛 | ✅ 已决（2026-10-28，P1-T8）：README 只保留原型定位、打开方式、指向 `docs/` 的导引表与许可；业务规则/数据契约/设计约定/本地状态/已知边界全部删除，规格单一来源 = `docs/` |
 
 ## 框架反馈（R 系列）
 
