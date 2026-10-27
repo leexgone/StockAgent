@@ -1,9 +1,9 @@
 # backend · 子木 Rust 服务
 
 ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开公网入站。
-当前包含：`zimu-server`（最简运行框架：`/api/health` + `frontend/dist` 静态托管）
-与 `zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent REPL + echo 工具）。
-SSE 事件流在 P2-T3 接入 zimu-server，领域纯函数库（P3-T3）将来作为独立 crate 加入。
+当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
+Agent SSE 会话，P2-T3）与 `zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent
+REPL + echo 工具，保留为调试入口）。领域纯函数库（P3-T3）将来作为独立 crate 加入。
 
 ## 运行 zimu-server
 
@@ -26,6 +26,32 @@ cd ..\frontend; npm run dev            # 前端 :5173，/api 已反代到 :8080
 
 浏览器访问 `http://127.0.0.1:5173`（开发）或 `http://127.0.0.1:8080`（生产形态）。
 workspace 里有多个 bin，`cargo run` 必须带 `-p` 指明。
+
+## 会话端点（P2-T3 SSE 桥）
+
+Agent 随服务启动装配（与 zimu-agent-cli 同一链路，`CliFrontend` 换成
+`SseFrontend`：broadcast 扇出 + 确认槽位，见 `agent_bridge.rs`）。找不到 robit
+配置时服务照常起、静态首页可用，仅 `/api/chat*` 降级 503。spike 边界：进程级
+单会话，多会话与持久化留给 P4+。
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/chat/stream` | SSE 事件流：首帧 `connected`，随后 `text_delta` / `tool_call` / `tool_result` / `confirm_request` / `turn_complete` / `error`（形状见 `agent_bridge.rs` 的 `SseEvent`） |
+| `POST /api/chat` | `{"text":"…"}` → 202，回复经 SSE 流出 |
+| `POST /api/chat/confirm` | `{"tool_call_id":"…","approved":true}` 回填工具确认 |
+| `POST /api/chat/cancel` | 取消当前轮次 |
+
+首页「子木会话」面板（`frontend/src/components/ChatPanel.tsx`）即消费这组端点；
+它是 spike 级 UI，正式 chat 屏 P5 按 `design/chat.html` 重做。
+
+curl 冒烟——**Windows 终端里中文 payload 必须走 UTF-8 文件**，内联会被编码搞坏
+（服务端报 `invalid unicode code point`）：
+
+```powershell
+'{"text":"请调用 echo 工具回显:你好子木"}' | Out-File -Encoding utf8NoBOM payload.json
+curl.exe -sN http://127.0.0.1:8080/api/chat/stream   # 另开窗口看事件流
+curl.exe -s -X POST http://127.0.0.1:8080/api/chat -H "Content-Type: application/json" --data-binary "@payload.json"
+```
 
 ## 运行 zimu-agent-cli（P2-T2 spike）
 
@@ -52,12 +78,14 @@ P2-T3 把会话搬进 zimu-server 时，替换的只是 CliFrontend（换成 SSE
 |---|---|---|
 | `ZIMU_ADDR` | `127.0.0.1:8080` | 监听地址；LAN 部署可改 `0.0.0.0:8080`，公网入站默认禁止（ADR-0005） |
 | `ZIMU_STATIC_DIR` | `frontend/dist`（按编译期 manifest 定位） | 静态目录，部署时可指向任意构建产物 |
-| `RUST_LOG` | `info,tower_http=debug` | 日志级别 |
+| `RUST_LOG` | 未设置时按 robit config `log_level`（缺省 info，含 tower_http=debug） | 设置了则优先于 robit 配置；有 robit 配置时日志由 `init_logging` 接管（控制台 + `<cwd>/.robit/logs`），无配置时回落服务自己的 tracing_subscriber（R3，见 `docs/07-backlog.md`） |
 
 ## 目录
 
 ```text
 Cargo.toml                  workspace（robit crates 消费 crates.io 发布版，其余依赖版本与 robit workspace 对齐）
-crates/zimu-server/         主服务：health + 静态托管（骨架）
-crates/zimu-agent-cli/      robit 集成 spike：Agent REPL + echo 工具（P2-T2）
+crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话（P2-T3）
+                            ├─ main.rs           端点与启动装配（robit 配置缺失时优雅降级）
+                            └─ agent_bridge.rs   SseFrontend / SseEvent / echo 工具 / Agent 装配
+crates/zimu-agent-cli/      robit 集成 spike：Agent REPL + echo 工具（P2-T2，调试入口）
 ```
