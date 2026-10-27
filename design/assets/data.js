@@ -282,10 +282,10 @@
 
   // 自选观察（非持仓）
   const watchlist = [
-    { code: '002415', name: '海康威视', kind: 'stock', limitPct: 10, sector: '电子', price: 34.86, dayChg: 0.91, note: '观察：AI 视觉商业化' },
-    { code: '688111', name: '金山办公', kind: 'stock', limitPct: 20, sector: '计算机', price: 287.40, dayChg: -1.24, note: '观察：订阅 ARPU' },
-    { code: '601899', name: '紫金矿业', kind: 'stock', limitPct: 10, sector: '有色金属', price: 19.72, dayChg: 1.86, note: '与现有有色仓位重叠' },
-    { code: '512890', name: '红利低波ETF', kind: 'etf', limitPct: 10, sector: '宽基指数', price: 1.284, dayChg: 0.31, note: '防守型候选，波动低' },
+    { code: '002415', name: '海康威视', mkt: 'SZ', kind: 'stock', limitPct: 10, sector: '电子', price: 34.86, dayChg: 0.91, note: '观察：AI 视觉商业化' },
+    { code: '688111', name: '金山办公', mkt: 'SH', kind: 'stock', limitPct: 20, sector: '计算机', price: 287.40, dayChg: -1.24, note: '观察：订阅 ARPU' },
+    { code: '601899', name: '紫金矿业', mkt: 'SH', kind: 'stock', limitPct: 10, sector: '有色金属', price: 19.72, dayChg: 1.86, note: '与现有有色仓位重叠' },
+    { code: '512890', name: '红利低波ETF', mkt: 'SH', kind: 'etf', limitPct: 10, sector: '宽基指数', price: 1.284, dayChg: 0.31, note: '防守型候选，波动低' },
   ];
 
   /* ---------- 对话式问股 样本问答 ---------- */

@@ -24,6 +24,8 @@
 | `dirClass` | `(v) → 'up'|'down'|'flat'` | 涨跌类名（红涨绿跌） |
 | `ICONS` | `{ name: svgString }` | 内联图标，24×24 viewBox |
 | `kindLabel` | `{ stock, etf, cb }` | 类型中文名 |
+| `priceDec` | `(kind) → 2\|3` | 报价小数位：股票 2、ETF/转债 3（与领域库 `price_decimals` 同源，见 `03` §1） |
+| `limitPrices` | `(kind, prev, pct) → { lo, hi }\|null` | 涨跌停价：昨收 × (1 ± pct) 按 `priceDec` 整数单元四舍五入（half-up，`03` §2）；`prev ≤ 0` 或 `pct` 未配置 → `null` |
 
 ### 原始数据（真实数据要替换的就是这些）
 
@@ -31,8 +33,8 @@
 |---|---|---|---|
 | `ws` | `{ name, init, style, cash, broker, wechat }` | ✅ | 单账户；`cash` 为可用现金 |
 | `indices[]` | `{ name, code, v, chg }` | ✅ | 行情条 5 个指数 |
-| `holdings[]` | `{ code, name, mkt, kind, sector, shares, cost, price, prev }` | ✅ | `mkt: 'SH'|'SZ'`；`kind: 'stock'|'etf'|'cb'` |
-| `watchlist[]` | `{ code, name, sector, price, dayChg, note }` | ✅ | 未持有的自选 |
+| `holdings[]` | `{ code, name, mkt, kind, sector, shares, cost, price, prev, limitPct }` | ✅ | `mkt: 'SH'|'SZ'`；`kind: 'stock'|'etf'|'cb'`；`limitPct` 涨跌停比例是标的属性（ETF 无法由代码推断，P4 由行情源填充，见 `03` §2） |
+| `watchlist[]` | `{ code, name, mkt, kind, limitPct, sector, price, dayChg, note }` | ✅ | 未持有的自选；与 `holdings` 一样带 `mkt / kind / limitPct`，页面不得由代码推断 |
 | `advice{}` | `code → { score, action, horizon, conf, position, target, stop, reason, dims[4], risks[] }` | ✅ | 语义见 `03` 第 10 节 |
 | `alerts[]` | `{ time, code, name, type, level, text, done }` | ✅ | `level: up/down/warn/flat`；`done` 为归档态 |
 | `qa[]` | `{ q, a:[{t,k}], cites:[{src,txt}], chips:[] }` | ✅ | `k: conclusion/body/plan` |
@@ -94,7 +96,7 @@
 2. **派生不能手填**：适配器只产出 `price / prev / shares / cost` 等原始字段，派生字段由契约层重算（这是 `03` 全部公式的执行处）。
 3. **行情更新要触发重算**：契约层已提供 `recalc()`——自动跳动、手动刷新（`tickPrices()` 内部）与交易页提交都统一走它，重算逐笔派生与汇总快照并重绘行情条；页面通过 `chrome({ onRefresh })` 或定时器回调重绘自身（原 B1 缺口已于 2026-10-24 修复）。真实数据推送只需写入 `price / prev` 后调用 `recalc()`，页面零改动。
 4. **时间要显式**：`equity.dates` 目前是「从今天往回推交易日」的中文短标签（`data.js:154`），且起点写死为 `2026-10-24`。真实数据要用带时区的日期 + 显示层格式化，`marketClock` 还要接交易日历（节假日/调休）。
-5. **代码 → 交易所的推断不要靠首字母**：页面里有 `code[0] === '6' ? 'SH' : 'SZ'`（`analysis.html:284`）这类猜测；契约里 `mkt` 是显式字段，请用它。
+5. **代码 → 交易所的推断不要靠首字母**：契约里 `mkt` 是显式字段（`holdings` 与 `watchlist` 都带），直接用它。原 `code[0] === '6' ? 'SH' : 'SZ'` 猜测已于 P1-T5 删除（B7，2026-10-28）——该猜测对 `5` 开头的深市 ETF 会判错。
 6. **建议要可留档**：`advice` 现在只有一个当前快照，而 `analysis.html` 的历史建议表格用的是页面内样本。真实实现里建议必须带生成时间与输入数据版本，否则「回看当时怎么说的」这个卖点无法兑现。
 7. **禁止跨页补全局**：共享派生只能放在 `data.js`（A1 的教训：`weight` / `totalMvAll()` 曾定义在 `holdings.html` 页内，被 `analysis.html` 调用时直接抛 `TypeError`；已于 2026-10-24 收进契约层）。页面不得给 `ZM` 赋值，也不得定义供其它页面使用的派生函数。
 8. **不要写死演示用的锚定值**：`walk()` 的末值锚定、`equity` 的 90 日长度、`advice` 文案里被正则覆盖的「当前 X%」（`data.js:259`）都属于样本阶段产物。这种正则打补丁方式很脆——接入真实数据后应当由模板插值，而不是对写死的中文句子做正则替换。

@@ -175,8 +175,8 @@
   const params = new URLSearchParams(location.search);
   let scope = 'hold', code = params.get('code') || '300750';
   const all = () => scope === 'hold'
-    ? D.holdings.map(h => ({ code: h.code, name: h.name, kind: h.kind, sector: h.sector, h }))
-    : D.watchlist.map(w => ({ code: w.code, name: w.name, kind: w.kind, sector: w.sector, w }));
+    ? D.holdings.map(h => ({ code: h.code, name: h.name, kind: h.kind, sector: h.sector, mkt: h.mkt, h }))
+    : D.watchlist.map(w => ({ code: w.code, name: w.name, kind: w.kind, sector: w.sector, mkt: w.mkt, w }));
   // 自选没有分析库时，生成一份保守的「观察中」结论
   function adviceFor(c) {
     if (D.advice[c]) return D.advice[c];
@@ -280,7 +280,7 @@
 
     const h = item.h, price = h ? h.price : item.w.price, chg = h ? h.dayChg : item.w.dayChg;
     document.getElementById('a-name').textContent = item.name;
-    document.getElementById('a-code').textContent = item.code + ' · ' + (item.code[0] === '6' ? 'SH' : 'SZ');
+    document.getElementById('a-code').textContent = item.code + ' · ' + item.mkt;   // mkt 是契约显式字段，不按代码首字符猜（B7）
     document.getElementById('a-meta').textContent =
       `${D.kindLabel[item.kind]} · ${item.sector}${h ? ` · 持有 ${D.fmt(h.shares, 0)} ${h.kind === 'cb' ? '张' : h.kind === 'etf' ? '份' : '股'} · 占组合 ${(h.weight || 0).toFixed(1)}%` : ' · 未持有（自选观察）'}`;
     const tag = document.getElementById('a-tag');
@@ -358,10 +358,13 @@
   function buildPlan(item, A) {
     const h = item.h;
     const prec = D.priceDec(item.kind);
-    if (A.watchOnly) return [
-      { t: '先不动，设一个触发条件', d: `突破 ${D.fmt(item.w.price * 1.03, prec)} 且成交额 > 20 日均量 1.5 倍时提醒你；在此之前不建仓。` },
-      { t: '若要试仓，上限 3%', d: `${D.money(item.w.price * (item.code[0] === '6' ? 100 : 100), 0)} 起（1 手），试错仓位不影响主组合判断。` },
-    ];
+    if (A.watchOnly) {
+      const lot = item.kind === 'cb' ? 10 : 100;
+      return [
+        { t: '先不动，设一个触发条件', d: `突破 ${D.fmt(item.w.price * 1.03, prec)} 且成交额 > 20 日均量 1.5 倍时提醒你；在此之前不建仓。` },
+        { t: '若要试仓，上限 3%', d: `${D.money(item.w.price * lot, 0)} 起（1 手），试错仓位不影响主组合判断。` },
+      ];
+    }
     if (A.action === '减仓' || A.action === '卖出') {
       const total = h.shares, lot = item.kind === 'cb' ? 10 : 100;
       const q1 = Math.max(lot, Math.floor(total * 0.4 / lot) * lot);

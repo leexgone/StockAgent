@@ -18,10 +18,6 @@
 
 `data.js:259` 用 `replace(/当前 [\d.]+%/g, …)` 把写死在文案里的百分比覆盖成计算值。目前能对齐，但只匹配「当前 X%」「占总资产 X%」两种句式——`advice` 里还有「减 200 股」「回落到 25% 以下」等句子不受保护。接真实数据后应改为模板插值。
 
-### B7 · 交易所靠代码首字母猜
-
-`analysis.html:284` 用 `code[0] === '6' ? 'SH' : 'SZ'`，而 `holdings` 已有显式 `mkt` 字段。`588000`（科创板 ETF，SH）能被猜对是巧合，`002415`（SZ）也是；`5` 开头的深市 ETF 会猜错。用 `mkt`。同样的猜测还出现在 `holdings.html` 交易提交处新建持仓的 `mkt` 字段。
-
 ### B8 · 死代码
 
 `holdings.html:428` 的 `r.inverse ? c / r.v * 100 : c / r.v * 100` 两个分支完全相同，「现金最低保留」的进度条因此按「越大越好」画，与另外三条规则的视觉语义相反。
@@ -69,6 +65,14 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 | R3 | **init_logging 独占全局 tracing subscriber**（P2-T3）：宿主服务自带日志初始化时二者只能选其一——zimu-server 现按「有 robit 配置就交给 init_logging（靠 additional_directives 补 tower_http），否则回落自建 fmt」分支处理，且失去对日志格式的自主权。诉求：提供 tracing `Layer` 形态，由宿主组合进自己的 registry | ⬜ 待提给 robit |
 
 ## 已修复（存档）
+
+### B7 · 交易所靠代码首字母猜 —— 2026-10-28 修复（P1-T5）
+
+**原现象**：`analysis.html` 用 `code[0] === '6' ? 'SH' : 'SZ'` 展示交易所——`588000`（科创板 ETF，SH）与 `002415`（SZ）被猜对是巧合，`5` 开头的深市 ETF 会猜错；`holdings.html` 交易提交新建持仓的 `mkt` 也按同样猜测写入；`analysis.html` 试仓金额里还有一处 `code[0] === '6' ? 100 : 100` 的死 ternary。
+
+**修复**：`data.js` watchlist 4 项补显式 `mkt` 字段（holdings 本就有）；分析页页头改读 `item.mkt`（`all()` 随 holdings/watchlist 带出），试仓金额删除死 ternary、按 `kind` 取 1 手（转债 10 / 其余 100）；holdings 新建持仓继承 `cur.mkt`。`04` 契约同步：`watchlist` 行补 `mkt / kind / limitPct`、`holdings` 行补 `limitPct`、工具表补 `priceDec` 与 `limitPrices`、适配器要求第 5 条改为已删除。
+
+**验证**：`grep -rn "code\[0\]" design/` 无命中；vm 沙箱断言 holdings/watchlist 每项 `mkt` 与代码真实交易所一致；7 页内联脚本编译通过。
 
 ### B2 · 涨跌停口径三处偏差 —— 2026-10-28 修复（P1-T2）
 

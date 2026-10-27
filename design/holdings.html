@@ -403,7 +403,7 @@
     if (side === 'buy') {
       if (cur.shares) { cur.cost = (cur.cost * cur.shares + amount + f) / (cur.shares + qty); cur.shares += qty; }
       else {
-        const h = { code: cur.code, name: cur.name, mkt: cur.code[0] === '6' ? 'SH' : 'SZ', kind: m.kind, sector: cur.sector || '新建持仓', shares: qty, cost: (amount + f) / qty, price: cur.price, prev: m.prev, limitPct: m.pct };
+        const h = { code: cur.code, name: cur.name, mkt: cur.mkt, kind: m.kind, sector: cur.sector || '新建持仓', shares: qty, cost: (amount + f) / qty, price: cur.price, prev: m.prev, limitPct: m.pct };   // mkt 继承自选的显式字段（B7）
         D.holdings.push(h); cur = h;
       }
       D.ws.cash -= amount + f;   // 现金源头是 ws.cash，recalc() 后重新发布为 D.cash

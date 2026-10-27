@@ -44,7 +44,7 @@ python -m http.server 8000 --directory design
 | `indices[]` | 顶部行情条的指数快照 |
 | `equity{}` | `dates / nav / bench`，净值与基准已归一到同一起点 |
 | `advice{}` | 按 `code` 存分析结论：`score / action / horizon / conf / position / target / stop / reason / dims[4] / risks[]` |
-| `alerts[] / watchlist[] / qa[] / sessions[]` | 预警、自选、问答样本、微信会话 |
+| `alerts[] / watchlist[] / qa[] / sessions[]` | 预警、自选（`code / name / mkt / kind / limitPct / sector / price / dayChg / note`，与 holdings 一样显式带交易所与类型，页面不得由代码推断）、问答样本、微信会话 |
 | `marketClock()` | 真实交易时段逻辑：9:15 集合竞价、9:30–11:30、13:00–15:00、盘后定价、周末休市并给出下一时段倒计时 |
 
 总资产、当日与累计盈亏、仓位占比、行业权重、HHI、年化波动、最大回撤、相关系数等汇总指标**全部由持仓与 `equity` 计算得出**，页面里不写死数字 —— 新增指标时请沿用同一口径，避免文案与图表打架。
