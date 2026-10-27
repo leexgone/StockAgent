@@ -1,22 +1,21 @@
-//! 子木 · robit Agent ↔ Web SSE 桥（P2-T3，见 docs/06-roadmap.md）。
+//! 子木 · robit Agent 装配（P2-T3 起；P2-T5 共同演进演练后桥体已下沉 robit-web）。
 //!
 //! Agent 装配方式与 `zimu-agent-cli` 完全相同（LlmClient / ToolRegistry /
 //! SkillRegistry / Agent::new），差异只在 `Frontend` 实现——CliFrontend 换成
-//! [`SseFrontend`]：
+//! robit-web 的 `WebFrontend`（robit v0.1.26 首发，见其 CHANGELOG）：
 //!
-//! * 事件下行：Agent 事件 → `broadcast` 通道 → `GET /api/chat/stream`（SSE），
-//!   多浏览器连接可同时观看；
-//! * 输入上行：`POST /api/chat` → `mpsc` 通道 → `Agent::run`；
-//! * 工具确认：`request_tool_confirmation` 挂起等待 oneshot——确认请求经
-//!   [`SseEvent::ConfirmRequest`] 推给前端，`POST /api/chat/confirm` 回填答复。
-//!   （robit 0.1.25 的确认只走该方法；`FrontendMessage::ConfirmationResponse`
-//!   是保留变体，Agent 收到会 warn。）
+//! * 事件下行：AgentEvent → `WebEvent`（官方 JSON schema）→ broadcast 扇出，
+//!   多浏览器连接可同时观看；SSE 编码在宿主 `main.rs`；
+//! * 输入上行：`POST /api/chat` → `WebBridge::send_user_text` → `Agent::run`；
+//! * 工具确认：`confirm_request` 事件推给前端，`POST /api/chat/confirm` 经
+//!   `WebBridge::resolve_confirm` 回填；responder 被 drop 一律按拒绝处理。
+//!
+//! 原先宿主侧手写的 SseEvent 投影 / SseFrontend / 确认槽位已删除——那正是
+//! docs/07-backlog.md R1 记录的重复劳动，P2-T5 把它通用化进了 robit-web
+//! （改 robit → tag v0.1.26 → 子木 pin 升级，回路首次走通）。
 //!
 //! spike 边界：进程级单会话（单 Agent、单确认槽位）；多会话与持久化留给 P4+。
 //! echo 工具与 CLI 里那份重复——spike 期容忍，P4-T6 领域工具成形时抽公共 crate。
-//!
-//! 「Web 桥该不该进 robit」的评估素材：本文件的 SseEvent 映射、确认槽位、
-//! broadcast 扇出都是宿主侧重复劳动，见 docs/07-backlog.md R 系列。
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,105 +24,12 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_trait::async_trait;
 use robit_agent::{
-    resolve_memory_settings, Agent, AgentEvent, Frontend, FrontendMessage, SkillRegistry, Tool,
-    ToolCallInfo, ToolContext, ToolRegistry, ToolResult,
+    resolve_memory_settings, Agent, SkillRegistry, Tool, ToolContext, ToolRegistry, ToolResult,
 };
 use robit_ai::{LlmClient, RobitConfig};
-use serde::Serialize;
+use robit_web::WebBridge;
 use serde_json::{json, Value};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
-
-// ============================================================================
-// SSE 出站事件 —— AgentEvent 的 JSON 投影
-// ============================================================================
-
-/// robit 的 `AgentEvent` 不带 Serialize（也不该由 robit 决定线上格式），
-/// 转成子木自己的 wire 类型。前端按 `type` 字段分发（snake_case）。
-#[derive(Serialize, Clone, Debug)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SseEvent {
-    /// SSE 连接建立后的首帧：前端据此显示模型与工具面
-    Connected {
-        profile: String,
-        model: String,
-        tools: Vec<String>,
-    },
-    TextDelta {
-        text: String,
-    },
-    ToolCall {
-        tool_call_id: String,
-        name: String,
-        arguments: String,
-    },
-    ToolResult {
-        tool_call_id: String,
-        is_error: bool,
-        content: String,
-    },
-    SkillTriggered {
-        name: String,
-        description: String,
-    },
-    AsyncToolCompleted {
-        task_id: String,
-        tool_call_id: String,
-        is_error: bool,
-    },
-    /// 工具需要人工确认：前端展示 批准/拒绝，答复走 POST /api/chat/confirm
-    ConfirmRequest {
-        tool_call_id: String,
-        name: String,
-        arguments: String,
-    },
-    TurnComplete,
-    Error {
-        message: String,
-    },
-}
-
-impl SseEvent {
-    fn from_agent(event: &AgentEvent) -> Self {
-        match event {
-            AgentEvent::TextDelta(text) => SseEvent::TextDelta { text: text.clone() },
-            AgentEvent::ToolCallRequested {
-                tool_call_id,
-                name,
-                arguments,
-            } => SseEvent::ToolCall {
-                tool_call_id: tool_call_id.clone(),
-                name: name.clone(),
-                arguments: arguments.clone(),
-            },
-            AgentEvent::ToolCallResult {
-                tool_call_id,
-                result,
-            } => SseEvent::ToolResult {
-                tool_call_id: tool_call_id.clone(),
-                is_error: result.is_error,
-                content: result.content.clone(),
-            },
-            AgentEvent::SkillTriggered { name, description } => SseEvent::SkillTriggered {
-                name: name.clone(),
-                description: description.clone(),
-            },
-            AgentEvent::AsyncToolCompleted {
-                task_id,
-                tool_call_id,
-                result,
-            } => SseEvent::AsyncToolCompleted {
-                task_id: task_id.clone(),
-                tool_call_id: tool_call_id.clone(),
-                is_error: result.is_error,
-            },
-            AgentEvent::TurnComplete => SseEvent::TurnComplete,
-            AgentEvent::Error(e) => SseEvent::Error {
-                message: e.to_string(),
-            },
-        }
-    }
-}
 
 // ============================================================================
 // echo —— 与 zimu-agent-cli 相同的最小领域工具（P2-T2 验收项，P4-T6 换新）
@@ -166,69 +72,13 @@ impl Tool for EchoTool {
 }
 
 // ============================================================================
-// SseFrontend —— 一切经通道转发，不直接碰 HTTP
-// ============================================================================
-
-/// 待确认的工具调用：id 用于和 POST /api/chat/confirm 对账，
-/// responder 回填 `request_tool_confirmation` 的返回值。
-/// Agent 串行调用确认，单槽位足够（spike 边界）。
-pub struct PendingConfirm {
-    tool_call_id: String,
-    responder: oneshot::Sender<bool>,
-}
-
-pub type ConfirmSlot = Arc<Mutex<Option<PendingConfirm>>>;
-
-struct SseFrontend {
-    events: broadcast::Sender<SseEvent>,
-    confirm_slot: ConfirmSlot,
-}
-
-#[async_trait]
-impl Frontend for SseFrontend {
-    async fn on_event(&self, event: AgentEvent) -> robit_agent::error::Result<()> {
-        // 无订阅者时 send 返回 Err，属正常（没人看就不用广播）
-        let _ = self.events.send(SseEvent::from_agent(&event));
-        Ok(())
-    }
-
-    async fn request_tool_confirmation(
-        &self,
-        info: &ToolCallInfo,
-    ) -> robit_agent::error::Result<bool> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut slot = self.confirm_slot.lock().await;
-            // 残留旧请求（理论上不会：Agent 串行确认）→ 顶掉，旧调用方收到 false
-            *slot = Some(PendingConfirm {
-                tool_call_id: info.id.clone(),
-                responder: tx,
-            });
-        }
-        let _ = self.events.send(SseEvent::ConfirmRequest {
-            tool_call_id: info.id.clone(),
-            name: info.name.clone(),
-            arguments: info.arguments.clone(),
-        });
-        // 挂起等待 HTTP 侧回填；连接断开（responder 被 drop）按拒绝处理
-        match rx.await {
-            Ok(approved) => Ok(approved),
-            Err(_) => Ok(false),
-        }
-    }
-}
-
-// ============================================================================
-// AgentBridge —— main 持有的接线端子
+// AgentBridge —— main 持有的接线端子（通用桥体在 robit_web::WebBridge）
 // ============================================================================
 
 pub struct AgentBridge {
-    /// SSE 端点从这里 subscribe
-    pub events: broadcast::Sender<SseEvent>,
-    /// POST /api/chat 往这里投递用户消息
-    pub message_tx: mpsc::Sender<FrontendMessage>,
-    /// POST /api/chat/confirm 通过它回填确认答复
-    pub confirm_slot: ConfirmSlot,
+    /// 事件订阅 / 消息注入 / 确认回填都在 WebBridge 上
+    pub web: WebBridge,
+    /// 宿主元数据：SSE 首帧 connected 用
     pub profile: String,
     pub model: String,
     pub tools: Vec<String>,
@@ -267,13 +117,9 @@ pub fn spawn_agent(working_dir: PathBuf, config: RobitConfig) -> anyhow::Result<
 
     let memory = resolve_memory_settings(&config, &working_dir)?;
 
-    let (events, _) = broadcast::channel::<SseEvent>(256);
-    let (message_tx, message_rx) = mpsc::channel::<FrontendMessage>(16);
-    let confirm_slot: ConfirmSlot = Arc::new(Mutex::new(None));
-    let frontend = Arc::new(SseFrontend {
-        events: events.clone(),
-        confirm_slot: confirm_slot.clone(),
-    });
+    let mut web = WebBridge::new(256, 16);
+    let frontend = web.frontend();
+    let message_rx = web.take_message_rx();
 
     let handle = tokio::spawn(async move {
         let context_config = config.app.as_ref().and_then(|a| a.context.as_ref());
@@ -295,29 +141,12 @@ pub fn spawn_agent(working_dir: PathBuf, config: RobitConfig) -> anyhow::Result<
     });
 
     Ok(AgentBridge {
-        events,
-        message_tx,
-        confirm_slot,
+        web,
         profile,
         model,
         tools: vec!["echo".to_string()],
         _handle: handle,
     })
-}
-
-/// 回填工具确认答复。返回 false = 当前没有匹配的待确认请求。
-pub async fn resolve_confirm(slot: &ConfirmSlot, tool_call_id: &str, approved: bool) -> bool {
-    let mut guard = slot.lock().await;
-    let matched = guard
-        .as_ref()
-        .map(|p| p.tool_call_id == tool_call_id)
-        .unwrap_or(false);
-    if matched {
-        if let Some(pending) = guard.take() {
-            let _ = pending.responder.send(approved);
-        }
-    }
-    matched
 }
 
 /// 脱敏展示密钥：只留前 3 后 4 位与长度，日志永不出现完整值。

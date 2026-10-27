@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | P0 | 工程与文档基线 | — | ✅ 2026-10-24 | — |
 | P1 | 原型定稿（修完 backlog 前两级） | 无，可与 P2/P3 并行 | 🔨 | 3–4 天 |
-| P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | 🔨 | 2–3 天 |
+| P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | ✅ 2026-10-27 | 2–3 天 |
 | P3 | 口径可执行化（黄金测试向量） | P2 | ⬜ | 2–3 天 |
 | P4 | 数据管道与存储 | P3；**C5、C8 拍板** | ⬜ | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | ⬜ | 1–1.5 周 |
@@ -47,7 +47,7 @@
 
 **完成标准**：七个界面在 `file://` 与本地服务两种方式下打开均无控制台报错；从「预警 → 建议 → 试算 → 结论」走一遍不需要离开原型；同一个数字在任意两处出现都相等。
 
-## P2 · 技术基座 Spike ⏳
+## P2 · 技术基座 Spike ✅（2026-10-27）
 
 四个 spike 验证 ADR-0005 的每个假设；**目录（`backend/` `frontend/` `datafetch/`）随对应 spike 创建**，勿提前半建。
 
@@ -57,7 +57,7 @@
 | P2-T2 | robit 集成 spike：`backend/` Cargo workspace + path override 指向本地 robit；最小 agent 会话接阿里云网关 qwen，注册一个 echo 领域工具 | `cargo run` 可对话 | 0.5–1d | ✅ 2026-10-27：robit 0.1.25 已发布 crates.io，改为直接引用（无需 path override）；`zimu-agent-cli` REPL + echo 工具全链路验收通过——qwen 流式对话正常，模型 function-calling 正确调用 echo 返回 `[子木 echo] …`（期间定位并更换失效的 DASHSCOPE_API_KEY；CLI 保留脱敏 api_key 打印便于日后 401 排查） |
 | P2-T3 | axum + SSE spike：一个 REST 端点 + 把 robit-agent 事件流经 SSE 转出；同时评估「Web Frontend 桥」该不该进 robit（R 系列第一条候选） | 浏览器/curl 看到流式输出 | 0.5d | ✅ 2026-10-27：Agent 进 zimu-server（与 CLI 同装配，CliFrontend 换成 SSE 桥——broadcast 扇出 + 确认槽位 + 降级 503）；curl 验收通过：connected → tool_call(echo，中文参数无损) → tool_result → 流式 text_delta → turn_complete，keep-alive 正常；首页 ChatPanel 可浏览器对话；「Web 桥进 robit」评估落为 `07` R1（P2-T5 首选素材），另记 R2/R3 |
 | P2-T4 | `frontend` spike：Vite + React + TS 脚手架，`ui.css` 设计令牌迁移（oklch、红涨绿跌、tabular-nums、断点），复刻 index 一屏静态版 | 与原型视觉可对照 | 0.5–1d | ✅ 2026-10-27：脚手架 + 令牌/组件类迁移（React 19 / Vite 6 / TS 5.6，对齐 robit-gui）；index 一屏静态复刻完成——Chrome 外壳（侧栏/顶栏/行情条/移动底栏，市场时钟每秒真实走针）+ 问候区/快照卡/六入口卡/时间线/待决事项；`demo.ts` 同口径移植 `data.js`（含确定性净值曲线与 perf），41 项派生数字与原型对照逐位一致；SPA 视图切换承载 P2-T3 会话（智能问答视图），未移植屏为占位（P5 接路由） |
-| P2-T5 | 共同演进回路演练：拿一个真实框架级改动（建议就用 T3 的 SSE/Web 桥）走完 改 robit → tag → 子木 pin rev 升级 | robit 有新 tag；痛点已记入 `07` R 系列 | 0.5d | ⬜ |
+| P2-T5 | 共同演进回路演练：拿一个真实框架级改动（建议就用 T3 的 SSE/Web 桥）走完 改 robit → tag → 子木 pin rev 升级 | robit 有新 tag；痛点已记入 `07` R 系列 | 0.5d | ✅ 2026-10-27：R1 落地——robit 新基线分支 `feat/web-bridge` 新增通用 crate `robit-web`（`WebEvent` 官方 wire schema + `WebFrontend` broadcast 扇出/单槽位确认 + `WebBridge` 消息注入；零 HTTP 框架依赖，单测 9/9），提交 9e3b15d + 36b0149，本地 tag `v0.1.26`；子木 backend pin 切 `git file:///E:/Github/robit tag=v0.1.26`，zimu-server 删除宿主手写桥（SseEvent/SseFrontend/确认槽位约 150 行）改消费 robit-web，curl 冒烟 wire 逐帧兼容（connected → tool_call → tool_result → text_delta → turn_complete，前端零改动）。**未完事项**：robit `feat/web-bridge` 分支稳定后再合并推送（2026-10-27 用户定，不急于回 main）+ tag 推送 + crates.io 发布后，子木 pin 换回 registry 写法（`robit-* = "0.1.26"`），见 `backend/README.md` |
 
 **完成标准**：spike 全部跑通；若任何 0005 假设被证伪（robit API 不适配、akshare 拿不到转债数据等），回 ADR 修订再继续。
 

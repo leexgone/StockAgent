@@ -12,8 +12,10 @@
 //! robit 配置读取与 zimu-agent-cli 相同（`<cwd>/.robit/config.toml` → `~/.robit/config.toml`）；
 //! 找不到配置时**服务照常起**，仅 /api/chat* 返回 503（静态首页仍可用）。
 //!
-//! 后续（见 docs/06-roadmap.md）：P2-T5 评估把 Web 桥沉淀进 robit；
-//! 部署约束：仅内网监听，默认不开公网入站（ADR-0005）。
+//! P2-T5 起：事件投影 / 确认槽位 / 扇出由 robit-web（v0.1.26）承担，
+//! 本文件只剩 axum 接线——SSE 编码、connected 首帧（宿主元数据）、
+//! POST 端点到 `WebBridge` 的路由。部署约束：仅内网监听，默认不开
+//! 公网入站（ADR-0005）。
 
 mod agent_bridge;
 
@@ -21,7 +23,7 @@ use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use agent_bridge::{resolve_confirm, spawn_agent, AgentBridge, SseEvent};
+use agent_bridge::{spawn_agent, AgentBridge};
 use anyhow::Context;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -29,6 +31,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tower_http::{
@@ -88,12 +91,15 @@ async fn chat_stream(State(state): State<AppState>) -> Result<Response, StatusCo
     let Some(agent) = state.agent.clone() else {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     };
-    let hello = SseEvent::Connected {
-        profile: agent.profile.clone(),
-        model: agent.model.clone(),
-        tools: agent.tools.clone(),
-    };
-    let rx = agent.events.subscribe();
+    // connected 首帧是宿主元数据（robit-web 不知道子木的 profile/tools 面），
+    // wire 形状沿用 P2-T3 起前端 ChatPanel 消费的约定
+    let hello = json!({
+        "type": "connected",
+        "profile": agent.profile,
+        "model": agent.model,
+        "tools": agent.tools,
+    });
+    let rx = agent.web.subscribe();
     let stream = tokio_stream::iter(vec![sse_json(&hello)]).chain(BroadcastStream::new(rx).map(
         |res| match res {
             Ok(event) => sse_json(&event),
@@ -106,7 +112,7 @@ async fn chat_stream(State(state): State<AppState>) -> Result<Response, StatusCo
         .into_response())
 }
 
-fn sse_json(event: &SseEvent) -> Result<Event, Infallible> {
+fn sse_json(event: &impl Serialize) -> Result<Event, Infallible> {
     Ok(Event::default()
         .json_data(event)
         .unwrap_or_else(|e| {
@@ -123,7 +129,7 @@ async fn chat(State(state): State<AppState>, Json(req): Json<ChatRequest>) -> Re
     if text.is_empty() {
         return (StatusCode::BAD_REQUEST, "消息为空").into_response();
     }
-    match agent.message_tx.send(text.into()).await {
+    match agent.web.send_user_text(text).await {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(_) => agent_offline(),
     }
@@ -133,7 +139,7 @@ async fn chat_confirm(State(state): State<AppState>, Json(req): Json<ConfirmRequ
     let Some(agent) = state.agent.clone() else {
         return agent_offline();
     };
-    if resolve_confirm(&agent.confirm_slot, &req.tool_call_id, req.approved).await {
+    if agent.web.resolve_confirm(&req.tool_call_id, req.approved).await {
         StatusCode::OK.into_response()
     } else {
         (StatusCode::NOT_FOUND, "没有匹配的待确认工具调用").into_response()
@@ -145,8 +151,8 @@ async fn chat_cancel(State(state): State<AppState>) -> Response {
         return agent_offline();
     };
     match agent
-        .message_tx
-        .send(robit_agent::FrontendMessage::Cancel)
+        .web
+        .send_message(robit_agent::FrontendMessage::Cancel)
         .await
     {
         Ok(()) => StatusCode::ACCEPTED.into_response(),

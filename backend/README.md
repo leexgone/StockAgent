@@ -2,8 +2,9 @@
 
 ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开公网入站。
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
-Agent SSE 会话，P2-T3）与 `zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent
-REPL + echo 工具，保留为调试入口）。领域纯函数库（P3-T3）将来作为独立 crate 加入。
+Agent SSE 会话，P2-T3；P2-T5 起桥体消费 robit `robit-web` crate）与
+`zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent REPL + echo 工具，保留为
+调试入口）。领域纯函数库（P3-T3）将来作为独立 crate 加入。
 
 ## 运行 zimu-server
 
@@ -29,10 +30,12 @@ workspace 里有多个 bin，`cargo run` 必须带 `-p` 指明。
 
 ## 会话端点（P2-T3 SSE 桥）
 
-Agent 随服务启动装配（与 zimu-agent-cli 同一链路，`CliFrontend` 换成
-`SseFrontend`：broadcast 扇出 + 确认槽位，见 `agent_bridge.rs`）。找不到 robit
-配置时服务照常起、静态首页可用，仅 `/api/chat*` 降级 503。spike 边界：进程级
-单会话，多会话与持久化留给 P4+。
+Agent 随服务启动装配（与 zimu-agent-cli 同一链路，`CliFrontend` 换成 robit-web
+的 `WebFrontend`：`WebEvent` broadcast 扇出 + 单槽位确认，P2-T5 起由 robit
+提供）。宿主侧只剩 axum 接线（SSE 编码、`connected` 首帧、POST → `WebBridge`
+路由，见 `main.rs`）与 Agent 装配 + echo 工具（`agent_bridge.rs`）。找不到
+robit 配置时服务照常起、静态首页可用，仅 `/api/chat*` 降级 503。spike 边界：
+进程级单会话，多会话与持久化留给 P4+（robit-web 约定单会话一桥）。
 
 | 端点 | 说明 |
 |---|---|
@@ -56,8 +59,10 @@ curl.exe -s -X POST http://127.0.0.1:8080/api/chat -H "Content-Type: application
 
 ## 运行 zimu-agent-cli（P2-T2 spike）
 
-robit 核心组件直接消费 crates.io 发布版（`robit-ai` / `robit-agent` 0.1.25，
-与 robit 仓库 tag 一致，无需 path override）。
+robit 全家 pin 到 tag `v0.1.26`（P2-T5 共同演进演练：`git = "file:///E:/Github/robit"`，
+含首发的 `robit-web`）。**尾巴**：robit 分支 `feat/web-bridge` 合并推送、tag 推送、
+crates.io 发布（robit 仓库 `publish.ps1`）之后，把 `backend/Cargo.toml` 三行 git
+pin 换回 registry 写法（`robit-ai = "0.1.26"` 等）并重新 `cargo build` 验证。
 
 前置：`~/.robit/config.toml` 已配置 OpenAI 兼容 provider（本机为阿里云网关
 DashScope compatible-mode 的 qwen），api_key 可写 `${ENV_VAR}` 并从
@@ -84,9 +89,9 @@ P2-T3 把会话搬进 zimu-server 时，替换的只是 CliFrontend（换成 SSE
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 发布版，其余依赖版本与 robit workspace 对齐）
-crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话（P2-T3）
+Cargo.toml                  workspace（robit crates pin 本地 git tag v0.1.26，其余依赖版本与 robit workspace 对齐）
+crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话（P2-T3；桥体在 robit-web）
                             ├─ main.rs           端点与启动装配（robit 配置缺失时优雅降级）
-                            └─ agent_bridge.rs   SseFrontend / SseEvent / echo 工具 / Agent 装配
+                            └─ agent_bridge.rs   Agent 装配 + echo 工具（WebBridge 接线）
 crates/zimu-agent-cli/      robit 集成 spike：Agent REPL + echo 工具（P2-T2，调试入口）
 ```

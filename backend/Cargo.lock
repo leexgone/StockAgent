@@ -1728,9 +1728,8 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2023fb3c5f06460d81b2a7e1b542a885b5c320751a67e53a95acc2bb4a84012"
+version = "0.1.26"
+source = "git+file:///E:/Github/robit?tag=v0.1.26#36b014951ab558b3bd054f4054d8eb47f4bfd312"
 dependencies = [
  "async-openai",
  "async-trait",
@@ -1758,9 +1757,8 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca39fcb51614da9e34ec8d5039e42009b35809cc16542822d7487a0a1c161597"
+version = "0.1.26"
+source = "git+file:///E:/Github/robit?tag=v0.1.26#36b014951ab558b3bd054f4054d8eb47f4bfd312"
 dependencies = [
  "async-openai",
  "dirs",
@@ -1772,6 +1770,19 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "robit-web"
+version = "0.1.26"
+source = "git+file:///E:/Github/robit?tag=v0.1.26#36b014951ab558b3bd054f4054d8eb47f4bfd312"
+dependencies = [
+ "async-trait",
+ "robit-agent",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3023,6 +3034,7 @@ dependencies = [
  "axum",
  "robit-agent",
  "robit-ai",
+ "robit-web",
  "serde",
  "serde_json",
  "tokio",

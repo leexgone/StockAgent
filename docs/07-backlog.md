@@ -68,7 +68,7 @@ P2-T1 spike（2026-10-26）实测：`110074 精达转债` 新浪行情定格（o
 
 | # | 痛点 / 需求 | 状态 |
 |---|---|---|
-| R1 | **Web/SSE 桥缺官方实现**（P2-T3）：robit 的 `Frontend` trait 只有 CLI/TUI 形态的参考实现；Web 宿主需要自己写 AgentEvent→wire 类型投影、确认槽位（`request_tool_confirmation` 挂起等 HTTP 回填）、broadcast 多客户端扇出。子木的实现见 `backend/crates/zimu-server/src/agent_bridge.rs`——确认语义与事件投影都是宿主无关的重复劳动。诉求：robit 提供可选 web 桥 crate（SSE/WS 的 Frontend 通用实现 + 消息注入约定），或至少给 `AgentEvent` 一个官方序列化 schema | 🔨 P2-T5 共同演进演练的首选素材（改 robit → tag → 子木升级） |
+| R1 | **Web/SSE 桥缺官方实现**（P2-T3）：robit 的 `Frontend` trait 只有 CLI/TUI 形态的参考实现；Web 宿主需要自己写 AgentEvent→wire 类型投影、确认槽位（`request_tool_confirmation` 挂起等 HTTP 回填）、broadcast 多客户端扇出。子木的实现见 `backend/crates/zimu-server/src/agent_bridge.rs`——确认语义与事件投影都是宿主无关的重复劳动。诉求：robit 提供可选 web 桥 crate（SSE/WS 的 Frontend 通用实现 + 消息注入约定），或至少给 `AgentEvent` 一个官方序列化 schema | ✅ 2026-10-27 落地（P2-T5）：robit v0.1.26 新增 `robit-web` crate——`WebEvent` 官方 JSON schema、`WebFrontend`（broadcast 扇出 + 确认槽位）、`WebBridge`（消息注入）；子木 zimu-server 已切换消费（pin tag v0.1.26），宿主手写桥删除。尾巴：robit 分支 `feat/web-bridge` 待合并推送、crates.io 待发布，之后子木 pin 换回 registry 写法 |
 | R2 | **ToolRegistry 装配后不可扩展**（P2-T2）：`bootstrap()` / `create_tools_from_config()` 返回不可变 `Arc<ToolRegistry>`，领域工具无法追加进内置工具面；只能绕过 bootstrap 手动 `ToolRegistry::new()` + `register()`（代价：丢掉 read/bash 等通用工具）。诉求：`bootstrap_with(extra_tools)` 或让 registry 支持装配后注册 | ⬜ 待提给 robit |
 | R3 | **init_logging 独占全局 tracing subscriber**（P2-T3）：宿主服务自带日志初始化时二者只能选其一——zimu-server 现按「有 robit 配置就交给 init_logging（靠 additional_directives 补 tower_http），否则回落自建 fmt」分支处理，且失去对日志格式的自主权。诉求：提供 tracing `Layer` 形态，由宿主组合进自己的 registry | ⬜ 待提给 robit |
 

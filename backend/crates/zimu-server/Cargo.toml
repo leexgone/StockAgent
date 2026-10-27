@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 robit-ai.workspace = true
 robit-agent.workspace = true
+robit-web.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 async-trait.workspace = true
