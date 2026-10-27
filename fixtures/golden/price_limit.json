@@ -1,0 +1,10 @@
+{
+  "group": "price_limit",
+  "title": "价格合法性（涨跌停校验）",
+  "spec": "docs/03-domain-rules.md §2",
+  "schema_version": 1,
+  "status": "pending",
+  "tolerance": 1e-9,
+  "notes": "口径未定稿，runner 跳过 pending 组（03 附录）。待定稿点（= 07-backlog B2 / 路线图 P1-T2）：① 板块区分 ±10（主板）/±20（创业板、科创板）/±5（ST，识别方式依赖行情字段，P4 才有真实数据）；② 可转债 ±20% 与盘中临停机制的口径；③ ETF 的涨跌幅规则；④ 显示与拦截阈值统一（0.1% 容差写进文案还是两处同数）。定稿后先改 03 §2 消除 ⚠️，再在本文件补 cases 并把 status 改为 active。",
+  "cases": []
+}

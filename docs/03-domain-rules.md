@@ -121,8 +121,10 @@ exposure     = totalMv / totalAssets × 100             # 仓位（不含现金�
 **降到目标仓位的卖出数量**（按手向上取整，`data.js:133`）：
 
 ```
-sellTo(code, target%) = max(100, ceil((mv − totalAssets × target/100) / price / 100) × 100)
+sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price / lot) × lot)
 ```
+
+`lot` 按第 1 节取值（股票/ETF 100、转债 10）。原型写死 100（只对股票正确），P3 起实现与黄金向量按泛化公式，见文末附录约定 1。
 
 ## 7. 净值与风险指标
 
@@ -192,3 +194,56 @@ sellTo(code, target%) = max(100, ceil((mv − totalAssets × target/100) / price
 - 涨跌类名：`dirClass(v)` → `up / down / flat`；`up` 红、`down` 绿（A 股惯例）。
 - 所有数字 `tabular-nums` 等宽；代码、价格、时间走 `--font-mono`。
 - ⚠️ `up/down` 类目前被复用于「合规/违规」「买入/卖出」「好/坏」等非涨跌语义（如 `holdings.html:433`、`:388`）。在红涨绿跌的产品里这会误导读者，需要引入 `--ok / --danger / --warn` 的中性别名。
+
+## 附录 · 黄金测试向量（P3-T1，2026-10-27）
+
+`fixtures/golden/` 是本手册数字口径的唯一权威样例集：Rust 领域纯函数库（P3-T3）与 TS 共享层（P3-T4）跑**同一份文件**。改任何公式 = 先改 fixture 与对应正文小节，再改实现——两边实现永远不许「各自对拍」，只对 fixture。
+
+### 文件格式（schema_version 1）
+
+每个公式组一个 JSON 文件，文件名 = `group`：
+
+| 字段 | 含义 |
+|---|---|
+| `group` / `title` | 组 id / 中文名 |
+| `spec` | 回指本手册章节 |
+| `schema_version` | 结构版本，破坏性变更时递增 |
+| `status` | `active` 参与测试；`pending` 口径未定稿，**runner 必须跳过**（现仅 `price_limit`，等 P1-T2/B2） |
+| `tolerance` | 文件级默认容差 |
+| `notes` | 组级口径备注（公式摘要、排除项及原因） |
+| `cases[]` | `id`（组内唯一）、`fn`（多函数组必填）、`desc`（**手算过程，含精确分数**）、`tags`（`normal` / `boundary` / `empty` 三类；与持仓无关的组可不设 `empty`，如 `fees`）、`tolerance`（可选，覆盖文件级）、`input`、`expect` |
+
+### 比对规则
+
+1. **数值**：`|实现值 − 期望值| ≤ tol`。tol 取 case 级 ?? 文件级。期望值是手算小数：精确小数组用 `1e-9`；含无理数/循环小数且手算舍入到 6 位的组（`perf`、`vol_synth`、个别 case）用 `1e-5` 或 `1e-6`——容差吸收手算误差，但仍能抓住 `244→252`、分母用错这类口径错误。
+2. **布尔 / 字符串 / 枚举**：精确相等。错误文案不进 fixture，只断言 `reason` 枚举码（如 `not_lot_multiple`），中文文案是界面层职责（`05`）。
+3. **数组**：长度相同、按序对齐。`recalc` 的 `per` 与输入 `holdings` 同序；`sectors` 按市值降序——**排序本身是期望的一部分**。
+4. **`null`**：实现必须返回空（如买入无 `realized`、清仓后 `after_cost`）。
+5. **阈值判定**（`pass` / `over_limit`）：恰好压线走「含边界」语义（`≤` / `≥` 判 pass，`>` 判超限）；数值与阈值之差在 tol 以内时按「恰好等于阈值」处理，避免浮点噪声翻转边界用例。
+6. **`expect` 未列出的字段不校验**（实现可以返回更多，如 UI 辅助字段）。
+
+### 公式组 → 函数映射（P3-T3 / P3-T4 按此表实现）
+
+| 组文件 | `fn` | 正文 | 输入 → 输出概要 |
+|---|---|---|---|
+| `lot.json` | `lot_size` / `price_decimals` / `validate_qty` / `quick_tiers` | §1 | `kind`(,`side`,`qty`,`held`) → 手数 / 小数位 / `{valid,reason}` / 档位数组 |
+| `fees.json` | `fee` | §3 | `kind,side,qty,price` → `amount,commission,stamp_tax,transfer_fee,total` |
+| `dilution.json` | `apply_trade` | §4 | `kind,side,qty,price,held,cost,cash,others_mv` → 摊薄成本 / 已实现 / 现金 / 调整后仓位与超限判定 |
+| `recalc.json` | `recalc` | §5 | `cash,holdings[]` → `per[]` 逐笔派生 + `agg` 组合汇总 |
+| `discipline.json` | `check` / `sell_to` | §6 | 纪律四条 `{value,threshold,pass}` / 降仓卖出数量 |
+| `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate` |
+| `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
+| `price_limit.json` | —（pending） | §2 | ⏸ 等 P1-T2/B2 定稿：板块 ±10/±20/±5、转债 ±20%、显示与拦截统一、ST 识别 |
+
+### 本附录固定的口径（新增约定，与正文同级）
+
+1. **`sell_to` 按 lot 泛化**：原型公式写死 100 股；泛化为 `max(lot, ceil((mv − totalAssets×target/100) / price / lot) × lot)`，转债按 10 张取整。§6 公式已同步更新。
+2. **`perf` 短序列**：长度 < 2（无相邻收益）→ 全指标返回 0，不报错。
+3. **清仓**：`after_shares = 0` 时持仓行移除，`after_cost` 记 `null`。
+4. **纪律压线**：恰好等于阈值算安全（见比对规则第 5 条）。
+5. **费用输出不舍入**：§3 公式结果保留原始精度（估算口径）；分位舍入是展示层与券商结算的事，领域库不做。
+
+### 已知缝隙（已记 `07-backlog.md`，fixture 暂不校验对应字段）
+
+- **B11**：基准侧风险指标口径未定——`benchVol`（RMS vs 标准差两处实现不一致）、`sharpe` ε 守卫缺失（diagnosis 页）、beta / 相关系数 / 超额收益未收入 §7。`perf.json` 因此只校验上表列出的 7 个字段。
+- **B12**：奇零股卖出——§1「可卖整数股」与原型「买卖一律整手拦截」冲突，`lot.json` 暂按原型行为编码（case `vq-sell-odd-lot`）。

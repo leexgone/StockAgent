@@ -1,0 +1,118 @@
+{
+  "group": "recalc",
+  "title": "逐笔派生与组合汇总",
+  "spec": "docs/03-domain-rules.md §5",
+  "schema_version": 1,
+  "status": "active",
+  "tolerance": 1e-9,
+  "notes": "input = { cash, holdings[{code,kind,sector,shares,cost,price,prev}] }；expect.per 与 holdings 同序对齐，expect.agg.sectors 按市值降序（排序是期望的一部分）。所有分母为 0 时比率取 0，不得产生 NaN/Inf。行业权重 w = 行业市值/total_mv（不含现金），单票 weight = mv/total_assets（含现金）——两个分母并存是 §6 的口径，别混。",
+  "cases": [
+    {
+      "id": "rc-normal",
+      "fn": "recalc",
+      "desc": "四标的三行业混合：C1 day_chg = 5/75×100 = 20/3 ≈ 6.666667；C1 pnl_pct = 10/70×100 = 100/7 ≈ 14.285714；day_pnl = 300+0+0+50 = 350；day_pnl_pct = 350/(10000−350)×100 = 350/9650×100 = 700/193 ≈ 3.626943（分母 = 昨日总资产）；total_pnl_pct = 800/3200×100 = 25%；exposure = 4000/10000×100 = 40%；hhi = (50²+30²+20²)/10000 = 3800/10000 = 0.38",
+      "tags": ["normal"],
+      "tolerance": 1e-6,
+      "input": {
+        "cash": 6000.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "医药生物", "shares": 100, "cost": 10.0, "price": 15.0, "prev": 12.0 },
+          { "code": "S2", "kind": "stock", "sector": "医药生物", "shares": 100, "cost": 5.0, "price": 5.0, "prev": 5.0 },
+          { "code": "E1", "kind": "etf", "sector": "宽基指数", "shares": 1000, "cost": 1.0, "price": 1.2, "prev": 1.2 },
+          { "code": "C1", "kind": "cb", "sector": "有色金属", "shares": 10, "cost": 70.0, "price": 80.0, "prev": 75.0 }
+        ]
+      },
+      "expect": {
+        "per": [
+          { "code": "S1", "day_chg": 25.0, "day_val": 300.0, "mv": 1500.0, "pnl": 500.0, "pnl_pct": 50.0, "weight": 15.0 },
+          { "code": "S2", "day_chg": 0.0, "day_val": 0.0, "mv": 500.0, "pnl": 0.0, "pnl_pct": 0.0, "weight": 5.0 },
+          { "code": "E1", "day_chg": 0.0, "day_val": 0.0, "mv": 1200.0, "pnl": 200.0, "pnl_pct": 20.0, "weight": 12.0 },
+          { "code": "C1", "day_chg": 6.666667, "day_val": 50.0, "mv": 800.0, "pnl": 100.0, "pnl_pct": 14.285714, "weight": 8.0 }
+        ],
+        "agg": {
+          "cash": 6000.0, "mv_stocks": 2000.0, "mv_etf": 1200.0, "mv_cb": 800.0,
+          "total_mv": 4000.0, "total_assets": 10000.0,
+          "day_pnl": 350.0, "day_pnl_pct": 3.626943,
+          "total_pnl": 800.0, "cost_total": 3200.0, "total_pnl_pct": 25.0,
+          "exposure": 40.0,
+          "sectors": [
+            { "name": "医药生物", "v": 2000.0, "w": 50.0 },
+            { "name": "宽基指数", "v": 1200.0, "w": 30.0 },
+            { "name": "有色金属", "v": 800.0, "w": 20.0 }
+          ],
+          "hhi": 0.38, "top3_sector": 100.0
+        }
+      }
+    },
+    {
+      "id": "rc-empty",
+      "fn": "recalc",
+      "desc": "空持仓：total_assets = cash = 50000；所有分母为 0 的比率（total_pnl_pct / day_pnl_pct / exposure / hhi / top3）取 0，不产生 NaN（§5 除零防护）",
+      "tags": ["empty"],
+      "input": { "cash": 50000.0, "holdings": [] },
+      "expect": {
+        "per": [],
+        "agg": {
+          "cash": 50000.0, "mv_stocks": 0.0, "mv_etf": 0.0, "mv_cb": 0.0,
+          "total_mv": 0.0, "total_assets": 50000.0,
+          "day_pnl": 0.0, "day_pnl_pct": 0.0,
+          "total_pnl": 0.0, "cost_total": 0.0, "total_pnl_pct": 0.0,
+          "exposure": 0.0, "sectors": [], "hhi": 0.0, "top3_sector": 0.0
+        }
+      }
+    },
+    {
+      "id": "rc-all-in",
+      "fn": "recalc",
+      "desc": "满仓无现金边界：exposure = 1000/1000×100 = 100%；weight = 100%；单行业 → hhi = 100²/10000 = 1；零涨跌 → day_pnl = 0，day_pnl_pct = 0/(1000−0) = 0",
+      "tags": ["boundary"],
+      "input": {
+        "cash": 0.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "银行", "shares": 100, "cost": 10.0, "price": 10.0, "prev": 10.0 }
+        ]
+      },
+      "expect": {
+        "per": [
+          { "code": "S1", "day_chg": 0.0, "day_val": 0.0, "mv": 1000.0, "pnl": 0.0, "pnl_pct": 0.0, "weight": 100.0 }
+        ],
+        "agg": {
+          "cash": 0.0, "mv_stocks": 1000.0, "mv_etf": 0.0, "mv_cb": 0.0,
+          "total_mv": 1000.0, "total_assets": 1000.0,
+          "day_pnl": 0.0, "day_pnl_pct": 0.0,
+          "total_pnl": 0.0, "cost_total": 1000.0, "total_pnl_pct": 0.0,
+          "exposure": 100.0,
+          "sectors": [{ "name": "银行", "v": 1000.0, "w": 100.0 }],
+          "hhi": 1.0, "top3_sector": 100.0
+        }
+      }
+    },
+    {
+      "id": "rc-down-day",
+      "fn": "recalc",
+      "desc": "下跌日符号与昨日总资产分母：day_pnl = (9−10)×100 = −100；day_pnl_pct = −100/(1900−(−100))×100 = −100/2000×100 = −5%（分母 = 昨日总资产 2000，不是今日 1900）；weight = exposure = 900/1900×100 = 9/19×100 ≈ 47.368421",
+      "tags": ["normal"],
+      "tolerance": 1e-6,
+      "input": {
+        "cash": 1000.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "汽车", "shares": 100, "cost": 10.0, "price": 9.0, "prev": 10.0 }
+        ]
+      },
+      "expect": {
+        "per": [
+          { "code": "S1", "day_chg": -10.0, "day_val": -100.0, "mv": 900.0, "pnl": -100.0, "pnl_pct": -10.0, "weight": 47.368421 }
+        ],
+        "agg": {
+          "cash": 1000.0, "mv_stocks": 900.0, "mv_etf": 0.0, "mv_cb": 0.0,
+          "total_mv": 900.0, "total_assets": 1900.0,
+          "day_pnl": -100.0, "day_pnl_pct": -5.0,
+          "total_pnl": -100.0, "cost_total": 1000.0, "total_pnl_pct": -10.0,
+          "exposure": 47.368421,
+          "sectors": [{ "name": "汽车", "v": 900.0, "w": 100.0 }],
+          "hhi": 1.0, "top3_sector": 100.0
+        }
+      }
+    }
+  ]
+}

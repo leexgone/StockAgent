@@ -1,0 +1,67 @@
+{
+  "group": "fees",
+  "title": "费用估算",
+  "spec": "docs/03-domain-rules.md §3",
+  "schema_version": 1,
+  "status": "active",
+  "tolerance": 1e-9,
+  "notes": "佣金 = max(5, amount×0.00025)；印花税 = 卖出且 stock 时 amount×0.0005；过户费 = stock 时 amount×0.00001（沪深均收，B3 只改文案不改公式）。输出不做分位舍入，保留原始精度（03 附录约定 5）。",
+  "cases": [
+    {
+      "id": "fees-stock-buy-min",
+      "fn": "fee",
+      "desc": "小额买入触发最低佣金：amount = 100×25 = 2500；佣金 2500×0.00025 = 0.625 < 5 → 取 5；过户费 2500×0.00001 = 0.025；买入无印花税",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "side": "buy", "qty": 100, "price": 25.0 },
+      "expect": { "amount": 2500.0, "commission": 5.0, "stamp_tax": 0.0, "transfer_fee": 0.025, "total": 5.025 }
+    },
+    {
+      "id": "fees-stock-sell-small",
+      "fn": "fee",
+      "desc": "小额卖出仍是最低佣金：amount = 1000×15 = 15000；佣金 3.75 < 5 → 5；印花税 15000×0.0005 = 7.5；过户费 0.15",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "side": "sell", "qty": 1000, "price": 15.0 },
+      "expect": { "amount": 15000.0, "commission": 5.0, "stamp_tax": 7.5, "transfer_fee": 0.15, "total": 12.65 }
+    },
+    {
+      "id": "fees-stock-sell-large",
+      "fn": "fee",
+      "desc": "大额卖出按比例佣金：amount = 1000×1618 = 1618000；佣金 ×0.00025 = 404.5；印花税 ×0.0005 = 809；过户费 ×0.00001 = 16.18",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "side": "sell", "qty": 1000, "price": 1618.0 },
+      "expect": { "amount": 1618000.0, "commission": 404.5, "stamp_tax": 809.0, "transfer_fee": 16.18, "total": 1229.68 }
+    },
+    {
+      "id": "fees-comm-exact-5",
+      "fn": "fee",
+      "desc": "佣金临界点：amount = 200×100 = 20000，20000×0.00025 = 5.0 恰好等于最低值，max(5, 5.0) = 5",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "buy", "qty": 200, "price": 100.0 },
+      "expect": { "amount": 20000.0, "commission": 5.0, "stamp_tax": 0.0, "transfer_fee": 0.2, "total": 5.2 }
+    },
+    {
+      "id": "fees-comm-just-above",
+      "fn": "fee",
+      "desc": "刚过临界点：amount = 204×100 = 20400，佣金 20400×0.00025 = 5.1 > 5 → 按比例",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "buy", "qty": 204, "price": 100.0 },
+      "expect": { "amount": 20400.0, "commission": 5.1, "stamp_tax": 0.0, "transfer_fee": 0.204, "total": 5.304 }
+    },
+    {
+      "id": "fees-etf-sell",
+      "fn": "fee",
+      "desc": "ETF 免印花税免过户费：amount = 12000×4.291 = 51492；佣金 51492×0.00025 = 12.873；总费用 = 佣金",
+      "tags": ["normal"],
+      "input": { "kind": "etf", "side": "sell", "qty": 12000, "price": 4.291 },
+      "expect": { "amount": 51492.0, "commission": 12.873, "stamp_tax": 0.0, "transfer_fee": 0.0, "total": 12.873 }
+    },
+    {
+      "id": "fees-cb-buy",
+      "fn": "fee",
+      "desc": "转债免印花税免过户费且触发最低佣金：amount = 120×126.72 = 15206.4；佣金 3.8016 < 5 → 5",
+      "tags": ["boundary"],
+      "input": { "kind": "cb", "side": "buy", "qty": 120, "price": 126.72 },
+      "expect": { "amount": 15206.4, "commission": 5.0, "stamp_tax": 0.0, "transfer_fee": 0.0, "total": 5.0 }
+    }
+  ]
+}

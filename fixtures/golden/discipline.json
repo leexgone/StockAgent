@@ -1,0 +1,125 @@
+{
+  "group": "discipline",
+  "title": "仓位纪律四条与降仓数量",
+  "spec": "docs/03-domain-rules.md §6",
+  "schema_version": 1,
+  "status": "active",
+  "tolerance": 1e-9,
+  "notes": "check 的四条规则分母不统一（务必照抄 §6 表格）：单票 = mv/total_assets、行业 = 行业市值/total_mv、转债合计 = Σmv(cb)/total_assets、现金 = cash/total_assets。pass 语义：上限规则 value ≤ threshold、现金规则 value ≥ threshold 为 pass；恰好压线 = pass，与阈值差在容差内按相等处理（03 附录比对规则第 5 条）。sell_to 用泛化 lot 公式（附录约定 1）。",
+  "cases": [
+    {
+      "id": "dc-normal",
+      "fn": "check",
+      "desc": "混合组合（与 recalc.json rc-normal 同一输入）：单票最大 S1 = 1500/10000 = 15% ≤ 25 安全；行业最大 医药生物 = 2000/4000 = 50% > 35 已触及；转债合计 = 800/10000 = 8% ≤ 12 安全；现金 = 6000/10000 = 60% ≥ 10 安全",
+      "tags": ["normal"],
+      "input": {
+        "cash": 6000.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "医药生物", "shares": 100, "cost": 10.0, "price": 15.0, "prev": 12.0 },
+          { "code": "S2", "kind": "stock", "sector": "医药生物", "shares": 100, "cost": 5.0, "price": 5.0, "prev": 5.0 },
+          { "code": "E1", "kind": "etf", "sector": "宽基指数", "shares": 1000, "cost": 1.0, "price": 1.2, "prev": 1.2 },
+          { "code": "C1", "kind": "cb", "sector": "有色金属", "shares": 10, "cost": 70.0, "price": 80.0, "prev": 75.0 }
+        ]
+      },
+      "expect": {
+        "single_stock": { "value": 15.0, "threshold": 25.0, "pass": true },
+        "sector": { "value": 50.0, "threshold": 35.0, "pass": false },
+        "cb_total": { "value": 8.0, "threshold": 12.0, "pass": true },
+        "cash_reserve": { "value": 60.0, "threshold": 10.0, "pass": true }
+      }
+    },
+    {
+      "id": "dc-exact-thresholds",
+      "fn": "check",
+      "desc": "四条同时恰好压线（含边界 = 安全）：total_mv = 2500+650+1200+2350+2300 = 9000，cash 1000 → total_assets = 10000；单票最大 = 2500/10000 = 25.0%；行业最大 A = (2500+650)/9000 = 3150/9000 = 35.0%；转债 = 1200/10000 = 12.0%；现金 = 1000/10000 = 10.0%",
+      "tags": ["boundary"],
+      "input": {
+        "cash": 1000.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "A", "shares": 100, "cost": 25.0, "price": 25.0, "prev": 25.0 },
+          { "code": "S2", "kind": "stock", "sector": "A", "shares": 100, "cost": 6.5, "price": 6.5, "prev": 6.5 },
+          { "code": "C1", "kind": "cb", "sector": "B", "shares": 10, "cost": 120.0, "price": 120.0, "prev": 120.0 },
+          { "code": "E1", "kind": "etf", "sector": "C", "shares": 1000, "cost": 2.35, "price": 2.35, "prev": 2.35 },
+          { "code": "E2", "kind": "etf", "sector": "D", "shares": 1000, "cost": 2.3, "price": 2.3, "prev": 2.3 }
+        ]
+      },
+      "expect": {
+        "single_stock": { "value": 25.0, "threshold": 25.0, "pass": true },
+        "sector": { "value": 35.0, "threshold": 35.0, "pass": true },
+        "cb_total": { "value": 12.0, "threshold": 12.0, "pass": true },
+        "cash_reserve": { "value": 10.0, "threshold": 10.0, "pass": true }
+      }
+    },
+    {
+      "id": "dc-just-over",
+      "fn": "check",
+      "desc": "单票刚过线：mv = 100×25.10 = 2510，cash 7490 → total_assets = 10000；单票 = 2510/10000 = 25.1% > 25 已触及；唯一行业 = 2510/2510 = 100% > 35 已触及；无转债 = 0 安全；现金 = 7490/10000 = 74.9% 安全",
+      "tags": ["boundary"],
+      "input": {
+        "cash": 7490.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "A", "shares": 100, "cost": 25.1, "price": 25.1, "prev": 25.1 }
+        ]
+      },
+      "expect": {
+        "single_stock": { "value": 25.1, "threshold": 25.0, "pass": false },
+        "sector": { "value": 100.0, "threshold": 35.0, "pass": false },
+        "cb_total": { "value": 0.0, "threshold": 12.0, "pass": true },
+        "cash_reserve": { "value": 74.9, "threshold": 10.0, "pass": true }
+      }
+    },
+    {
+      "id": "dc-empty",
+      "fn": "check",
+      "desc": "空持仓：前三条分子为 0 → value 0 安全；现金 = 50000/50000 = 100% ≥ 10 安全",
+      "tags": ["empty"],
+      "input": { "cash": 50000.0, "holdings": [] },
+      "expect": {
+        "single_stock": { "value": 0.0, "threshold": 25.0, "pass": true },
+        "sector": { "value": 0.0, "threshold": 35.0, "pass": true },
+        "cb_total": { "value": 0.0, "threshold": 12.0, "pass": true },
+        "cash_reserve": { "value": 100.0, "threshold": 10.0, "pass": true }
+      }
+    },
+    {
+      "id": "st-normal",
+      "fn": "sell_to",
+      "desc": "超出目标较多但不足一手：excess = 1500 − 10000×10/100 = 500；500/15 = 33.33 股；ceil(33.33/100)×100 = 100；max(100, 100) = 100",
+      "tags": ["normal"],
+      "input": { "mv": 1500.0, "price": 15.0, "total_assets": 10000.0, "target": 10.0, "lot": 100 },
+      "expect": { "qty": 100 }
+    },
+    {
+      "id": "st-exact-lots",
+      "fn": "sell_to",
+      "desc": "恰好整手：excess = 8000 − 20000×15/100 = 8000 − 3000 = 5000；5000/25 = 200 股；ceil(200/100)×100 = 200",
+      "tags": ["normal"],
+      "input": { "mv": 8000.0, "price": 25.0, "total_assets": 20000.0, "target": 15.0, "lot": 100 },
+      "expect": { "qty": 200 }
+    },
+    {
+      "id": "st-ceil-up",
+      "fn": "sell_to",
+      "desc": "零股向上取整到手：excess = 6500 − 20000×25/100 = 1500；1500/10 = 150 股；ceil(150/100) = 2 → 200 股",
+      "tags": ["boundary"],
+      "input": { "mv": 6500.0, "price": 10.0, "total_assets": 20000.0, "target": 25.0, "lot": 100 },
+      "expect": { "qty": 200 }
+    },
+    {
+      "id": "st-below-target",
+      "fn": "sell_to",
+      "desc": "已在目标线下仍返回最小一手：excess = 1000 − 2500 = −1500；−1500/10 = −150 股；ceil(−150/100) = −1 → −100；max(100, −100) = 100（公式的 max(lot,·) 语义：卖就至少一手，是否真要卖由调用方判断）",
+      "tags": ["boundary"],
+      "input": { "mv": 1000.0, "price": 10.0, "total_assets": 10000.0, "target": 25.0, "lot": 100 },
+      "expect": { "qty": 100 }
+    },
+    {
+      "id": "st-cb-lot",
+      "fn": "sell_to",
+      "desc": "转债按 10 张一手（附录约定 1 的泛化公式）：excess = 1300 − 10000×10/100 = 300；300/130 ≈ 2.31 张；ceil(2.31/10)×10 = 10",
+      "tags": ["boundary"],
+      "input": { "mv": 1300.0, "price": 130.0, "total_assets": 10000.0, "target": 10.0, "lot": 10 },
+      "expect": { "qty": 10 }
+    }
+  ]
+}

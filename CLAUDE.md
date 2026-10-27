@@ -12,6 +12,7 @@ backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum�
 frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话），令牌在 src/styles/tokens.css
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare），P2-T1 spike 产物
 design/            界面原型：7 个 html + assets/{ui.css, data.js, charts.js}
+fixtures/golden/   黄金测试向量（P3）：数字口径的权威样例集，Rust 领域库与 TS 共享层跑同一份；schema 见 03 附录
 docs/              产品规格与工程规范（编号即阅读顺序）
 docs/decisions/    ADR 决策记录
 ```

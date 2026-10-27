@@ -1,0 +1,139 @@
+{
+  "group": "lot",
+  "title": "标的属性与交易单位",
+  "spec": "docs/03-domain-rules.md §1",
+  "schema_version": 1,
+  "status": "active",
+  "tolerance": 1e-9,
+  "notes": "错误文案不进 fixture，只断言 reason 枚举码（not_lot_multiple / exceeds_held），文案是界面层职责。奇零股卖出与 §1「可卖整数股」的冲突待 B12 定稿，vq-sell-odd-lot 暂按原型行为编码。",
+  "cases": [
+    {
+      "id": "lot-stock",
+      "fn": "lot_size",
+      "desc": "股票 1 手 = 100 股",
+      "tags": ["normal"],
+      "input": { "kind": "stock" },
+      "expect": { "lot": 100 }
+    },
+    {
+      "id": "lot-etf",
+      "fn": "lot_size",
+      "desc": "ETF 1 手 = 100 份",
+      "tags": ["normal"],
+      "input": { "kind": "etf" },
+      "expect": { "lot": 100 }
+    },
+    {
+      "id": "lot-cb",
+      "fn": "lot_size",
+      "desc": "可转债 1 手 = 10 张",
+      "tags": ["normal"],
+      "input": { "kind": "cb" },
+      "expect": { "lot": 10 }
+    },
+    {
+      "id": "dec-stock",
+      "fn": "price_decimals",
+      "desc": "股票报价 2 位小数",
+      "tags": ["normal"],
+      "input": { "kind": "stock" },
+      "expect": { "decimals": 2 }
+    },
+    {
+      "id": "dec-etf",
+      "fn": "price_decimals",
+      "desc": "ETF 报价 3 位小数",
+      "tags": ["normal"],
+      "input": { "kind": "etf" },
+      "expect": { "decimals": 3 }
+    },
+    {
+      "id": "dec-cb",
+      "fn": "price_decimals",
+      "desc": "转债报价 3 位小数（§1 表格即定稿口径；抽屉显示 2 位的 bug 由 B4/P1-T3 修）",
+      "tags": ["normal"],
+      "input": { "kind": "cb" },
+      "expect": { "decimals": 3 }
+    },
+    {
+      "id": "vq-buy-ok",
+      "fn": "validate_qty",
+      "desc": "买 300 股，为 100 的整数倍 → 合法",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "side": "buy", "qty": 300, "held": 0 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vq-buy-not-lot",
+      "fn": "validate_qty",
+      "desc": "买 250 股，250 % 100 = 50 ≠ 0 → 拒绝",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "buy", "qty": 250, "held": 0 },
+      "expect": { "valid": false, "reason": "not_lot_multiple" }
+    },
+    {
+      "id": "vq-cb-not-lot",
+      "fn": "validate_qty",
+      "desc": "买 25 张转债，25 % 10 = 5 ≠ 0 → 拒绝",
+      "tags": ["boundary"],
+      "input": { "kind": "cb", "side": "buy", "qty": 25, "held": 0 },
+      "expect": { "valid": false, "reason": "not_lot_multiple" }
+    },
+    {
+      "id": "vq-sell-over",
+      "fn": "validate_qty",
+      "desc": "卖 300 但持仓 200 → 拒绝（reason 报超出持仓）",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "sell", "qty": 300, "held": 200 },
+      "expect": { "valid": false, "reason": "exceeds_held" }
+    },
+    {
+      "id": "vq-sell-full",
+      "fn": "validate_qty",
+      "desc": "卖出全部持仓 200 = held → 合法（清仓）",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "sell", "qty": 200, "held": 200 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vq-sell-odd-lot",
+      "fn": "validate_qty",
+      "desc": "卖 150 股（奇零股，150 % 100 ≠ 0）：原型买卖一律按整手倍数拦截；与 §1「可卖整数股」及 A 股奇零股规则的冲突记 B12，定稿后更新本用例",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "sell", "qty": 150, "held": 150 },
+      "expect": { "valid": false, "reason": "not_lot_multiple" }
+    },
+    {
+      "id": "qt-held-normal",
+      "fn": "quick_tiers",
+      "desc": "持仓 1250 股卖出：base = max(100, 1250) = 1250；10% = 125 → floor(125/100)×100 = 100；25% = 312.5 → floor(312.5/100)×100 = 300；50% = 625 → floor(625/100)×100 = 600；卖出追加「全部清仓」= held",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "side": "sell", "held": 1250 },
+      "expect": { "tiers": [100, 300, 600, 1250] }
+    },
+    {
+      "id": "qt-empty",
+      "fn": "quick_tiers",
+      "desc": "空持仓买入：base = 10 手 = 1000；10% = 100 → 100；25% = 250 → floor(250/100)×100 = 200；50% = 500 → 500；买入无清仓档",
+      "tags": ["empty"],
+      "input": { "kind": "stock", "side": "buy", "held": 0 },
+      "expect": { "tiers": [100, 200, 500] }
+    },
+    {
+      "id": "qt-odd-held",
+      "fn": "quick_tiers",
+      "desc": "持仓 90 股（不足一手）：base = max(100, 90) = 100；三档 floor 后均为 0，按「每档至少一手」回落到 100",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "buy", "held": 90 },
+      "expect": { "tiers": [100, 100, 100] }
+    },
+    {
+      "id": "qt-cb",
+      "fn": "quick_tiers",
+      "desc": "持有 30 张转债卖出：base = 30；10% = 3 → floor(3/10)×10 = 0 → 回落 10；25% = 7.5 → 0 → 10；50% = 15 → floor(15/10)×10 = 10；追加清仓 30",
+      "tags": ["boundary"],
+      "input": { "kind": "cb", "side": "sell", "held": 30 },
+      "expect": { "tiers": [10, 10, 10, 30] }
+    }
+  ]
+}
