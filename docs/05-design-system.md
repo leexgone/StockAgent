@@ -16,13 +16,17 @@
 | 涨跌 | `--up` | `55% .19 22`（**红**） | 上涨、正收益 |
 | | `--down` | `50% .13 152`（**绿**） | 下跌、亏损 |
 | | `--flat` | `60% .01 240` | 持平 |
-| 状态 | `--warn` / `--danger` / `--ok` | | 提示、危险、通过 |
+| 状态（好坏轴） | `--warn` | `66% .14 78`（黄） | 提示、接近限制 |
+| | `--danger` | `52% .2 22`（红） | 危险、违规、优先、资金不足 |
+| | `--ok` | `55% .14 152`（绿） | 通过、安全、质量良好 |
+| | `--warn-soft / --danger-soft / --ok-soft` | `96%` 浅底 | pill 与浅底态 |
+| 交易方向 | `--buy` / `--sell`（含 `-soft`） | `--up` / `--down` 的别名 | 买卖、加减仓、结论标签——A 股红买绿卖，类名不借 `up/down` |
 
 ### 三条不可违背的语义规则
 
 1. **红涨绿跌**（A 股惯例）。不要按西方习惯反过来，也不要给「好/坏」另设一套颜色还复用 `--up/--down`。
 2. `--accent` **每屏不超过两处**，只用于交互态。它不参与涨跌与状态表达。
-3. `--up/--down` 只作用于数字与标记，**不做装饰**。需要表达合规/风险状态时用 `--warn/--danger/--ok`。⚠️ 现状是 `up/down` 类被复用于「已触及/安全」「买入/卖出」（见 `03` 第 11 节），需要一次语义清理。
+3. `--up/--down` 只作用于涨跌方向的数字与标记，**不做装饰**。好坏轴（合规/质量/反馈）用 `--ok/--warn/--danger`（`.ok/.warn/.danger` 类与同名 pill），交易方向（买卖、加减仓、结论标签）用 `.buy/.sell`（红买绿卖，`--up/--down` 别名令牌）。语义清理已随 P1-T4 完成（2026-10-28），逐类映射见 `03` 第 11 节。
 
 ## 排版
 
@@ -45,7 +49,7 @@
 
 ## 组件清单（`ui.css` 的分区）
 
-`外壳（.shell/.sidebar/.topbar/.strip/.mtabs/.mtab）` · `页面骨架（.page/.page-head/.page-title/.eyebrow/.card/.grid/.g-2/.g-3/.g-4/.g-even/.g-main）` · `指标（.metric-label/.metric-value(-sm/-lg)/.metric-meta/.delta/.pill(.accent/.up/.down/.warn/.plain)）` · `表格（.tbl-wrap/.tbl）` · `控件（.btn/.btn-primary/.btn-sm/.seg/.input/.textarea/.select/.switch/.kbd/.hint/.ic）` · `图表（.chart/.spark/.crosshair-tip/.bar-line/.progress）` · `浮层（.scrim/.drawer/.modal/.toasts/.toast）` · `列表与时间线（.list/.list-item/.tl/.tl-item/.empty）` · `页脚免责（.footnote）`
+`外壳（.shell/.sidebar/.topbar/.strip/.mtabs/.mtab）` · `页面骨架（.page/.page-head/.page-title/.eyebrow/.card/.grid/.g-2/.g-3/.g-4/.g-even/.g-main）` · `指标（.metric-label/.metric-value(-sm/-lg)/.metric-meta/.delta/.pill(.accent/.up/.down/.warn/.ok/.danger/.buy/.sell/.plain)）` · `表格（.tbl-wrap/.tbl）` · `控件（.btn/.btn-primary/.btn-sm/.seg/.input/.textarea/.select/.switch/.kbd/.hint/.ic）` · `图表（.chart/.spark/.crosshair-tip/.bar-line/.progress）` · `浮层（.scrim/.drawer/.modal/.toasts/.toast）` · `列表与时间线（.list/.list-item/.tl/.tl-item/.empty）` · `页脚免责（.footnote）`
 
 新增组件请放进 `ui.css` 对应分区（分区以 `/* === */` 注释标出），不要新建顶层分区。
 

@@ -28,11 +28,19 @@
   --down-soft: oklch(96.5% 0.02 152);
   --flat:      oklch(60% 0.01 240);
 
-  /* —— 语义：状态 —— */
+  /* —— 语义：状态（好坏轴，与涨跌色分离，B5→P1-T4） —— */
   --warn:      oklch(66% 0.14 78);
   --warn-soft: oklch(96% 0.03 78);
   --danger:    oklch(52% 0.2 22);
+  --danger-soft: oklch(96% 0.03 22);
   --ok:        oklch(55% 0.14 152);
+  --ok-soft:   oklch(96% 0.03 152);
+
+  /* —— 语义：交易方向（A股红买绿卖 = 涨跌色别名；页面只引用 --buy/--sell 与 .buy/.sell 类，不再借 up/down 表达买卖） —— */
+  --buy:       var(--up);
+  --buy-soft:  var(--up-soft);
+  --sell:      var(--down);
+  --sell-soft: var(--down-soft);
 
   /* —— 字体 —— */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
@@ -257,6 +265,11 @@ button { cursor: pointer; }
 .up-bg { background: var(--up-soft); }
 .down-bg { background: var(--down-soft); }
 
+/* 状态类（好坏轴）：合规/质量/反馈用 .ok/.warn/.danger，不得借 .up/.down（B5，映射见 03 §11） */
+.ok { color: var(--ok); }
+.warn { color: oklch(48% 0.12 78); }   /* --warn 调深保证小字号对比度，与 .pill.warn 文字同值 */
+.danger { color: var(--danger); }
+
 .pill {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11.5px; font-weight: 550; letter-spacing: .02em;
@@ -267,6 +280,10 @@ button { cursor: pointer; }
 .pill.up { background: var(--up-soft); color: var(--up); border-color: color-mix(in oklab, var(--up) 22%, transparent); }
 .pill.down { background: var(--down-soft); color: var(--down); border-color: color-mix(in oklab, var(--down) 22%, transparent); }
 .pill.warn { background: var(--warn-soft); color: oklch(48% 0.12 78); border-color: color-mix(in oklab, var(--warn) 30%, transparent); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); border-color: color-mix(in oklab, var(--ok) 30%, transparent); }
+.pill.danger { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); }
+.pill.buy { background: var(--buy-soft); color: var(--buy); border-color: color-mix(in oklab, var(--buy) 22%, transparent); }
+.pill.sell { background: var(--sell-soft); color: var(--sell); border-color: color-mix(in oklab, var(--sell) 22%, transparent); }
 .pill.plain { background: transparent; }
 .pill svg { width: 11px; height: 11px; stroke-width: 2; }
 
@@ -329,7 +346,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--fg-2); }
 .btn-ghost:hover { background: var(--surface-2); }
 .btn-danger { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); background: transparent; }
-.btn-danger:hover { background: var(--up-soft); }
+.btn-danger:hover { background: var(--danger-soft); }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .btn-block { width: 100%; }
 
@@ -483,8 +500,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   background: var(--surface); border: 2px solid var(--border-2);
 }
 .tl-item.hot::before { border-color: var(--accent); }
-.tl-item.up::before { border-color: var(--up); }
-.tl-item.down::before { border-color: var(--down); }
 .tl-time { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: -.01em; }
 .tl-title { font-size: 13px; font-weight: 550; margin-top: 3px; }
 .tl-body { font-size: 12.5px; color: var(--fg-2); margin-top: 5px; line-height: 1.6; max-width: 68ch; }

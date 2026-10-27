@@ -14,7 +14,7 @@
   .fix { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--border); align-items: start; }
   .fix:last-child { border-bottom: 0; }
   .fix .no { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; background: var(--surface-2); color: var(--fg-2); border: 1px solid var(--border); }
-  .fix.p1 .no { background: var(--up); color: #fff; border-color: var(--up); }
+  .fix.p1 .no { background: var(--danger); color: #fff; border-color: var(--danger); }
   .fix.p2 .no { background: var(--warn); color: #fff; border-color: var(--warn); }
   .fix h4 { font-size: 13.5px; font-family: var(--font-ui); font-weight: 550; letter-spacing: 0; }
   .fix p { font-size: 12.5px; color: var(--fg-2); line-height: 1.65; margin-top: 5px; max-width: 64ch; }
@@ -162,8 +162,8 @@
     const cells = [
       ['区间收益', D.pct(k.cum), `基准 ${D.pct(k.bcum)}`, D.dirClass(k.cum)],
       ['超额收益', D.pct(k.ex), k.ex >= 0 ? '跑赢基准' : '跑输基准', D.dirClass(k.ex)],
-      ['年化波动率', k.vol.toFixed(1) + '%', `基准 ${k.bvol.toFixed(1)}%`, k.vol > k.bvol ? 'up' : 'down'],
-      ['最大回撤', k.m1.toFixed(1) + '%', `基准 ${k.m2.toFixed(1)}%`, k.m1 < k.m2 ? 'up' : 'down'],
+      ['年化波动率', k.vol.toFixed(1) + '%', `基准 ${k.bvol.toFixed(1)}%`, k.vol > k.bvol ? 'danger' : 'ok'],
+      ['最大回撤', k.m1.toFixed(1) + '%', `基准 ${k.m2.toFixed(1)}%`, k.m1 < k.m2 ? 'danger' : 'ok'],
       ['与基准相关系数', k.rho.toFixed(2), `Beta ${k.beta.toFixed(2)}`, ''],
       ['日度跑赢频率', k.winRate.toFixed(0) + '%', `${k.r.length} 个交易日`, ''],
     ];
@@ -276,7 +276,7 @@
         <span class="no">${i + 1}</span>
         <div><h4>${f.t}</h4><p>${f.d}</p><div class="calc">${f.c()}</div></div>
         <div style="display:flex;gap:6px;flex-direction:column;align-items:flex-end">
-          ${f.p === 1 ? '<span class="pill up">优先</span>' : f.p === 2 ? '<span class="pill warn">建议</span>' : '<span class="pill">可选</span>'}
+          ${f.p === 1 ? '<span class="pill danger">优先</span>' : f.p === 2 ? '<span class="pill warn">建议</span>' : '<span class="pill">可选</span>'}
           ${f.code ? `<a class="btn btn-sm" href="holdings.html?code=${f.code}&side=${f.side || 'sell'}&qty=100">试算</a>` : `<button class="btn btn-sm" data-fix-ack="${i}">知道了</button>`}
         </div>
       </div>`).join('');

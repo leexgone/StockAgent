@@ -56,7 +56,7 @@
           <!-- 通道 -->
           <section class="card" data-od-id="wx-channel-card">
             <div class="card-head"><div><div class="card-title">接入通道</div><div class="card-sub">主通道失败时自动改用备用通道重试一次</div></div>
-              <div class="head-actions"><span class="pill up" id="chan-status">—</span></div></div>
+              <div class="head-actions"><span class="pill" id="chan-status">—</span></div></div>
             <div id="channels"></div>
           </section>
 
@@ -194,7 +194,7 @@
       <div class="chan" data-od-id="channel-${i}">
         <span class="ic">${c.id === 'desk' ? D.ICONS.bell : D.ICONS.wechat}</span>
         <div><div style="font-size:13px;font-weight:550">${c.name}
-          <span class="pill ${c.on ? (c.ok ? 'up' : 'warn') : ''}" style="margin-left:6px">${c.on ? (c.ok ? '正常' : '异常') : '未启用'}</span></div>
+          <span class="pill ${c.on ? (c.ok ? 'ok' : 'warn') : ''}" style="margin-left:6px">${c.on ? (c.ok ? '正常' : '异常') : '未启用'}</span></div>
           <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${c.desc} · 最近发送 ${c.last}</div></div>
         <span style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-sm" data-chan-test="${i}">测一下</button>
@@ -204,7 +204,7 @@
     const usable = state.channels.filter(c => c.on && c.ok).length;
     const badge = document.getElementById('chan-status');
     badge.textContent = `${usable} / ${state.channels.length} 可用`;
-    badge.className = 'pill ' + (usable >= 1 ? 'up' : 'warn');
+    badge.className = 'pill ' + (usable >= 1 ? 'ok' : 'warn');
   }
 
   /* ---------- 订阅 ---------- */
@@ -223,7 +223,7 @@
   function renderBind() {
     const badge = document.getElementById('bind-badge');
     badge.textContent = state.bound ? '已绑定' : '未绑定';
-    badge.className = 'pill ' + (state.bound ? 'up' : 'warn');
+    badge.className = 'pill ' + (state.bound ? 'ok' : 'warn');
     document.getElementById('bind-sub').textContent = state.bound
       ? `${D.ws.wechat} · 最近同步 今日 15:05`
       : '扫码重新绑定即可恢复推送';

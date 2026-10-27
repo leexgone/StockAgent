@@ -10,10 +10,6 @@
 
 ## 一致性
 
-### B5 · `up / down` 类被复用于非涨跌语义
-
-`holdings.html:433` 用 `up` 表示「已触及纪律上限」、`:388` 用 `up/down` 表示买入/卖出、`analysis.html:315` 用它们表示维度得分高低、`charts.js:158` 的 gauge 用它们表示分数。在红涨绿跌的产品里，「红色 = 危险」和「红色 = 上涨」会同时出现且互相冲突。需要引入 `--ok/--warn/--danger` 的用法并逐处替换。
-
 ### B6 · 演示数字靠正则改写中文句子维持一致
 
 `data.js:259` 用 `replace(/当前 [\d.]+%/g, …)` 把写死在文案里的百分比覆盖成计算值。目前能对齐，但只匹配「当前 X%」「占总资产 X%」两种句式——`advice` 里还有「减 200 股」「回落到 25% 以下」等句子不受保护。接真实数据后应改为模板插值。
@@ -61,6 +57,14 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 | R3 | **init_logging 独占全局 tracing subscriber**（P2-T3）：宿主服务自带日志初始化时二者只能选其一——zimu-server 现按「有 robit 配置就交给 init_logging（靠 additional_directives 补 tower_http），否则回落自建 fmt」分支处理，且失去对日志格式的自主权。诉求：提供 tracing `Layer` 形态，由宿主组合进自己的 registry | ⬜ 待提给 robit |
 
 ## 已修复（存档）
+
+### B5 · `up / down` 类被复用于非涨跌语义 —— 2026-10-28 修复（P1-T4）
+
+**原现象**：`holdings.html` 用 `up` 表示「已触及纪律上限」、`up/down` 表示买卖流水；`analysis.html` 用它们表示维度得分高低、建议排序与结论标签；`charts.js` gauge 用它们表示分数；`diagnosis.html` 用它们表示优先级与风险指标好坏；`wechat.html` 用它们表示通道正常/已绑定；`index.html` 用它们表示待决事项「限期/减仓」——在红涨绿跌的产品里，「红色 = 危险」和「红色 = 上涨」同屏出现且互相冲突。
+
+**修复**：三类语义分离（`03` §11 定稿、`05` 令牌表与三条规则更新）——① **好坏轴**用 `.ok/.warn/.danger` 类与同名 pill（新增 `--ok-soft/--danger-soft` 浅底令牌），替换纪律「已触及/安全」、维度得分条、得分弧（≥70 ok / 55–69 warn / <55 danger 红绿灯）、风险指标对比基准、通道状态、反馈标记、资金不足提示、优先级（p1 = danger）；② **交易方向**用 `.buy/.sell`（新增 `--buy/--sell` = `--up/--down` 别名令牌，A 股红买绿卖视觉不变、类名解耦），替换流水买卖、历史建议动作、结论标签、待决事项「减仓」；③ `up/down` 退回涨跌数字/标记与预警 `level` 词汇。顺带：删除 inviting 复用的 `.tl-item.up/.down` 死样式；纪律安全态进度条由 `--accent` 改 `--fg-2`（accent 只用于交互态，05 规则 2）；`.btn-danger:hover` 底色改用 `--danger-soft`。frontend `tokens.css / ui.css / HomeScreen.tsx` 镜像同步（兑现 P2-T4 注释里「届时两边一起改」的约定）。
+
+**验证**：vm 沙箱断言两份 ui.css/tokens.css 含新令牌与类、7 页 + charts.js 无遗留复用点（dashboard 超额收益/归因与预警 `level` 属合法涨跌语义，保留）；`npm run build` 通过。视觉变化（有意为之）：得分弧/维度条/排序 pill 由「高分红」转红绿灯（高分绿）、中档由 accent 蓝转 warn 黄；微信「正常/已绑定」由红转绿；纪律安全条由蓝转灰。
 
 ### B8 · 死代码：现金规则 ternary 两分支相同 —— 2026-10-28 修复（P1-T6）
 

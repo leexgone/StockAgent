@@ -155,7 +155,7 @@
       return `M${s0[0]} ${s0[1]} A${r} ${r} 0 ${to - from > Math.PI ? 1 : 0} 1 ${s1[0]} ${s1[1]}`;
     };
     const frac = Math.max(0, Math.min(1, score / 100));
-    const col = score >= 70 ? css('--up') : score >= 55 ? css('--accent') : css('--down');
+    const col = score >= 70 ? css('--ok') : score >= 55 ? css('--warn') : css('--danger');   // 质量红绿灯（B5：得分不是涨跌）
     el.innerHTML = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" class="chart">
       <path d="${arc(C0, C0 + Math.PI)}" fill="none" stroke="${css('--surface-2')}" stroke-width="9" stroke-linecap="round"/>
       <path d="${arc(C0, C0 + Math.PI * frac)}" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round"/>

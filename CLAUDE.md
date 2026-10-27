@@ -1,6 +1,6 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T2/T3/T5/T6 ✅，余 T1、T4、T7–T9）。下一步主线 P1 → P4（数据管道，前置 C5/C8 拍板）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
+个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T2–T6 ✅，余 T1、T7–T9）。下一步主线 P1 → P4（数据管道，前置 C5/C8 拍板）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
 
 产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
@@ -45,7 +45,7 @@ docs/decisions/    ADR 决策记录
 - 逐笔派生与全部汇总只出自 `ZM.recalc()`：价格、持仓、现金变动后必须调用（`tickPrices` 内部已调）；页面不得自行补算派生值、不得给 `ZM` 挂新属性，改现金要写 `ZM.ws.cash` 而不是 `ZM.cash`。
 - 每个可走查的区块带 `data-od-id="..."`（kebab-case，重复项用 `-0`、`-1` 下标），设计走查与自动化截图依赖它。
 - 每个页面底部保留 `*-disclaimer` 免责区块，新增界面不能漏。
-- 涨跌配色按 A 股惯例：`--up` 红 = 涨，`--down` 绿 = 跌，只用于数字与标记；这两个类**不要复用来表达「合规/违规」「好/坏」**（语义已经不够用了，见 backlog）。
+- 涨跌配色按 A 股惯例：`--up` 红 = 涨，`--down` 绿 = 跌，只用于涨跌方向的数字与标记。好坏轴（合规/违规、得分、状态）用 `.ok/.warn/.danger`，交易方向（买入/卖出、加仓/减仓）用 `.buy/.sell`（`--up/--down` 别名令牌）——三套语义禁止混类（P1-T4 定稿，映射见 `03` §11、令牌见 `05`）。
 - `--accent` 每屏不超过两处，只用于交互态。
 
 **中文文案**

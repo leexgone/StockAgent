@@ -149,9 +149,9 @@
 
   /* 待决事项 */
   const ATT = [
-    { t: '把比亚迪仓位降到 15% 附近', d: '减 200 股（整手）即可，不必拆很多笔', href: 'analysis.html?code=002594', pill: '减仓', cls: 'down' },
+    { t: '把比亚迪仓位降到 15% 附近', d: '减 200 股（整手）即可，不必拆很多笔', href: 'analysis.html?code=002594', pill: '减仓', cls: 'sell' },
     { t: '科创50ETF 触及 +12% 止盈线', d: '可分批止盈 3,000 份，或把止盈线上移到 +18%', href: 'holdings.html', pill: '止盈', cls: 'warn' },
-    { t: '11-20 前处理博威转债', d: '强赎最后交易日前卖出或转股，逾期将承担额外损失', href: 'analysis.html?code=113650', pill: '限期', cls: 'up' },
+    { t: '11-20 前处理博威转债', d: '强赎最后交易日前卖出或转股，逾期将承担额外损失', href: 'analysis.html?code=113650', pill: '限期', cls: 'danger' },
   ];
   document.getElementById('home-attention').innerHTML = ATT.map((a, i) => `
     <a class="list-item" href="${a.href}" data-od-id="attention-item-${i}">

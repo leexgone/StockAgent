@@ -30,11 +30,19 @@
   --down-soft: oklch(96.5% 0.02 152);
   --flat:      oklch(60% 0.01 240);
 
-  /* —— 语义：状态 —— */
+  /* —— 语义：状态（好坏轴，与涨跌色分离，B5→P1-T4） —— */
   --warn:      oklch(66% 0.14 78);
   --warn-soft: oklch(96% 0.03 78);
   --danger:    oklch(52% 0.2 22);
+  --danger-soft: oklch(96% 0.03 22);
   --ok:        oklch(55% 0.14 152);
+  --ok-soft:   oklch(96% 0.03 152);
+
+  /* —— 语义：交易方向（A股红买绿卖 = 涨跌色别名；组件只引用 --buy/--sell 与 .buy/.sell 类） —— */
+  --buy:       var(--up);
+  --buy-soft:  var(--up-soft);
+  --sell:      var(--down);
+  --sell-soft: var(--down-soft);
 
   /* —— 字体 —— */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",

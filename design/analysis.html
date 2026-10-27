@@ -20,8 +20,8 @@
     font-family: var(--font-display); font-size: 30px; font-weight: 590; letter-spacing: -.03em;
     padding: 10px 18px; border-radius: var(--r-md); line-height: 1;
   }
-  .vt-buy, .vt-add { background: var(--up-soft); color: var(--up); }
-  .vt-reduce, .vt-sell { background: var(--down-soft); color: var(--down); }
+  .vt-buy, .vt-add { background: var(--buy-soft); color: var(--buy); }
+  .vt-reduce, .vt-sell { background: var(--sell-soft); color: var(--sell); }
   .vt-hold, .vt-dca { background: var(--accent-soft); color: var(--accent); }
   .dim { display: grid; grid-template-columns: 76px 1fr; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
   .dim:last-child { border-bottom: 0; }
@@ -311,7 +311,7 @@
     document.getElementById('dims').innerHTML = A.dims.map((d, i) => `
       <div class="dim" data-od-id="dim-${i}">
         <div><div class="dim-k">${d.k}</div><div class="dim-s">${d.s} / 100</div>
-          <div class="progress" style="margin-top:8px"><i style="width:${d.s}%;background:${d.s >= 65 ? 'var(--up)' : d.s >= 45 ? 'var(--accent)' : 'var(--down)'}"></i></div></div>
+          <div class="progress" style="margin-top:8px"><i style="width:${d.s}%;background:${d.s >= 65 ? 'var(--ok)' : d.s >= 45 ? 'var(--warn)' : 'var(--danger)'}"></i></div></div>
         <div class="dim-t">${d.t}</div>
       </div>`).join('');
 
@@ -329,7 +329,7 @@
     document.querySelector('#hist tbody').innerHTML = hist.map((x, i) => `
       <tr data-od-id="hist-row-${i}">
         <td class="txt num" style="color:var(--muted);font-size:11.5px">${x.date}</td>
-        <td class="txt"><span class="pill ${TAG[x.action] ? (x.action === '减仓' || x.action === '卖出' ? 'down' : x.action === '持有' || x.action === '定投' ? '' : 'up') : ''}">${x.action}</span></td>
+        <td class="txt"><span class="pill ${TAG[x.action] ? (x.action === '减仓' || x.action === '卖出' ? 'sell' : x.action === '持有' || x.action === '定投' ? '' : 'buy') : ''}">${x.action}</span></td>
         <td class="num">${x.score}</td>
         <td class="num">${D.fmt(x.price, D.priceDec(item.kind))}</td>
         <td class="txt" style="white-space:normal;max-width:34ch;font-size:12px;color:var(--muted)">${x.note}</td>
@@ -348,7 +348,7 @@
       <tr data-clickable data-code="${r.code}" data-od-id="rank-row-${r.code}"${r.code === code ? ' style="background:var(--accent-soft)"' : ''}>
         <td class="txt"><div class="name">${r.name}</div><div class="sub code">${r.code}</div></td>
         <td class="num strong">${r.a.score}</td>
-        <td style="text-align:right"><span class="pill ${r.a.score >= 70 ? 'up' : r.a.score >= 55 ? '' : 'down'}">${r.a.action}</span></td>
+        <td style="text-align:right"><span class="pill ${r.a.score >= 70 ? 'ok' : r.a.score >= 55 ? '' : 'danger'}">${r.a.action}</span></td>
       </tr>`).join('') || '<tr><td colspan="3"><div class="empty">该范围内没有标的</div></td></tr>';
   }
   document.getElementById('rank').addEventListener('click', e => {
@@ -438,7 +438,7 @@
     const yes = b.dataset.fb === 'yes';
     const note = document.getElementById('fb-note');
     note.textContent = yes ? '已反馈：有帮助' : '已反馈：没帮助（会降低同类信号权重）';
-    note.className = 'pill ' + (yes ? 'up' : 'warn');
+    note.className = 'pill ' + (yes ? 'ok' : 'warn');
   }));
   let resizeT; window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => cache && drawK(cache.item), 150); });
   render();

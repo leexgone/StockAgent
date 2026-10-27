@@ -369,7 +369,7 @@
       <div class="row"><span class="k">持仓变动</span><span class="v">${D.fmt(held, 0)} → <b>${D.fmt(afterShares, 0)}</b></span></div>
       <div class="row"><span class="k">摊薄成本</span><span class="v">${D.fmt(cur.cost || price, m.prec)} → <b>${D.fmt(afterCost, m.prec)}</b></span></div>
       <div class="row"><span class="k">占组合（估）</span><span class="v">${((cur.weight || 0)).toFixed(1)}% → <b>${afterW.toFixed(1)}%</b></span></div>
-      <div class="row"><span class="k">现金余额</span><span class="v ${cashAfter < 0 ? 'down' : ''}">${D.money(cashAfter)}${cashAfter < 0 ? '（资金不足）' : ''}</span></div>
+      <div class="row"><span class="k">现金余额</span><span class="v ${cashAfter < 0 ? 'danger' : ''}">${D.money(cashAfter)}${cashAfter < 0 ? '（资金不足）' : ''}</span></div>
       ${realized != null && qty ? `<div class="row"><span class="k">已实现盈亏</span><span class="v ${D.dirClass(realized)}">${cur.cost ? D.pct(realized / (cur.cost * qty) * 100) : '—'} · ${D.money(realized)}</span></div>` : ''}
       ${qty && overLimit ? `<div class="row"><span class="k" style="color:var(--warn)">纪律提示</span><span class="v" style="color:var(--warn)">单票将超过 25% 上限</span></div>` : ''}`;
     const ok = qty > 0 && !errQ && !bad && qty % lot === 0 && (side === 'buy' ? cashAfter >= 0 : qty <= held);
@@ -387,7 +387,7 @@
       <tr data-od-id="log-row-${i}">
         <td class="txt" style="font-family:var(--font-mono);font-size:11.5px;color:var(--muted)">${l.t}</td>
         <td class="txt"><span class="name">${l.name}</span> <span class="code">${l.code}</span></td>
-        <td class="txt"><span class="pill ${l.side === '买入' ? 'up' : 'down'}">${l.side}</span></td>
+        <td class="txt"><span class="pill ${l.side === '买入' ? 'buy' : 'sell'}">${l.side}</span></td>
         <td class="num">${D.fmt(l.qty, 0)}</td><td class="num">${D.fmt(l.price, D.priceDec(l.kind))}</td>
         <td class="num" style="color:var(--muted)">${D.fmt(l.fee, 2)}</td>
         <td class="num ${l.rp == null ? '' : D.dirClass(l.rp)}">${l.rp == null ? '—' : (l.rp > 0 ? '+' : '') + D.fmt(l.rp, 2)}</td>
@@ -433,10 +433,10 @@
         <div style="display:flex;align-items:baseline;gap:8px;font-size:12.5px">
           <span>${r.k}</span>
           <span class="num" style="margin-left:auto;color:var(--muted);font-size:11.5px">${r.inverse ? '下限' : '上限'} ${r.v}${r.unit}</span>
-          <span class="num ${hit ? 'up' : 'down'}" style="font-weight:550">${c.toFixed(1)}${r.unit}</span>
+          <span class="num ${hit ? 'danger' : 'ok'}" style="font-weight:550">${c.toFixed(1)}${r.unit}</span>
           <span class="pill ${hit ? 'warn' : ''}">${hit ? '已触及' : '安全'}</span>
         </div>
-        <div class="progress" style="margin-top:7px"><i style="width:${pctv.toFixed(0)}%;background:${hit ? 'var(--warn)' : 'var(--accent)'}"></i></div>
+        <div class="progress" style="margin-top:7px"><i style="width:${pctv.toFixed(0)}%;background:${hit ? 'var(--warn)' : 'var(--fg-2)'}"></i></div>
       </div>`;
     }).join('');
   }

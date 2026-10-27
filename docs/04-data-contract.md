@@ -82,7 +82,7 @@
 | `spark(data, dir, w, h)` | 表格内联迷你走势线（返回 HTML 字符串） | `dir` 决定红/绿 |
 | `bars(data, dir, h)` | 量能柱（返回 HTML 字符串） | |
 | `donut(host, items, opts)` | 环形权重图 | `items[{name,v,color}]`，默认 8 色 `DONUT_COLORS` |
-| `gauge(host, score, label)` | 得分弧 | ≥70 红、55–69 accent、<55 绿 |
+| `gauge(host, score, label)` | 得分弧 | 质量红绿灯（P1-T4）：≥70 `--ok` 绿、55–69 `--warn` 黄、<55 `--danger` 红 |
 | `hbars(items, opts)` | 水平条组（返回 HTML） | `items[{k,v,color}]`、`fmt`、`id` |
 | `smooth/path/scale/esc/color` | 底层工具，页面自定义图形（如 K 线）复用 | `color(varName)` 读 CSS 令牌 |
 
