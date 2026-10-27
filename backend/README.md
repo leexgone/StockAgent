@@ -90,9 +90,10 @@ P2-T3 把会话搬进 zimu-server 时，替换的只是 CliFrontend（换成 SSE
 cargo test -p zimu-domain   # 9 个单测 + 黄金向量 runner（52 用例；pending 组自动跳过）
 ```
 
-改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层（P3-T4）
-跑同一份 fixtures，两边实现永不互相「对拍」，只对黄金向量。
-`price_limit` 组等 B2/P1-T2 涨跌停口径定稿后补实现与用例。
+改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层
+（P3-T4 ✅：`frontend/src/domain/`，`npm test` 跑 vitest）跑同一份
+fixtures，两边实现永不互相「对拍」，只对黄金向量。
+`price_limit` 组等 B2/P1-T2 涨跌停口径定稿后**两侧同步**补实现与用例。
 
 ## 环境变量
 

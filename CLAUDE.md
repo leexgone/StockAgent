@@ -1,6 +1,6 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**P2 技术基座 Spike 已收官（2026-10-27）**——`backend/`（axum + robit Agent SSE 会话 + SPA 托管）、`frontend/`（React 工作台复刻 + 智能问答视图）、`datafetch/`（Python 行情）三块 spike 全部跑通，Web 桥已沉淀为 robit `robit-web` crate（v0.1.26）；下一步 P3（口径可执行化）与 P1（原型定稿）可并行。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
+个人股票助理程序。当前阶段：**P3 口径可执行化基本收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture；唯一尾巴是 `price_limit` 组（pending），等 P1-T2/B2 涨跌停口径定稿。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。下一步主线 P1（原型定稿）→ P4（数据管道，前置 C5/C8 拍板）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
 
 产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
@@ -10,7 +10,8 @@
 backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管）
                    crates/zimu-agent-cli（robit 集成 spike：Agent REPL + echo 工具，P2-T2）
                    crates/zimu-domain（领域纯函数库，P3-T3：03 数字口径唯一 Rust 实现 + 黄金向量测试）
-frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话），令牌在 src/styles/tokens.css
+frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话）；
+                   src/domain/ 为领域纯函数 TS 共享层（P3-T4：镜像 zimu-domain，vitest 跑同一份黄金向量），令牌在 src/styles/tokens.css
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare），P2-T1 spike 产物
 design/            界面原型：7 个 html + assets/{ui.css, data.js, charts.js}
 fixtures/golden/   黄金测试向量（P3）：数字口径的权威样例集，Rust 领域库与 TS 共享层跑同一份；schema 见 03 附录
@@ -53,7 +54,9 @@ docs/decisions/    ADR 决策记录
 
 ## 验证方式
 
-没有测试框架，改完原型请人工过一遍（浏览器控制台必须无报错）：
+数字口径有自动化验收：两边 runner 跑**同一份** `fixtures/golden/`——backend `cargo test -p zimu-domain`（Rust 领域库），frontend `npm test`（vitest，TS 共享层）。改口径的顺序固定：**先改 `docs/03` 与 fixtures，再改两边实现**；实现之间永不互相对拍。
+
+`design/` 原型没有测试框架，改完请人工过一遍（浏览器控制台必须无报错）：
 
 1. 直接双击打开每个页面（`file://`，注意跨页依赖会在这种方式下暴露）。
 2. `python -m http.server` 后访问，逐项检查：控制台无错误、侧栏/顶栏/底栏渲染正常、数字与图表口径一致。

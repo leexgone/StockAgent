@@ -11,7 +11,7 @@
 | P0 | 工程与文档基线 | — | ✅ 2026-10-24 | — |
 | P1 | 原型定稿（修完 backlog 前两级） | 无，可与 P2/P3 并行 | 🔨 | 3–4 天 |
 | P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | ✅ 2026-10-27 | 2–3 天 |
-| P3 | 口径可执行化（黄金测试向量） | P2 | 🔨 | 2–3 天 |
+| P3 | 口径可执行化（黄金测试向量） | P2 | 🔨 两边全绿，余 `price_limit` 尾巴（随 P1-T2） | 2–3 天 |
 | P4 | 数据管道与存储 | P3；**C5、C8 拍板** | ⬜ | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | ⬜ | 1–1.5 周 |
 | P6 | MVP 垂直切片（连续 5 个交易日真实跑通） | P4+P5；C4 渠道落地 | ⬜ | ≥5 个交易日 |
@@ -68,7 +68,7 @@
 | P3-T1 | fixture 设计：JSON 格式（公式 id / 输入 / 期望输出），放 `fixtures/golden/`，前后端共享同一份 | schema 说明进 `03` 附录 | 0.5d | ✅ 2026-10-27：schema v1 定稿进 `03` 附录（比对规则 6 条 / 公式组→函数映射表 / 新增口径约定 5 条：sell_to 按 lot 泛化、perf 短序列归 0、清仓 after_cost=null、压线算安全、费用不舍入）；runner 随 P3-T3/T4 落地 |
 | P3-T2 | 手算可对用例集：`03` 每条公式至少 3 组（常规 / 边界 / 空持仓），数字可在纸上复核 | fixture 文件 | 1d | 🔨 七组 52 个 active 用例（lot 16 / fees 7 / dilution 7 / recalc 4 / discipline 9 / perf 4 / vol_synth 5），三类标签齐备、desc 附精确分数手算过程；`price_limit` 组 status=pending ⏸ 等 P1-T2（B2）口径定稿；新发现口径缝隙记入 `07` B11/B12 |
 | P3-T3 | Rust 领域纯函数库（backend 内独立 crate）：整手 / 费用 / 摊薄 / 涨跌停 / 仓位与纪律四条 / 净值指标 / 波动合成 / recalc 汇总，`cargo test` 跑 fixture | 全绿 | 1–2d | ✅ 2026-10-28：`zimu-domain` crate——7 个纯函数模块 + `tests/golden.rs` runner（按 03 附录比对规则：容差分级/null/数组按序/未列字段不校验/pending 跳过），`cargo test -p zimu-domain` 全绿（9 单测 + 52 黄金向量）；期间向量抓出一处期望值手算错误（pf-normal 的 mdd 应为 −5.5/110 = −5%）并修正 fixture。涨跌停实现随 `price_limit` 组等 P1-T2/B2 定稿后补 |
-| P3-T4 | TS 实现（frontend 共享层）：抽屉试算等即时交互用，同一组 fixture 跑测试 | 全绿 | 1d | ⬜ |
+| P3-T4 | TS 实现（frontend 共享层）：抽屉试算等即时交互用，同一组 fixture 跑测试 | 全绿 | 1d | ✅ 2026-10-28：`frontend/src/domain/`——8 个模块镜像 `zimu-domain`（模块划分/字段名/运算顺序一致，snake_case 字段对 fixture 键）+ `golden.test.ts` runner（比对规则与 Rust 侧同款，另判 NaN/Inf 失败）；引入 vitest 5（frontend 首个测试依赖），`npm test` 全绿（52 用例，`price_limit` pending 跳过）、`npm run build` 不受影响。P5-T2 holdings 抽屉试算直接消费 |
 
 **完成标准**：两边测试全绿；任何人可以用 fixture + 一份持仓表在纸上复算出界面上的每一个数字。
 
