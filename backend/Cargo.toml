@@ -1,15 +1,26 @@
 [workspace]
-members = ["crates/zimu-server"]
+members = ["crates/zimu-server", "crates/zimu-agent-cli"]
 resolver = "2"
 
 [workspace.package]
 version = "0.0.1"
 edition = "2021"
 
-# 版本基准尽量与 robit（E:\Github\robit）的 workspace.dependencies 对齐，
-# P2-T2 引入 robit crates 时避免依赖树分裂。
+# 版本基准与 robit workspace 对齐（robit 0.1.25 已发布 crates.io，直接引用；
+# 共同演进约定见 CLAUDE.md：升级 pin 版本前先想 robit 那边的节奏）。
 [workspace.dependencies]
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "signal"] }
+robit-ai = "0.1.25"
+robit-agent = "0.1.25"
+tokio = { version = "1.53", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "signal",
+    "sync",     # mpsc / oneshot（Agent 通道）
+    "io-std",   # stdin（REPL）
+    "io-util",  # AsyncBufReadExt
+] }
+async-trait = "0.1"
 axum = "0.8"
 tower-http = { version = "0.6", features = ["fs", "trace"] }
 serde = { version = "1.0", features = ["derive"] }

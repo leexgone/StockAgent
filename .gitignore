@@ -40,6 +40,8 @@ cache/
 # ── 工具与临时目录 ────────────────────────────
 .file-versions/
 .od/
+# robit 运行时会话库与记忆文件（<workdir>/.robit/memory/robit.db 等），永不入库
+.robit/
 screenshots/
 shots/
 *.log
