@@ -1,12 +1,15 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**界面原型 + 规格文档**（`design/` 零构建）；技术路线已定案——Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar（ADR-0005），代码骨架尚未创建。
+个人股票助理程序。当前阶段：**技术基座 Spike（路线图 P2）**——最简运行框架已立起（`backend/` axum + `frontend/` React，启动服务即进首页）；`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
 
 产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
 ## 现在这个仓库里有什么
 
 ```
+backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管）
+frontend/          React + TS + Vite 前端：首页骨架，令牌在 src/styles/tokens.css
+datafetch/         Python 行情 sidecar（uv + FastAPI + akshare），P2-T1 spike 产物
 design/            界面原型：7 个 html + assets/{ui.css, data.js, charts.js}
 docs/              产品规格与工程规范（编号即阅读顺序）
 docs/decisions/    ADR 决策记录
@@ -28,7 +31,7 @@ docs/decisions/    ADR 决策记录
 
 **技术形态（受 ADR-0005 约束；0002/0003 已被其取代）**
 - `design/` 原型保持零构建（不引入打包器、框架、CDN、npm 包），直到 `frontend/` 迁移完成前它都是设计参照与验收基准。
-- 技术路线见 ADR-0005：`backend/`（Rust workspace，依赖 robit）、`frontend/`（React + TS + Vite）、`datafetch/`（Python sidecar，uv + FastAPI + akshare/baostock）。**目录随 `06-roadmap.md` P2 spike 启动时创建**，不要提前半建。
+- 技术路线见 ADR-0005：`backend/`（Rust workspace，依赖 robit）、`frontend/`（React + TS + Vite）、`datafetch/`（Python sidecar，uv + FastAPI + akshare/baostock）。目录已随 P2 spike 创建（datafetch P2-T1 ✅；backend + frontend 最简框架 2026-10-27 立起，robit 集成待 P2-T2）。前端版本基准对齐 robit-gui（React 19 / Vite 6 / TS 5.6），后端 crate 版本对齐 robit workspace，升级前先想两边。
 - 两工程共同演进：框架级缺口先改 robit（`E:\Github\robit`，改动保持通用性、走它自己的发布流程），子木 pin tag/rev 消费（开发期可 path override）；痛点记入 `docs/07-backlog.md` R 系列，**不要写绕过 robit trait 的补丁**，领域逻辑不渗进 robit。
 - `design/` 原型只用演示样本；真实行情自 P2 起经 datafetch sidecar 进入。**真实持仓、券商账户数据、任何 API key 永不入库。**
 
@@ -67,7 +70,7 @@ docs/decisions/    ADR 决策记录
 
 - 有取舍的决定写进 `docs/decisions/NNNN-<slug>.md`（模板见该目录 README），编号递增，状态 `提议 / 接受 / 已取代`。
 - 未定事项集中在 `docs/07-backlog.md`（问题）与 `docs/06-roadmap.md`（阶段）。
-- 当前明确暂缓：后端栈、前端框架、真实行情源。讨论有结论后再落 ADR。
+- 后端栈、前端框架、真实行情源已由 ADR-0005 定案；当前待拍板：C5 录入方式（P4 前）、C8 打分生成（P4-T6 前）、C4 微信渠道（P5 前），见 `06-roadmap.md` 决策闸门表。
 
 ## 安全与责任边界
 

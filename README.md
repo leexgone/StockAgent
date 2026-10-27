@@ -2,10 +2,18 @@
 
 面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险。发布形态是**常驻 Web 服务**——浏览器访问全部界面，也可以通过微信 / QQ 与助理对话、接收预警与盘后复盘（与 robit 的桌面端定位不同）。
 
-**当前阶段：界面原型 + 规格文档。** `design/` 原型零构建、无外部依赖、断网可跑，行情/持仓/净值/分析结论全部来自演示样本。技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite，代码骨架随路线图 P2 启动。
+**当前阶段：技术基座 Spike（路线图 P2）。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。**最简运行框架已立起**：`backend/`（axum）+ `frontend/`（React），启动服务即可在浏览器进首页；`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
+
+```powershell
+# 运行最简框架（生产形态：后端托管前端构建产物，单端口）
+cd frontend; npm install; npm run build
+cd ..\backend; cargo run                  # → http://127.0.0.1:8080
+
+# 开发形态：前端热更新（5173，/api 反代 8080），细节见 backend/README.md
+```
 
 ```bash
-python -m http.server 8000 --directory design   # 或直接双击 design/index.html
+python -m http.server 8000 --directory design   # 原型：或直接双击 design/index.html
 # → http://localhost:8000/
 ```
 
@@ -13,6 +21,9 @@ python -m http.server 8000 --directory design   # 或直接双击 design/index.h
 
 | 路径 | 内容 |
 |---|---|
+| `backend/` | Rust 服务（Cargo workspace，axum）：health + SPA 静态托管，robit agent 集成在 P2-T2 |
+| `frontend/` | React + TS + Vite 前端：首页骨架 + 设计令牌迁移（`design/assets/ui.css` 为令牌来源） |
+| `datafetch/` | Python 行情 sidecar（uv + FastAPI + akshare）：P2-T1 spike 产物，生产化在 P4-T3 |
 | `design/` | 界面原型（7 个页面 + 共享样式/数据/图表层），原型自带的说明见 `design/README.md` |
 | `docs/` | 产品规格与工程规范：范围、界面、业务口径、数据契约、设计系统、路线图、待办 |
 | `docs/decisions/` | 决策记录（ADR）—— 每个「为什么这样做」都留档 |

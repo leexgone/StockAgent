@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/zimu-server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+
+# 版本基准尽量与 robit（E:\Github\robit）的 workspace.dependencies 对齐，
+# P2-T2 引入 robit crates 时避免依赖树分裂。
+[workspace.dependencies]
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "signal"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"

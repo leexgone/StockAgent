@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | P0 | 工程与文档基线 | — | ✅ 2026-10-24 | — |
 | P1 | 原型定稿（修完 backlog 前两级） | 无，可与 P2/P3 并行 | 🔨 | 3–4 天 |
-| P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | ⬜ | 2–3 天 |
+| P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | 🔨 | 2–3 天 |
 | P3 | 口径可执行化（黄金测试向量） | P2 | ⬜ | 2–3 天 |
 | P4 | 数据管道与存储 | P3；**C5、C8 拍板** | ⬜ | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | ⬜ | 1–1.5 周 |
@@ -55,8 +55,8 @@
 |---|---|---|---|---|
 | P2-T1 | `datafetch` spike：uv + FastAPI + akshare，取样本标的（股票/ETF/转债/指数各一）的实时行情与日线，记录字段、盘中频率、限频表现 | 与 `04` 契约的字段对照表（并入 `04` 附录）+ 可运行脚本 | 0.5–1d | ✅ 2026-10-26：三轮探测 + API 冒烟通过；主通道=新浪直连，东财间歇需熔断，baostock 登录失败待 P4 复测，详见 `04` 附录 |
 | P2-T2 | robit 集成 spike：`backend/` Cargo workspace + path override 指向本地 robit；最小 agent 会话接阿里云网关 qwen，注册一个 echo 领域工具 | `cargo run` 可对话 | 0.5–1d | ⬜ |
-| P2-T3 | axum + SSE spike：一个 REST 端点 + 把 robit-agent 事件流经 SSE 转出；同时评估「Web Frontend 桥」该不该进 robit（R 系列第一条候选） | 浏览器/curl 看到流式输出 | 0.5d | ⬜ |
-| P2-T4 | `frontend` spike：Vite + React + TS 脚手架，`ui.css` 设计令牌迁移（oklch、红涨绿跌、tabular-nums、断点），复刻 index 一屏静态版 | 与原型视觉可对照 | 0.5–1d | ⬜ |
+| P2-T3 | axum + SSE spike：一个 REST 端点 + 把 robit-agent 事件流经 SSE 转出；同时评估「Web Frontend 桥」该不该进 robit（R 系列第一条候选） | 浏览器/curl 看到流式输出 | 0.5d | 🔨 2026-10-27：`backend/` workspace + zimu-server 骨架已立起（/api/health + SPA 静态托管，双模式跑通）；SSE 与 robit 事件流待 P2-T2 之后接入 |
+| P2-T4 | `frontend` spike：Vite + React + TS 脚手架，`ui.css` 设计令牌迁移（oklch、红涨绿跌、tabular-nums、断点），复刻 index 一屏静态版 | 与原型视觉可对照 | 0.5–1d | 🔨 2026-10-27：脚手架 + `:root` 令牌迁移 + 首页骨架完成（React 19 / Vite 6 / TS 5.6，对齐 robit-gui）；index 一屏静态复刻未做 |
 | P2-T5 | 共同演进回路演练：拿一个真实框架级改动（建议就用 T3 的 SSE/Web 桥）走完 改 robit → tag → 子木 pin rev 升级 | robit 有新 tag；痛点已记入 `07` R 系列 | 0.5d | ⬜ |
 
 **完成标准**：spike 全部跑通；若任何 0005 假设被证伪（robit API 不适配、akshare 拿不到转债数据等），回 ADR 修订再继续。

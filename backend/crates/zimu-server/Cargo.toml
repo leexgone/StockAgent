@@ -1,0 +1,15 @@
+[package]
+name = "zimu-server"
+description = "子木 · 股票智能助理 Web 服务（最简骨架：health + 静态托管）"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
