@@ -427,11 +427,12 @@
   function renderRules() {
     document.getElementById('rules').innerHTML = RULES.map((r, i) => {
       const c = r.cur(), hit = r.inverse ? c < r.v : c > r.v;
-      const pctv = Math.min(100, r.inverse ? c / r.v * 100 : c / r.v * 100);
+      // 进度条语义统一「满格 = 触及限制」：上限类取 c/v；下限类（现金最低保留）取 v/c，现金降到下限即满格（c=0 → Infinity 由 min 截为 100，无 NaN）
+      const pctv = Math.min(100, r.inverse ? r.v / c * 100 : c / r.v * 100);
       return `<div style="margin-bottom:${i === RULES.length - 1 ? 0 : 15}px" data-od-id="rule-${i}">
         <div style="display:flex;align-items:baseline;gap:8px;font-size:12.5px">
           <span>${r.k}</span>
-          <span class="num" style="margin-left:auto;color:var(--muted);font-size:11.5px">上限 ${r.v}${r.unit}</span>
+          <span class="num" style="margin-left:auto;color:var(--muted);font-size:11.5px">${r.inverse ? '下限' : '上限'} ${r.v}${r.unit}</span>
           <span class="num ${hit ? 'up' : 'down'}" style="font-weight:550">${c.toFixed(1)}${r.unit}</span>
           <span class="pill ${hit ? 'warn' : ''}">${hit ? '已触及' : '安全'}</span>
         </div>

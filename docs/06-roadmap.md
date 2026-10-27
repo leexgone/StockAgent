@@ -40,7 +40,7 @@
 | P1-T3 | B3+B4 过户费文案统一；小数位按 `kind` 决定并收进 `data.js` | `03` 第 1/3 节 ⚠️ 消除 | 0.5d | ✅ 2026-10-28：文案改「过户费 0.001%（沪深两市均收）」（代码本就对）；小数位收进 `data.js` `priceDec(kind)`（stock 2、ETF/转债 3），7 屏全量替换、analysis 删 `last2`、watchlist 补 `kind`、转债文案字面量转 3 位；`03` §1/§3 ⚠️ 消除 |
 | P1-T4 | B5 `up/down` 语义分离：引入 `--ok/--danger` 令牌，逐处替换非涨跌语义 | `05` 令牌表更新、`03` 第 11 节 ⚠️ 消除 | 1d | ⬜ |
 | P1-T5 | B7 交易所用显式 `mkt` 字段（analysis 展示 + holdings 新建持仓路径） | 不再出现 `code[0]==='6'` | 0.25d | ✅ 2026-10-28：watchlist 补显式 `mkt`，分析页页头与 holdings 新建持仓改读 `mkt`，顺带删掉 analysis 试仓金额的 `? 100 : 100` 死 ternary（按 `kind` 取 1 手）；`04` 契约同步（watchlist 补 `mkt/kind/limitPct`、工具表补 `priceDec/limitPrices`） |
-| P1-T6 | B8 死 ternary 修复（现金规则进度条方向） | 进度条语义与另三条一致 | 0.1d | ⬜ |
+| P1-T6 | B8 死 ternary 修复（现金规则进度条方向） | 进度条语义与另三条一致 | 0.1d | ✅ 2026-10-28：现金规则进度改 `v/c`（满格 = 降至下限，`c=0` 由 `min` 截断无 NaN），行标签按 `inverse` 显示「下限/上限」；四条统一「满格 = 触及限制」 |
 | P1-T7 | B9 原型级处理：历史建议标注为样本、结构对齐未来的 `adviceHistory`（正式解在 P4-T2） | `analysis` 页不再假装是真实留档 | 0.5d | ⬜ |
 | P1-T8 | C11 `design/README.md` 收敛：保留「怎么打开」，其余改链接指向 `docs/` | 无双源冲突 | 0.25d | ⬜ |
 | P1-T9 | 人工验收：按 CLAUDE.md 验证方式过 7 屏（`file://` + http.server、窄屏、真实时钟、刷新按钮） | 控制台零报错 | 0.5d | ⬜ |
