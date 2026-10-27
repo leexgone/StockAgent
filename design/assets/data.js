@@ -39,6 +39,16 @@
   const dirClass = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
   // 报价小数位按 kind（03 §1 定稿，B4/P1-T3）：股票 2 位、ETF/转债 3 位；页面不得手搓精度
   const priceDec = kind => (kind === 'stock' ? 2 : 3);
+  // 涨停/跌停价（03 §2 定稿，B2/P1-T2）：昨收 × (1 ± pct/100) 按报价小数位四舍五入，
+  // 整数单元运算与交易所算法一致（裸浮点 9.85×1.1 = 10.834999… 会错得 10.83）。
+  // prev ≤ 0（停牌/无行情）或 pct 未配置 → null，页面显示 — 并跳过区间拦截。
+  function limitPrices(kind, prev, pct) {
+    if (!(prev > 0) || !(pct > 0)) return null;
+    const scale = Math.pow(10, priceDec(kind));
+    const units = Math.round(prev * scale);
+    const cut = up => Math.floor((units * (up ? 100 + pct : 100 - pct) + 50) / 100) / scale;
+    return { lo: cut(false), hi: cut(true) };
+  }
 
   /* ---------- 个人账户 ---------- */
   const ws = { name: '我的账户', init: '我', style: '均衡成长', cash: 46800.00, broker: '华泰证券 · 沪深 A 股账户（*8842）', wechat: '已绑定 · 微信' };
@@ -52,18 +62,20 @@
     { name: '中证转债', code: '000832.SH', v: 428.55, chg: 0.29 },
   ];
 
-  /* ---------- 持仓（股票 / ETF / 可转债） ---------- */
+  /* ---------- 持仓（股票 / ETF / 可转债） ----------
+   * limitPct = 涨跌幅比例（03 §2 定稿：标板 ±10、创业板/科创板 ±20、转债 ±20；
+   * 比例是标的属性，ETF 无法由代码推断——演示样本手工配置，P4 由行情源自动填充）。 */
   const holdings = [
-    { code: '600519', name: '贵州茅台', mkt: 'SH', kind: 'stock', sector: '食品饮料', shares: 100,  cost: 1512.00, price: 1618.00, prev: 1601.50, limit: '—',  tscore: 71 },
-    { code: '300750', name: '宁德时代', mkt: 'SZ', kind: 'stock', sector: '电力设备', shares: 400,  cost: 196.40,  price: 212.35,  prev: 207.80,  limit: '—',  tscore: 78 },
-    { code: '002594', name: '比亚迪',   mkt: 'SZ', kind: 'stock', sector: '汽车',     shares: 500,  cost: 264.80,  price: 254.10,  prev: 259.40,  limit: '—',  tscore: 44 },
-    { code: '600036', name: '招商银行', mkt: 'SH', kind: 'stock', sector: '银行',     shares: 1800, cost: 33.85,   price: 37.05,   prev: 36.62,   limit: '—',  tscore: 66 },
-    { code: '600276', name: '恒瑞医药', mkt: 'SH', kind: 'stock', sector: '医药生物', shares: 700,  cost: 52.30,   price: 58.42,   prev: 57.10,   limit: '—',  tscore: 74 },
-    { code: '510300', name: '沪深300ETF', mkt: 'SH', kind: 'etf', sector: '宽基指数', shares: 12000, cost: 4.015, price: 4.291,   prev: 4.262,   limit: '—',  tscore: 62 },
-    { code: '588000', name: '科创50ETF',  mkt: 'SH', kind: 'etf', sector: '宽基指数', shares: 8000, cost: 0.968,   price: 1.086,   prev: 1.104,   limit: '—',  tscore: 51 },
-    { code: '110074', name: '精达转债',   mkt: 'SH', kind: 'cb',  sector: '有色金属', shares: 120,  cost: 118.500, price: 126.720, prev: 124.380, limit: '—',  tscore: 69 },
-    { code: '113650', name: '博威转债',   mkt: 'SH', kind: 'cb',  sector: '有色金属', shares: 80,   cost: 132.400, price: 127.150, prev: 128.600, limit: '—',  tscore: 48 },
-    { code: '127022', name: '恒逸转债',   mkt: 'SZ', kind: 'cb',  sector: '基础化工', shares: 60,   cost: 106.800, price: 105.350, prev: 104.200, limit: '—',  tscore: 55 },
+    { code: '600519', name: '贵州茅台', mkt: 'SH', kind: 'stock', sector: '食品饮料', shares: 100,  cost: 1512.00, price: 1618.00, prev: 1601.50, limitPct: 10, tscore: 71 },
+    { code: '300750', name: '宁德时代', mkt: 'SZ', kind: 'stock', sector: '电力设备', shares: 400,  cost: 196.40,  price: 212.35,  prev: 207.80,  limitPct: 20, tscore: 78 },
+    { code: '002594', name: '比亚迪',   mkt: 'SZ', kind: 'stock', sector: '汽车',     shares: 500,  cost: 264.80,  price: 254.10,  prev: 259.40,  limitPct: 10, tscore: 44 },
+    { code: '600036', name: '招商银行', mkt: 'SH', kind: 'stock', sector: '银行',     shares: 1800, cost: 33.85,   price: 37.05,   prev: 36.62,   limitPct: 10, tscore: 66 },
+    { code: '600276', name: '恒瑞医药', mkt: 'SH', kind: 'stock', sector: '医药生物', shares: 700,  cost: 52.30,   price: 58.42,   prev: 57.10,   limitPct: 10, tscore: 74 },
+    { code: '510300', name: '沪深300ETF', mkt: 'SH', kind: 'etf', sector: '宽基指数', shares: 12000, cost: 4.015, price: 4.291,   prev: 4.262,   limitPct: 10, tscore: 62 },
+    { code: '588000', name: '科创50ETF',  mkt: 'SH', kind: 'etf', sector: '宽基指数', shares: 8000, cost: 0.968,   price: 1.086,   prev: 1.104,   limitPct: 20, tscore: 51 },
+    { code: '110074', name: '精达转债',   mkt: 'SH', kind: 'cb',  sector: '有色金属', shares: 120,  cost: 118.500, price: 126.720, prev: 124.380, limitPct: 20, tscore: 69 },
+    { code: '113650', name: '博威转债',   mkt: 'SH', kind: 'cb',  sector: '有色金属', shares: 80,   cost: 132.400, price: 127.150, prev: 128.600, limitPct: 20, tscore: 48 },
+    { code: '127022', name: '恒逸转债',   mkt: 'SZ', kind: 'cb',  sector: '基础化工', shares: 60,   cost: 106.800, price: 105.350, prev: 104.200, limitPct: 20, tscore: 55 },
   ];
   const kindLabel = { stock: '股票', etf: 'ETF / 基金', cb: '可转债' };
 
@@ -270,10 +282,10 @@
 
   // 自选观察（非持仓）
   const watchlist = [
-    { code: '002415', name: '海康威视', kind: 'stock', sector: '电子', price: 34.86, dayChg: 0.91, note: '观察：AI 视觉商业化' },
-    { code: '688111', name: '金山办公', kind: 'stock', sector: '计算机', price: 287.40, dayChg: -1.24, note: '观察：订阅 ARPU' },
-    { code: '601899', name: '紫金矿业', kind: 'stock', sector: '有色金属', price: 19.72, dayChg: 1.86, note: '与现有有色仓位重叠' },
-    { code: '512890', name: '红利低波ETF', kind: 'etf', sector: '宽基指数', price: 1.284, dayChg: 0.31, note: '防守型候选，波动低' },
+    { code: '002415', name: '海康威视', kind: 'stock', limitPct: 10, sector: '电子', price: 34.86, dayChg: 0.91, note: '观察：AI 视觉商业化' },
+    { code: '688111', name: '金山办公', kind: 'stock', limitPct: 20, sector: '计算机', price: 287.40, dayChg: -1.24, note: '观察：订阅 ARPU' },
+    { code: '601899', name: '紫金矿业', kind: 'stock', limitPct: 10, sector: '有色金属', price: 19.72, dayChg: 1.86, note: '与现有有色仓位重叠' },
+    { code: '512890', name: '红利低波ETF', kind: 'etf', limitPct: 10, sector: '宽基指数', price: 1.284, dayChg: 0.31, note: '防守型候选，波动低' },
   ];
 
   /* ---------- 对话式问股 样本问答 ---------- */
@@ -525,7 +537,7 @@
   }
 
   ZM = {
-    fmt, money, pct, wan, dirClass, priceDec, ICONS,
+    fmt, money, pct, wan, dirClass, priceDec, limitPrices, ICONS,
     ws, indices, holdings, kindLabel, watchlist, advice, alerts, qa, sessions,
     equity, P, wp, wsec, sellTo, weightAfter,
     marketClock, chrome, toast, tickPrices, stripHTML, recalc, totalMvAll,

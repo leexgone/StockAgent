@@ -17,18 +17,35 @@
 
 ## 2. 价格合法性（涨跌停校验）
 
-原型实现（`holdings.html:293` 显示、`:347` 拦截）：
+P1-T2 定稿（2026-10-28，B2 消除）。涨跌幅比例是**标的属性**，不能完全由代码推断；显示与拦截用**同一对限价**、含边界；旧原型的 0.1% 容差与「−20%/+10%」不对称口径废除。
+
+**比例（`limit_pct`）**——股票/转债按代码前缀推断，ETF 必须由数据层显式配置（P4 接行情源自动填充）：
+
+| 标的 | 板块（代码前缀） | 涨跌幅 |
+|---|---|---|
+| 股票 | 沪深主板（`60` / `00` 开头，含原中小板 002/003） | ±10%；ST/*ST ±5% |
+| 股票 | 创业板（`30` 开头：300/301/302） | ±20%（创业板无 ST 制度，`st` 输入被忽略） |
+| 股票 | 科创板（`68` 开头：688/689） | ±20%（科创板暂无 ST 制度，同上） |
+| 可转债 | 沪 `11` 开头（110/111/113/118）、深 `12` 开头（123/127/128） | ±20%（沪深 2022-08 转债交易规则；盘中临停由交易所负责，不在本程序口径内） |
+| ETF | — | **返回 null**：无法由代码推断（159915 创业板 ETF ±20% 与 159919 沪深300ETF ±10% 同前缀），必须由行情源/数据层配置。参考：创业板/科创板相关 ±20%，其余股票型 ±10% |
+| 北交所 | `8` / `4` / `920` 开头（±30%） | 超出产品范围（子木只覆盖沪深）→ null |
+
+- ST 识别依赖行情字段（名称含 ST 或交易所风险警示板标记），P4 才有真实数据；`st` 是显式入参，**不做名称字符串猜测**。
+- 原型演示样本无 ST，各标的 `limitPct` 在 `data.js` 手工配置（与上表参考值同源）。
+
+**涨停价 / 跌停价（`limit_prices`）**——按标的报价小数位（§1：stock 2、etf/cb 3）四舍五入（half-up），与交易所算法一致：
 
 ```
-股票 / ETF： 昨收 × 0.899  ≤  委托价  ≤  昨收 × 1.1001
-可转债：     昨收 × 0.799  ≤  委托价  ≤  昨收 × 1.1001
+units      = round(prev × 10^decimals)                          # 整数单元（分/厘），精确恢复
+limit_up   = floor((units × (100 + pct) + 50) / 100) / 10^decimals
+limit_down = floor((units × (100 − pct) + 50) / 100) / 10^decimals
 ```
 
-⚠️ 三处偏差，接入真实行情前必须定稿：
+必须用整数单元运算消除浮点噪声：裸浮点 `9.85 × 1.1 = 10.834999…`，按小数四舍五入会错得 `10.83`；整数单元给出与交易所一致的 `10.84`。`prev ≤ 0`（停牌/无行情）或 `pct ≤ 0`（未配置）→ 返回 null，界面显示 `—` 并跳过区间拦截。
 
-1. **板块没有区分**：`300750`（创业板）、`588000`（科创 50ETF）实际是 ±20%，原型按 ±10% 一刀切；ST 应为 ±5%。
-2. **上下限不对称**：转债用了 −20% / +10%。沪深可转债现行涨跌幅为 ±20%（另有盘中临时停牌机制），需确认口径。
-3. **显示与拦截不一致**：提示文案是 `0.9 — 1.1`，拦截用的是 `0.899 — 1.1001`。这 0.1% 容差是为了抵消四舍五入，但用户看到的区间和实际被判非法的边界不同——要么在文案里写明「含 0.1% 容差」，要么两处用同一个数。
+**委托价校验（`validate_price`）**：`limit_down ≤ price ≤ limit_up` 合法，**含边界**（压线可成交是交易所语义）；显示文案与拦截判定必须用同一对限价。`reason` 枚举：`above_limit_up` / `below_limit_down` / `invalid_price`（`price ≤ 0`）。阈值比较带 `THRESHOLD_EPS` 守卫（附录比对规则第 5 条）。
+
+范围外（P4 接真实委托链路时再议，本程序只做记账试算）：新股/退市整理期等无涨跌幅场景、转债盘中临停、报价 tick（0.01/0.001 整数倍）校验。
 
 ## 3. 费用估算
 
@@ -209,7 +226,7 @@ sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price
 | `group` / `title` | 组 id / 中文名 |
 | `spec` | 回指本手册章节 |
 | `schema_version` | 结构版本，破坏性变更时递增 |
-| `status` | `active` 参与测试；`pending` 口径未定稿，**runner 必须跳过**（现仅 `price_limit`，等 P1-T2/B2） |
+| `status` | `active` 参与测试；`pending` 口径未定稿，**runner 必须跳过**（机制保留；`price_limit` 已随 P1-T2 于 2026-10-28 定稿转 active，现全部组 active） |
 | `tolerance` | 文件级默认容差 |
 | `notes` | 组级口径备注（公式摘要、排除项及原因） |
 | `cases[]` | `id`（组内唯一）、`fn`（多函数组必填）、`desc`（**手算过程，含精确分数**）、`tags`（`normal` / `boundary` / `empty` 三类；与持仓无关的组可不设 `empty`，如 `fees`）、`tolerance`（可选，覆盖文件级）、`input`、`expect` |
@@ -234,7 +251,7 @@ sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price
 | `discipline.json` | `check` / `sell_to` | §6 | 纪律四条 `{value,threshold,pass}` / 降仓卖出数量 |
 | `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate` |
 | `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
-| `price_limit.json` | —（pending） | §2 | ⏸ 等 P1-T2/B2 定稿：板块 ±10/±20/±5、转债 ±20%、显示与拦截统一、ST 识别 |
+| `price_limit.json` | `limit_pct` / `limit_prices` / `validate_price` | §2 | `kind,code,st` → 涨跌幅比例（ETF/北交所 null）/ `kind,prev,pct` → 涨停与跌停价（整数单元 half-up）/ `price,limit_up,limit_down` → `{valid,reason}` |
 
 ### 本附录固定的口径（新增约定，与正文同级）
 

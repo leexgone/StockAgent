@@ -3,8 +3,201 @@
   "title": "价格合法性（涨跌停校验）",
   "spec": "docs/03-domain-rules.md §2",
   "schema_version": 1,
-  "status": "pending",
+  "status": "active",
   "tolerance": 1e-9,
-  "notes": "口径未定稿，runner 跳过 pending 组（03 附录）。待定稿点（= 07-backlog B2 / 路线图 P1-T2）：① 板块区分 ±10（主板）/±20（创业板、科创板）/±5（ST，识别方式依赖行情字段，P4 才有真实数据）；② 可转债 ±20% 与盘中临停机制的口径；③ ETF 的涨跌幅规则；④ 显示与拦截阈值统一（0.1% 容差写进文案还是两处同数）。定稿后先改 03 §2 消除 ⚠️，再在本文件补 cases 并把 status 改为 active。",
-  "cases": []
+  "notes": "P1-T2 定稿（2026-10-28，B2 消除）：① 比例是标的属性——股票/转债按代码前缀推断（沪深主板 ±10、ST ±5，创业板/科创板 ±20 且无 ST 制度，沪深转债 ±20），ETF 无法由代码推断（159915 创业板 ETF 20% 与 159919 沪深300ETF 10% 同前缀）→ null 由数据层配置，北交所 ±30% 超出产品范围 → null；② 限价 = 昨收 × (1 ± pct/100) 按 kind 报价小数位四舍五入（half-up），用整数单元运算实现，与交易所算法一致且无浮点噪声；③ 显示与拦截用同一对限价、含边界，旧原型 0.1% 容差废除。范围外：新股首日等无涨跌幅场景、转债盘中临停、报价 tick 校验。",
+  "cases": [
+    {
+      "id": "lp-stock-main-sh",
+      "fn": "limit_pct",
+      "desc": "沪主板（60 开头）→ ±10%",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "code": "600519", "st": false },
+      "expect": { "pct": 10 }
+    },
+    {
+      "id": "lp-stock-main-sz",
+      "fn": "limit_pct",
+      "desc": "深主板（00 开头；002 中小板 2021 年已并入深主板）→ ±10%",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "code": "002594", "st": false },
+      "expect": { "pct": 10 }
+    },
+    {
+      "id": "lp-stock-main-st",
+      "fn": "limit_pct",
+      "desc": "主板 ST/*ST → ±5%（st 是显式入参，识别依赖行情字段，P4 填充）",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "code": "600519", "st": true },
+      "expect": { "pct": 5 }
+    },
+    {
+      "id": "lp-stock-gem",
+      "fn": "limit_pct",
+      "desc": "创业板（30 开头：300/301/302）→ ±20%",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "code": "300750", "st": false },
+      "expect": { "pct": 20 }
+    },
+    {
+      "id": "lp-stock-gem-st-ignored",
+      "fn": "limit_pct",
+      "desc": "创业板无 ST 制度（注册制退市规则），st 输入被忽略，仍 ±20%",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "code": "300750", "st": true },
+      "expect": { "pct": 20 }
+    },
+    {
+      "id": "lp-stock-star",
+      "fn": "limit_pct",
+      "desc": "科创板（68 开头：688/689）→ ±20%",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "code": "688111", "st": false },
+      "expect": { "pct": 20 }
+    },
+    {
+      "id": "lp-cb-sh",
+      "fn": "limit_pct",
+      "desc": "沪转债（11 开头：110/111/113/118）→ ±20%（沪深 2022-08 转债交易规则，上下限对称）",
+      "tags": ["normal"],
+      "input": { "kind": "cb", "code": "113650", "st": false },
+      "expect": { "pct": 20 }
+    },
+    {
+      "id": "lp-cb-sz",
+      "fn": "limit_pct",
+      "desc": "深转债（12 开头：123/127/128）→ ±20%",
+      "tags": ["normal"],
+      "input": { "kind": "cb", "code": "127022", "st": false },
+      "expect": { "pct": 20 }
+    },
+    {
+      "id": "lp-etf-null",
+      "fn": "limit_pct",
+      "desc": "ETF 比例无法由代码推断（159915 创业板 ETF ±20% 与 159919 沪深300ETF ±10% 同为 159 前缀）→ null，由行情源/数据层显式配置",
+      "tags": ["boundary"],
+      "input": { "kind": "etf", "code": "510300", "st": false },
+      "expect": { "pct": null }
+    },
+    {
+      "id": "lp-stock-bj-null",
+      "fn": "limit_pct",
+      "desc": "北交所（833171 碧雅，8 开头，±30%）超出产品范围（子木只覆盖沪深）→ null",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "code": "833171", "st": false },
+      "expect": { "pct": null }
+    },
+    {
+      "id": "lpr-stock-int",
+      "fn": "limit_prices",
+      "desc": "units = round(10.00×100) = 1000。涨停 floor((1000×110+50)/100) = floor(1100.5) = 1100 → 11.00；跌停 floor((1000×90+50)/100) = floor(900.5) = 900 → 9.00（10×1.1、10×0.9 均为精确整数）",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "prev": 10.0, "pct": 10 },
+      "expect": { "limit_up": 11.0, "limit_down": 9.0 }
+    },
+    {
+      "id": "lpr-stock-half-up",
+      "fn": "limit_prices",
+      "desc": "9.85×1.1 = 10.835 → 第三位 5 进位 → 10.84；9.85×0.9 = 8.865 → 8.87。整数单元：floor((985×110+50)/100) = 108400/100 = 1084；floor((985×90+50)/100) = 88700/100 = 887。注意裸浮点 9.85×1.1 = 10.834999… 会错得 10.83——整数单元与交易所一致",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "prev": 9.85, "pct": 10 },
+      "expect": { "limit_up": 10.84, "limit_down": 8.87 }
+    },
+    {
+      "id": "lpr-stock-st-5",
+      "fn": "limit_prices",
+      "desc": "10.03×1.05 = 10.5315 → 第三位 1 舍 → 10.53；10.03×0.95 = 9.5285 → 第三位 8 进 → 9.53。整数：floor((1003×105+50)/100) = floor(1053.65) = 1053；floor((1003×95+50)/100) = floor(953.35) = 953",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "prev": 10.03, "pct": 5 },
+      "expect": { "limit_up": 10.53, "limit_down": 9.53 }
+    },
+    {
+      "id": "lpr-stock-gem-20",
+      "fn": "limit_prices",
+      "desc": "207.80×1.2 = 249.36、207.80×0.8 = 166.24 均精确。整数：floor((20780×120+50)/100) = floor(24936.5) = 24936 → 249.36；floor((20780×80+50)/100) = floor(16624.5) = 16624 → 166.24",
+      "tags": ["normal"],
+      "input": { "kind": "stock", "prev": 207.8, "pct": 20 },
+      "expect": { "limit_up": 249.36, "limit_down": 166.24 }
+    },
+    {
+      "id": "lpr-etf-3dec",
+      "fn": "limit_prices",
+      "desc": "ETF 3 位小数：units = round(4.262×1000) = 4262。4.262×1.1 = 4.6882 → 4.688；4.262×0.9 = 3.8358 → 第四位 8 进 → 3.836。整数：floor((4262×110+50)/100) = floor(4688.7) = 4688；floor((4262×90+50)/100) = floor(3836.3) = 3836",
+      "tags": ["normal"],
+      "input": { "kind": "etf", "prev": 4.262, "pct": 10 },
+      "expect": { "limit_up": 4.688, "limit_down": 3.836 }
+    },
+    {
+      "id": "lpr-etf-half-up",
+      "fn": "limit_prices",
+      "desc": "1.005×1.1 = 1.1055 → 第四位 5 进 → 1.106；1.005×0.9 = 0.9045 → 0.905。整数：(1005×110+50)/100 = 110600/100 = 1106 恰好；(1005×90+50)/100 = 90500/100 = 905 恰好",
+      "tags": ["boundary"],
+      "input": { "kind": "etf", "prev": 1.005, "pct": 10 },
+      "expect": { "limit_up": 1.106, "limit_down": 0.905 }
+    },
+    {
+      "id": "lpr-cb-20",
+      "fn": "limit_prices",
+      "desc": "转债 3 位小数：units = round(124.380×1000) = 124380。124.38×1.2 = 149.256、124.38×0.8 = 99.504 均精确。整数：floor((124380×120+50)/100) = floor(149256.5) = 149256 → 149.256；floor((124380×80+50)/100) = floor(99504.5) = 99504 → 99.504",
+      "tags": ["normal"],
+      "input": { "kind": "cb", "prev": 124.38, "pct": 20 },
+      "expect": { "limit_up": 149.256, "limit_down": 99.504 }
+    },
+    {
+      "id": "lpr-invalid-prev",
+      "fn": "limit_prices",
+      "desc": "prev = 0（停牌/无行情）→ 无法计算限价 → 双 null；界面显示 — 并跳过区间拦截",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "prev": 0.0, "pct": 10 },
+      "expect": { "limit_up": null, "limit_down": null }
+    },
+    {
+      "id": "vp-mid",
+      "fn": "validate_price",
+      "desc": "9.00 < 10.50 < 11.00 → 区间内合法",
+      "tags": ["normal"],
+      "input": { "price": 10.5, "limit_up": 11.0, "limit_down": 9.0 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vp-at-up",
+      "fn": "validate_price",
+      "desc": "price = 涨停价 11.00 → 含边界 → 合法（旧原型 0.1% 容差废除，显示与拦截同一数字）",
+      "tags": ["boundary"],
+      "input": { "price": 11.0, "limit_up": 11.0, "limit_down": 9.0 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vp-at-down",
+      "fn": "validate_price",
+      "desc": "price = 跌停价 9.00 → 含边界 → 合法",
+      "tags": ["boundary"],
+      "input": { "price": 9.0, "limit_up": 11.0, "limit_down": 9.0 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vp-above",
+      "fn": "validate_price",
+      "desc": "11.01 > 11.00 → 超涨停 → above_limit_up",
+      "tags": ["normal"],
+      "input": { "price": 11.01, "limit_up": 11.0, "limit_down": 9.0 },
+      "expect": { "valid": false, "reason": "above_limit_up" }
+    },
+    {
+      "id": "vp-below",
+      "fn": "validate_price",
+      "desc": "8.99 < 9.00 → 低于跌停 → below_limit_down",
+      "tags": ["normal"],
+      "input": { "price": 8.99, "limit_up": 11.0, "limit_down": 9.0 },
+      "expect": { "valid": false, "reason": "below_limit_down" }
+    },
+    {
+      "id": "vp-invalid-price",
+      "fn": "validate_price",
+      "desc": "price = 0（未填写/非法价）→ invalid_price（NaN 同样落入该分支：!(NaN > 0)）",
+      "tags": ["boundary"],
+      "input": { "price": 0.0, "limit_up": 11.0, "limit_down": 9.0 },
+      "expect": { "valid": false, "reason": "invalid_price" }
+    }
+  ]
 }

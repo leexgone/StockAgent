@@ -40,7 +40,7 @@ python -m http.server 8000 --directory design
 
 | 字段 | 说明 |
 |---|---|
-| `holdings[]` | 每只标的：`code / name / mkt / kind(stock\|etf\|cb) / sector / shares / cost / price / prev`。`dayChg / dayVal / mv / pnl / pnlPct / weight` 由代码派生，**不要手填** |
+| `holdings[]` | 每只标的：`code / name / mkt / kind(stock\|etf\|cb) / sector / shares / cost / price / prev / limitPct`。`dayChg / dayVal / mv / pnl / pnlPct / weight` 由代码派生，**不要手填** |
 | `indices[]` | 顶部行情条的指数快照 |
 | `equity{}` | `dates / nav / bench`，净值与基准已归一到同一起点 |
 | `advice{}` | 按 `code` 存分析结论：`score / action / horizon / conf / position / target / stop / reason / dims[4] / risks[]` |
@@ -55,7 +55,7 @@ python -m http.server 8000 --directory design
 - **报价小数位**：按 `kind` 统一（股票 2 位、ETF / 转债 3 位），唯一出处是 `data.js` 的 `priceDec(kind)`，页面不得手搓精度（转债一律 `126.720` 三位）。
 - **费用估算**：佣金万 2.5（单笔最低 5 元）+ 卖出印花税 0.05% + 过户费 0.001%（2022-04-29 起沪深两市均收）；ETF 与可转债免印花税。实际以券商结算为准。
 - **摊薄成本**：买入按 `(成本 × 持仓 + 成交额 + 费用) / 新持仓` 重算；卖出扣减持仓并计算已实现盈亏。
-- **价格校验**：偏离昨收超过涨跌停区间的委托价判为非法（主板 ±10%，转债按 ±20% 口径放宽）。
+- **价格校验**：涨跌幅分板块——沪深主板 ±10%（ST ±5%）、创业板/科创板 ±20%、转债 ±20%；ETF 无法由代码推断，比例随标的数据配置（`limitPct`）。涨跌停价 = 昨收 × (1 ± 比例) 按报价小数位四舍五入（`data.js` 的 `limitPrices()`，整数单元运算与交易所一致）；抽屉显示与拦截用同一对限价、含边界。口径详见 `docs/03-domain-rules.md` §2。
 - **仓位纪律**：单票 ≤25%、单行业 ≤35%、现金 ≥10%、可转债合计 ≤12%；触及即在「组合诊断」生成再平衡条目。
 - **波动测算假设**：组合年化波动由各标的 30 日收益标准差按权重合成，跨行业相关系数取 0.35、同行业取 0.62。这是标注在页面上的**假设值**，不代表未来表现。
 

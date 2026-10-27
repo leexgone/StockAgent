@@ -18,6 +18,7 @@ pub mod discipline;
 pub mod fees;
 pub mod lot;
 pub mod perf;
+pub mod price_limit;
 pub mod recalc;
 pub mod vol_synth;
 

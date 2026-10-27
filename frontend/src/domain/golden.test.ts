@@ -7,7 +7,7 @@
  * - 数值：|实现 − 期望| ≤ tol（case 级 ?? 文件级 ?? 1e-9）；非有限数（NaN/Inf）直接判失败
  * - 布尔/字符串/枚举：精确相等（阈值压线的浮点噪声由实现内 THRESHOLD_EPS 消化）
  * - 数组：同长按序对齐；`null`：实现必须返回 null；expect 未列字段不校验
- * - `status != "active"` 的组（如 price_limit pending）整组跳过
+ * - `status != "active"` 的组整组跳过（机制保留；price_limit 已随 P1-T2 定稿转 active，现全部 active）
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,12 @@ function compute(group: string, fn: string, input: any): Json {
       return domain.perf(input);
     case "vol_synth/vol_synth":
       return domain.volSynth(input);
+    case "price_limit/limit_pct":
+      return { pct: domain.limitPct(input.kind, input.code, input.st) };
+    case "price_limit/limit_prices":
+      return domain.limitPrices(input.kind, input.prev, input.pct);
+    case "price_limit/validate_price":
+      return domain.validatePrice(input.price, input.limit_up, input.limit_down);
     default:
       throw new Error(`未知 组/函数：${group}/${fn}`);
   }
@@ -130,7 +136,7 @@ for (const file of fixtureFiles) {
     });
 
     if (doc.status !== "active") {
-      // pending 组（price_limit 等 B2/P1-T2 定稿）整组跳过，与 Rust runner 行为一致
+      // 非 active 组整组跳过，与 Rust runner 行为一致（现全部 active）
       it.skip(`status=${doc.status}：整组跳过（定稿条件见 fixture notes）`, () => {});
       return;
     }

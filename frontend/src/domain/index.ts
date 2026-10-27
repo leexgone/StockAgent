@@ -16,7 +16,7 @@
  * - **除零防护**：分母为 0 时各比率取 0（`ratio`）；阈值判定带 `THRESHOLD_EPS`
  *   守卫，压线按含边界语义（03 附录约定 4）。
  * - 改口径的顺序：**先改 `docs/03` 与 fixtures，再改本层与 Rust 侧**。
- * - `price_limit`（涨跌停）组 pending，等 P1-T2/B2 定稿后两侧同步补实现。
+ * - `price_limit`（涨跌停）已随 P1-T2 定稿（2026-10-28），fixture 组全部 active。
  */
 
 export * from "./common";
@@ -27,3 +27,4 @@ export * from "./recalc";
 export * from "./discipline";
 export * from "./perf";
 export * from "./vol_synth";
+export * from "./price_limit";

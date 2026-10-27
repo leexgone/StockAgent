@@ -5,7 +5,7 @@
 //! - 数值：|实现 − 期望| ≤ tol（case 级 ?? 文件级）
 //! - 布尔/字符串/枚举：精确相等（阈值压线的浮点噪声由实现内 THRESHOLD_EPS 消化）
 //! - 数组：同长按序对齐；`null`：实现必须返回空；expect 未列字段不校验
-//! - `status != "active"` 的组（如 price_limit pending）跳过
+//! - `status != "active"` 的组跳过（机制保留；price_limit 已随 P1-T2 定稿转 active，现全部 active）
 //!
 //! TS 共享层（P3-T4）跑同一份文件，规则一致。
 
@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-use zimu_domain::{dilution, discipline, fees, lot, perf, recalc, vol_synth};
+use zimu_domain::{dilution, discipline, fees, lot, perf, price_limit, recalc, vol_synth};
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -58,6 +58,17 @@ fn compute(group: &str, case: &Value) -> Value {
         ("perf", "perf") => call(input, |i: perf::PerfInput| perf::perf(&i)),
         ("vol_synth", "vol_synth") => call(input, |i: vol_synth::VolSynthInput| {
             vol_synth::vol_synth(&i)
+        }),
+        ("price_limit", "limit_pct") => call(input, |i: price_limit::LimitPctInput| {
+            price_limit::LimitPctOutput {
+                pct: price_limit::limit_pct(i.kind, &i.code, i.st),
+            }
+        }),
+        ("price_limit", "limit_prices") => call(input, |i: price_limit::LimitPricesInput| {
+            price_limit::limit_prices(i.kind, i.prev, i.pct)
+        }),
+        ("price_limit", "validate_price") => call(input, |i: price_limit::ValidatePriceInput| {
+            price_limit::validate_price(i.price, i.limit_up, i.limit_down)
         }),
         (g, f) => panic!("未知 组/函数：{g}/{f}"),
     }

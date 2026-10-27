@@ -83,17 +83,18 @@ P2-T3 把会话搬进 zimu-server 时，替换的只是 CliFrontend（换成 SSE
 
 数字口径（`docs/03-domain-rules.md` 正文 + 附录）在 Rust 侧的唯一实现处：
 手数/数量校验/快捷档位、费用、摊薄试算、recalc 汇总、纪律四条 + 降仓数量、
-净值指标、波动合成——全部纯函数无 I/O，输入输出 serde 结构体的字段名与
+净值指标、波动合成、涨跌停（比例推断 / 整数单元限价 / 委托价校验，P1-T2
+定稿）——全部纯函数无 I/O，输入输出 serde 结构体的字段名与
 `fixtures/golden/*.json` 键一一对应。测试即验收：
 
 ```powershell
-cargo test -p zimu-domain   # 9 个单测 + 黄金向量 runner（52 用例；pending 组自动跳过）
+cargo test -p zimu-domain   # 11 个单测 + 黄金向量 runner（76 用例；pending 组自动跳过，现全部 active）
 ```
 
 改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层
 （P3-T4 ✅：`frontend/src/domain/`，`npm test` 跑 vitest）跑同一份
 fixtures，两边实现永不互相「对拍」，只对黄金向量。
-`price_limit` 组等 B2/P1-T2 涨跌停口径定稿后**两侧同步**补实现与用例。
+`price_limit` 组已随 P1-T2 定稿（2026-10-28）**两侧同步**补齐实现与用例。
 
 ## 环境变量
 
@@ -111,6 +112,6 @@ crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话
                             ├─ main.rs           端点与启动装配（robit 配置缺失时优雅降级）
                             └─ agent_bridge.rs   Agent 装配 + echo 工具（WebBridge 接线）
 crates/zimu-agent-cli/      robit 集成 spike：Agent REPL + echo 工具（P2-T2，调试入口）
-crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth
+crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit
                             └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/）
 ```

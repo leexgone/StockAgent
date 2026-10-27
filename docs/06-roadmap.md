@@ -11,7 +11,7 @@
 | P0 | 工程与文档基线 | — | ✅ 2026-10-24 | — |
 | P1 | 原型定稿（修完 backlog 前两级） | 无，可与 P2/P3 并行 | 🔨 | 3–4 天 |
 | P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | ✅ 2026-10-27 | 2–3 天 |
-| P3 | 口径可执行化（黄金测试向量） | P2 | 🔨 两边全绿，余 `price_limit` 尾巴（随 P1-T2） | 2–3 天 |
+| P3 | 口径可执行化（黄金测试向量） | P2 | ✅ 2026-10-28（`price_limit` 尾巴随 P1-T2 消除，8 组 76 用例两边全绿） | 2–3 天 |
 | P4 | 数据管道与存储 | P3；**C5、C8 拍板** | ⬜ | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | ⬜ | 1–1.5 周 |
 | P6 | MVP 垂直切片（连续 5 个交易日真实跑通） | P4+P5；C4 渠道落地 | ⬜ | ≥5 个交易日 |
@@ -36,7 +36,7 @@
 | # | 任务 | 验收 | 估算 | 状态 |
 |---|---|---|---|---|
 | P1-T1 | A2 空态：空持仓引导界面 + 「录入第一笔」入口壳（导入方式留待 C5） | 7 屏在空持仓下不报错、有空态引导 | 1d | ⏸ 入口细节等 C5，壳可先做 |
-| P1-T2 | B2 涨跌停：分板块 ±10/±20/±5，转债口径定稿，显示与拦截阈值一致 | `03` 第 2 节 ⚠️ 消除 | 0.5d | ⬜ |
+| P1-T2 | B2 涨跌停：分板块 ±10/±20/±5，转债口径定稿，显示与拦截阈值一致 | `03` 第 2 节 ⚠️ 消除 | 0.5d | ✅ 2026-10-28：`03` §2 重写定稿——比例是标的属性（主板 ±10/ST ±5、创业板与科创板 ±20、转债 ±20 对称；ETF 无法由代码推断 → `limitPct` 数据层配置；北交所超范围）；限价整数单元 half-up（与交易所一致）；显示与拦截同一对限价含边界。`price_limit` 向量转 active（24 用例），Rust/TS 两侧同步补实现全绿（76 向量），原型抽屉接入 |
 | P1-T3 | B3+B4 过户费文案统一；小数位按 `kind` 决定并收进 `data.js` | `03` 第 1/3 节 ⚠️ 消除 | 0.5d | ✅ 2026-10-28：文案改「过户费 0.001%（沪深两市均收）」（代码本就对）；小数位收进 `data.js` `priceDec(kind)`（stock 2、ETF/转债 3），7 屏全量替换、analysis 删 `last2`、watchlist 补 `kind`、转债文案字面量转 3 位；`03` §1/§3 ⚠️ 消除 |
 | P1-T4 | B5 `up/down` 语义分离：引入 `--ok/--danger` 令牌，逐处替换非涨跌语义 | `05` 令牌表更新、`03` 第 11 节 ⚠️ 消除 | 1d | ⬜ |
 | P1-T5 | B7 交易所用显式 `mkt` 字段（analysis 展示 + holdings 新建持仓路径） | 不再出现 `code[0]==='6'` | 0.25d | ⬜ |
@@ -61,14 +61,14 @@
 
 **完成标准**：spike 全部跑通；若任何 0005 假设被证伪（robit API 不适配、akshare 拿不到转债数据等），回 ADR 修订再继续。
 
-## P3 · 口径可执行化（黄金测试向量）
+## P3 · 口径可执行化（黄金测试向量） ✅（2026-10-28）
 
 | # | 任务 | 产出 | 估算 | 状态 |
 |---|---|---|---|---|
 | P3-T1 | fixture 设计：JSON 格式（公式 id / 输入 / 期望输出），放 `fixtures/golden/`，前后端共享同一份 | schema 说明进 `03` 附录 | 0.5d | ✅ 2026-10-27：schema v1 定稿进 `03` 附录（比对规则 6 条 / 公式组→函数映射表 / 新增口径约定 5 条：sell_to 按 lot 泛化、perf 短序列归 0、清仓 after_cost=null、压线算安全、费用不舍入）；runner 随 P3-T3/T4 落地 |
-| P3-T2 | 手算可对用例集：`03` 每条公式至少 3 组（常规 / 边界 / 空持仓），数字可在纸上复核 | fixture 文件 | 1d | 🔨 七组 52 个 active 用例（lot 16 / fees 7 / dilution 7 / recalc 4 / discipline 9 / perf 4 / vol_synth 5），三类标签齐备、desc 附精确分数手算过程；`price_limit` 组 status=pending ⏸ 等 P1-T2（B2）口径定稿；新发现口径缝隙记入 `07` B11/B12 |
-| P3-T3 | Rust 领域纯函数库（backend 内独立 crate）：整手 / 费用 / 摊薄 / 涨跌停 / 仓位与纪律四条 / 净值指标 / 波动合成 / recalc 汇总，`cargo test` 跑 fixture | 全绿 | 1–2d | ✅ 2026-10-28：`zimu-domain` crate——7 个纯函数模块 + `tests/golden.rs` runner（按 03 附录比对规则：容差分级/null/数组按序/未列字段不校验/pending 跳过），`cargo test -p zimu-domain` 全绿（9 单测 + 52 黄金向量）；期间向量抓出一处期望值手算错误（pf-normal 的 mdd 应为 −5.5/110 = −5%）并修正 fixture。涨跌停实现随 `price_limit` 组等 P1-T2/B2 定稿后补 |
-| P3-T4 | TS 实现（frontend 共享层）：抽屉试算等即时交互用，同一组 fixture 跑测试 | 全绿 | 1d | ✅ 2026-10-28：`frontend/src/domain/`——8 个模块镜像 `zimu-domain`（模块划分/字段名/运算顺序一致，snake_case 字段对 fixture 键）+ `golden.test.ts` runner（比对规则与 Rust 侧同款，另判 NaN/Inf 失败）；引入 vitest 5（frontend 首个测试依赖），`npm test` 全绿（52 用例，`price_limit` pending 跳过）、`npm run build` 不受影响。P5-T2 holdings 抽屉试算直接消费 |
+| P3-T2 | 手算可对用例集：`03` 每条公式至少 3 组（常规 / 边界 / 空持仓），数字可在纸上复核 | fixture 文件 | 1d | ✅ 2026-10-28：八组 76 个 active 用例（lot 16 / fees 7 / dilution 7 / recalc 4 / discipline 9 / perf 4 / vol_synth 5 / price_limit 24——随 P1-T2 定稿补齐转 active），三类标签齐备、desc 附精确分数手算过程；口径缝隙记入 `07` B11/B12 |
+| P3-T3 | Rust 领域纯函数库（backend 内独立 crate）：整手 / 费用 / 摊薄 / 涨跌停 / 仓位与纪律四条 / 净值指标 / 波动合成 / recalc 汇总，`cargo test` 跑 fixture | 全绿 | 1–2d | ✅ 2026-10-28：`zimu-domain` crate——7 个纯函数模块 + `tests/golden.rs` runner（按 03 附录比对规则：容差分级/null/数组按序/未列字段不校验/pending 跳过），`cargo test -p zimu-domain` 全绿（9 单测 + 52 黄金向量）；期间向量抓出一处期望值手算错误（pf-normal 的 mdd 应为 −5.5/110 = −5%）并修正 fixture。涨跌停（`price_limit.rs`：比例推断/整数单元限价/委托价校验）随 P1-T2 于 2026-10-28 补齐，现 11 单测 + 76 向量全绿 |
+| P3-T4 | TS 实现（frontend 共享层）：抽屉试算等即时交互用，同一组 fixture 跑测试 | 全绿 | 1d | ✅ 2026-10-28：`frontend/src/domain/`——8 个模块镜像 `zimu-domain`（模块划分/字段名/运算顺序一致，snake_case 字段对 fixture 键）+ `golden.test.ts` runner（比对规则与 Rust 侧同款，另判 NaN/Inf 失败）；引入 vitest 5（frontend 首个测试依赖），`npm run build` 不受影响。`price_limit.ts` 随 P1-T2 于 2026-10-28 补齐，现 `npm test` 84 项全绿（76 向量 + 8 组校验，无跳过）。P5-T2 holdings 抽屉试算直接消费 |
 
 **完成标准**：两边测试全绿；任何人可以用 fixture + 一份持仓表在纸上复算出界面上的每一个数字。
 

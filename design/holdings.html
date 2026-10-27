@@ -275,7 +275,7 @@
   function find(code) { return D.holdings.find(h => h.code === code) || D.watchlist.find(h => h.code === code); }
   function meta(h) {
     const kind = h.kind || 'stock';
-    return { kind, lot: lots[kind], unit: units[kind], prec: D.priceDec(kind), prev: h.prev || h.price / (1 + (h.dayChg || 0) / 100) };
+    return { kind, lot: lots[kind], unit: units[kind], prec: D.priceDec(kind), pct: h.limitPct || null, prev: h.prev || h.price / (1 + (h.dayChg || 0) / 100) };
   }
   function openTrade(code, s) {
     cur = find(code); if (!cur) return;
@@ -290,7 +290,8 @@
     document.getElementById('drawer-submit').disabled = true;
     document.getElementById('unit').textContent = m.unit;
     document.getElementById('lot-hint').textContent = `${D.kindLabel[m.kind]}最小单位 1 手 = ${m.lot} ${m.unit}，数量需为 ${m.lot} 的整数倍`;
-    document.getElementById('limit-txt').textContent = `${D.fmt(m.prev * (m.kind === 'cb' ? 0.8 : 0.9), 2)} — ${D.fmt(m.prev * 1.1, 2)}`;
+    const lim0 = D.limitPrices(m.kind, m.prev, m.pct);
+    document.getElementById('limit-txt').textContent = lim0 ? `${D.fmt(lim0.lo, m.prec)} — ${D.fmt(lim0.hi, m.prec)}（±${m.pct}%）` : '—';
     document.getElementById('code-hint').textContent = cur.shares
       ? `当前持有 ${D.fmt(cur.shares, 0)} ${m.unit} · 成本 ${D.fmt(cur.cost, m.prec)} · 现价 ${D.fmt(cur.price, m.prec)}`
       : '尚未持有，买入后将新建持仓。';
@@ -344,10 +345,11 @@
     fQty.classList.toggle('invalid', !!errQ);
     document.getElementById('err-qty').textContent = errQ || '请填写有效数量';
 
-    const hi = m.prev * 1.1001, lo = m.prev * (m.kind === 'cb' ? 0.799 : 0.899);
-    const bad = price && (price > hi || price < lo);
-    fPrice.classList.toggle('invalid', !!bad);
-    document.getElementById('err-price').textContent = bad ? `价格超出涨跌停合理区间 ${D.fmt(lo, 2)} — ${D.fmt(hi, 2)}` : '';
+    // 涨跌停拦截与上方显示用同一对限价（03 §2 定稿：含边界，旧 0.1% 容差废除）
+    const lim = D.limitPrices(m.kind, m.prev, m.pct);
+    const bad = !!(price && lim && (price > lim.hi || price < lim.lo));
+    fPrice.classList.toggle('invalid', bad);
+    document.getElementById('err-price').textContent = bad ? `价格超出涨跌停区间 ${D.fmt(lim.lo, m.prec)} — ${D.fmt(lim.hi, m.prec)}` : '';
 
     const amount = qty * price, f = fee(amount, m.kind, side);
     const afterShares = side === 'buy' ? held + qty : Math.max(0, held - qty);
@@ -401,7 +403,7 @@
     if (side === 'buy') {
       if (cur.shares) { cur.cost = (cur.cost * cur.shares + amount + f) / (cur.shares + qty); cur.shares += qty; }
       else {
-        const h = { code: cur.code, name: cur.name, mkt: cur.code[0] === '6' ? 'SH' : 'SZ', kind: m.kind, sector: cur.sector || '新建持仓', shares: qty, cost: (amount + f) / qty, price: cur.price, prev: m.prev };
+        const h = { code: cur.code, name: cur.name, mkt: cur.code[0] === '6' ? 'SH' : 'SZ', kind: m.kind, sector: cur.sector || '新建持仓', shares: qty, cost: (amount + f) / qty, price: cur.price, prev: m.prev, limitPct: m.pct };
         D.holdings.push(h); cur = h;
       }
       D.ws.cash -= amount + f;   // 现金源头是 ws.cash，recalc() 后重新发布为 D.cash
