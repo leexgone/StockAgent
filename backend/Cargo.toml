@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zimu-server", "crates/zimu-agent-cli"]
+members = ["crates/zimu-server", "crates/zimu-agent-cli", "crates/zimu-domain"]
 resolver = "2"
 
 [workspace.package]

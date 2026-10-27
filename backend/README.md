@@ -2,9 +2,10 @@
 
 ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开公网入站。
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
-Agent SSE 会话，P2-T3；P2-T5 起桥体消费 robit `robit-web` crate）与
+Agent SSE 会话，P2-T3；P2-T5 起桥体消费 robit `robit-web` crate）、
 `zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent REPL + echo 工具，保留为
-调试入口）。领域纯函数库（P3-T3）将来作为独立 crate 加入。
+调试入口）与 `zimu-domain`（P3-T3 领域纯函数库：`docs/03` 全部数字口径的
+Rust 实现，`cargo test -p zimu-domain` 跑 `fixtures/golden/` 黄金向量）。
 
 ## 运行 zimu-server
 
@@ -78,6 +79,21 @@ cargo run -p zimu-agent-cli
 P2-T3 把会话搬进 zimu-server 时，替换的只是 CliFrontend（换成 SSE 桥），
 装配方式（LlmClient / ToolRegistry / Agent）原样复用。
 
+## zimu-domain（P3-T3 领域纯函数库）
+
+数字口径（`docs/03-domain-rules.md` 正文 + 附录）在 Rust 侧的唯一实现处：
+手数/数量校验/快捷档位、费用、摊薄试算、recalc 汇总、纪律四条 + 降仓数量、
+净值指标、波动合成——全部纯函数无 I/O，输入输出 serde 结构体的字段名与
+`fixtures/golden/*.json` 键一一对应。测试即验收：
+
+```powershell
+cargo test -p zimu-domain   # 9 个单测 + 黄金向量 runner（52 用例；pending 组自动跳过）
+```
+
+改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层（P3-T4）
+跑同一份 fixtures，两边实现永不互相「对拍」，只对黄金向量。
+`price_limit` 组等 B2/P1-T2 涨跌停口径定稿后补实现与用例。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
@@ -94,4 +110,6 @@ crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话
                             ├─ main.rs           端点与启动装配（robit 配置缺失时优雅降级）
                             └─ agent_bridge.rs   Agent 装配 + echo 工具（WebBridge 接线）
 crates/zimu-agent-cli/      robit 集成 spike：Agent REPL + echo 工具（P2-T2，调试入口）
+crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth
+                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/）
 ```

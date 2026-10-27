@@ -1,0 +1,11 @@
+[package]
+name = "zimu-domain"
+description = "子木领域纯函数库（P3-T3）：手数/费用/摊薄/汇总/纪律/净值指标/波动合成，跑 fixtures/golden 黄金向量"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

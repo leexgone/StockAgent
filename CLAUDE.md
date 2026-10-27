@@ -9,6 +9,7 @@
 ```
 backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管）
                    crates/zimu-agent-cli（robit 集成 spike：Agent REPL + echo 工具，P2-T2）
+                   crates/zimu-domain（领域纯函数库，P3-T3：03 数字口径唯一 Rust 实现 + 黄金向量测试）
 frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话），令牌在 src/styles/tokens.css
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare），P2-T1 spike 产物
 design/            界面原型：7 个 html + assets/{ui.css, data.js, charts.js}
