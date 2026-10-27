@@ -151,7 +151,7 @@ export default function ChatPanel({ agentOnline }: { agentOnline: boolean }) {
                   ⚠️ 工具 <code>{pending.name}</code> 请求确认：{briefArgs(pending.arguments)}
                 </p>
                 <p className="row">
-                  <button className="btn btn-accent" onClick={() => void answerConfirm(true)}>
+                  <button className="btn btn-primary" onClick={() => void answerConfirm(true)}>
                     批准
                   </button>
                   <button className="btn" onClick={() => void answerConfirm(false)}>
@@ -171,7 +171,7 @@ export default function ChatPanel({ agentOnline }: { agentOnline: boolean }) {
               disabled={busy}
               autoComplete="off"
             />
-            <button type="submit" className="btn btn-accent" disabled={busy || !input.trim()}>
+            <button type="submit" className="btn btn-primary" disabled={busy || !input.trim()}>
               发送
             </button>
             <button type="button" className="btn" onClick={() => void cancel()} disabled={!busy}>

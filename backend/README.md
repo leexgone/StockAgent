@@ -41,7 +41,8 @@ Agent 随服务启动装配（与 zimu-agent-cli 同一链路，`CliFrontend` �
 | `POST /api/chat/confirm` | `{"tool_call_id":"…","approved":true}` 回填工具确认 |
 | `POST /api/chat/cancel` | 取消当前轮次 |
 
-首页「子木会话」面板（`frontend/src/components/ChatPanel.tsx`）即消费这组端点；
+「智能问答」视图的会话面板（`frontend/src/components/ChatPanel.tsx`，工作台首页点
+侧栏「智能问答 / 问一句」或对应入口卡进入，P2-T4 起）即消费这组端点；
 它是 spike 级 UI，正式 chat 屏 P5 按 `design/chat.html` 重做。
 
 curl 冒烟——**Windows 终端里中文 payload 必须走 UTF-8 文件**，内联会被编码搞坏

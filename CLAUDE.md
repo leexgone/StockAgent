@@ -9,7 +9,7 @@
 ```
 backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管）
                    crates/zimu-agent-cli（robit 集成 spike：Agent REPL + echo 工具，P2-T2）
-frontend/          React + TS + Vite 前端：首页骨架，令牌在 src/styles/tokens.css
+frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话），令牌在 src/styles/tokens.css
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare），P2-T1 spike 产物
 design/            界面原型：7 个 html + assets/{ui.css, data.js, charts.js}
 docs/              产品规格与工程规范（编号即阅读顺序）
@@ -32,7 +32,7 @@ docs/decisions/    ADR 决策记录
 
 **技术形态（受 ADR-0005 约束；0002/0003 已被其取代）**
 - `design/` 原型保持零构建（不引入打包器、框架、CDN、npm 包），直到 `frontend/` 迁移完成前它都是设计参照与验收基准。
-- 技术路线见 ADR-0005：`backend/`（Rust workspace，依赖 robit）、`frontend/`（React + TS + Vite）、`datafetch/`（Python sidecar，uv + FastAPI + akshare/baostock）。目录已随 P2 spike 创建（datafetch P2-T1 ✅；backend + frontend 最简框架 2026-10-27 立起；P2-T2 ✅——`zimu-agent-cli` 直接消费 crates.io 的 robit 0.1.25，流式对话 + echo 工具 function-calling 验收通过；P2-T3 ✅——Agent SSE 桥进 zimu-server（`/api/chat*` 端点 + 首页 ChatPanel，浏览器/curl 均见流式输出）。前端版本基准对齐 robit-gui（React 19 / Vite 6 / TS 5.6），后端 crate 版本对齐 robit workspace，升级前先想两边。
+- 技术路线见 ADR-0005：`backend/`（Rust workspace，依赖 robit）、`frontend/`（React + TS + Vite）、`datafetch/`（Python sidecar，uv + FastAPI + akshare/baostock）。目录已随 P2 spike 创建（datafetch P2-T1 ✅；backend + frontend 最简框架 2026-10-27 立起；P2-T2 ✅——`zimu-agent-cli` 直接消费 crates.io 的 robit 0.1.25，流式对话 + echo 工具 function-calling 验收通过；P2-T3 ✅——Agent SSE 桥进 zimu-server（`/api/chat*` 端点 + ChatPanel，浏览器/curl 均见流式输出）；P2-T4 ✅——index 工作台静态复刻进 React（Chrome 外壳 + 六区块，`demo.ts` 同口径移植 `data.js`，41 项派生数字与原型逐位一致；会话面板移入「智能问答」视图）。前端版本基准对齐 robit-gui（React 19 / Vite 6 / TS 5.6），后端 crate 版本对齐 robit workspace，升级前先想两边。
 - 两工程共同演进：框架级缺口先改 robit（`E:\Github\robit`，改动保持通用性、走它自己的发布流程），子木 pin tag/rev 消费（开发期可 path override）；痛点记入 `docs/07-backlog.md` R 系列，**不要写绕过 robit trait 的补丁**，领域逻辑不渗进 robit。
 - `design/` 原型只用演示样本；真实行情自 P2 起经 datafetch sidecar 进入。**真实持仓、券商账户数据、任何 API key 永不入库。**
 
