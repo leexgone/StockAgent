@@ -37,6 +37,8 @@
   const pct = v => (v > 0 ? '+' : v < 0 ? '' : '') + fmt(v, 2) + '%';
   const wan = v => (v / 10000).toFixed(2) + ' 万';
   const dirClass = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+  // 报价小数位按 kind（03 §1 定稿，B4/P1-T3）：股票 2 位、ETF/转债 3 位；页面不得手搓精度
+  const priceDec = kind => (kind === 'stock' ? 2 : 3);
 
   /* ---------- 个人账户 ---------- */
   const ws = { name: '我的账户', init: '我', style: '均衡成长', cash: 46800.00, broker: '华泰证券 · 沪深 A 股账户（*8842）', wechat: '已绑定 · 微信' };
@@ -185,7 +187,7 @@
   /* ---------- 预警 ---------- */
   const alerts = [
     { time: '10:32', code: '300750', name: '宁德时代', type: '放量突破', level: 'up', text: '成交额明显高于 20 日均量，价格站上 60 日均线', done: false },
-    { time: '09:58', code: '002594', name: '比亚迪', type: '跌破成本', level: 'down', text: `现价 ${fmt(BYD.price, 2)} 低于成本 ${fmt(BYD.cost, 2)}，浮亏扩大至 ${pct(BYD.pnlPct)}`, done: false },
+    { time: '09:58', code: '002594', name: '比亚迪', type: '跌破成本', level: 'down', text: `现价 ${fmt(BYD.price, priceDec(BYD.kind))} 低于成本 ${fmt(BYD.cost, priceDec(BYD.kind))}，浮亏扩大至 ${pct(BYD.pnlPct)}`, done: false },
     { time: '14:47', code: '588000', name: '科创50ETF', type: '止盈提醒', level: 'warn', text: `累计收益 ${pct(H('588000').pnlPct)}，触及你设定的 +12% 止盈线`, done: false },
     { time: '08:55', code: '113650', name: '博威转债', type: '强赎公告', level: 'warn', text: '正股触发有条件赎回条款，最后交易日 11-20，溢价率 12.4%', done: true },
     { time: '昨 15:05', code: '600036', name: '招商银行', type: '盘后复盘', level: 'flat', text: '已连续 3 日跑赢银行指数，PB 0.96 处近 3 年 31 分位', done: true },
@@ -252,7 +254,7 @@
     '588000': { score: 51, action: '持有', horizon: '波段', conf: 0.58, position: '当前 1.5% → 维持', target: [1.15, 1.20], stop: 1.02, reason: '高波动小仓位，作为科技敞口保留。', dims: [ { k: '技术面', s: 48, t: '跌破 10 日线，短线进入整理。' }, { k: '基本面', s: 55, t: '成分股半导体营收回暖，但估值不便宜。' }, { k: '资金面', s: 49, t: '份额略有赎回。' }, { k: '消息面', s: 52, t: '出口管制变化仍是主要变量。' } ], risks: ['单日波动常超 2%，请确认自己承受得起。'] },
     '110074': { score: 69, action: '持有', horizon: '短中线', conf: 0.61, position: '当前 2.9% → 维持', target: null, stop: 121.0, reason: '纯债溢价率 8.2%，债底保护尚可，正股弹性仍在。', dims: [ { k: '技术面', s: 66, t: '突破盘整区间，转股溢价率压缩至 14.6%。' }, { k: '基本面', s: 68, t: '正股受益高端铜材需求，业绩改善。' }, { k: '资金面', s: 70, t: '转债余额小幅下降，筹码集中。' }, { k: '消息面', s: 55, t: '无重大公告。' } ], risks: ['溢价率若回到 20% 以上，跟涨能力会明显减弱。'] },
     '113650': { score: 48, action: '减仓', horizon: '短线', conf: 0.63, position: '当前 1.8% → 建议清仓或换券', target: null, stop: 124.0, reason: '接近强赎时间窗，溢价率与赎回风险叠加。', dims: [ { k: '技术面', s: 45, t: '冲高回落，10 日线上方反复。' }, { k: '基本面', s: 52, t: '正股稳健但估值已兑现。' }, { k: '资金面', s: 44, t: '溢价率走阔伴随缩量。' }, { k: '消息面', s: 40, t: '已发布可能强赎提示公告。' } ], risks: ['强赎后未及时转股或卖出会承担额外损失，注意最后交易日 11-20。'] },
-    '127022': { score: 55, action: '持有', horizon: '中线', conf: 0.57, position: '当前 1.1% → 维持', target: null, stop: 101.5, reason: '双低特征明显（价格 105.35 / 溢价率 9.8%），下行有限。', dims: [ { k: '技术面', s: 50, t: '底部横盘，波动收敛。' }, { k: '基本面', s: 54, t: '化纤价差修复带动转债债性抬升。' }, { k: '资金面', s: 56, t: '低价格券近期受配置资金关注。' }, { k: '消息面', s: 58, t: '无风险事件。' } ], risks: ['低价格券弹性弱，靠时间换空间。'] },
+    '127022': { score: 55, action: '持有', horizon: '中线', conf: 0.57, position: '当前 1.1% → 维持', target: null, stop: 101.5, reason: '双低特征明显（价格 105.350 / 溢价率 9.8%），下行有限。', dims: [ { k: '技术面', s: 50, t: '底部横盘，波动收敛。' }, { k: '基本面', s: 54, t: '化纤价差修复带动转债债性抬升。' }, { k: '资金面', s: 56, t: '低价格券近期受配置资金关注。' }, { k: '消息面', s: 58, t: '无风险事件。' } ], risks: ['低价格券弹性弱，靠时间换空间。'] },
   };
 
   // 文案中的仓位百分比统一用计算值覆盖，保证「建议文字 / 表格 / 图表」口径一致
@@ -268,10 +270,10 @@
 
   // 自选观察（非持仓）
   const watchlist = [
-    { code: '002415', name: '海康威视', sector: '电子', price: 34.86, dayChg: 0.91, note: '观察：AI 视觉商业化' },
-    { code: '688111', name: '金山办公', sector: '计算机', price: 287.40, dayChg: -1.24, note: '观察：订阅 ARPU' },
-    { code: '601899', name: '紫金矿业', sector: '有色金属', price: 19.72, dayChg: 1.86, note: '与现有有色仓位重叠' },
-    { code: '512890', name: '红利低波ETF', sector: '宽基指数', price: 1.284, dayChg: 0.31, note: '防守型候选，波动低' },
+    { code: '002415', name: '海康威视', kind: 'stock', sector: '电子', price: 34.86, dayChg: 0.91, note: '观察：AI 视觉商业化' },
+    { code: '688111', name: '金山办公', kind: 'stock', sector: '计算机', price: 287.40, dayChg: -1.24, note: '观察：订阅 ARPU' },
+    { code: '601899', name: '紫金矿业', kind: 'stock', sector: '有色金属', price: 19.72, dayChg: 1.86, note: '与现有有色仓位重叠' },
+    { code: '512890', name: '红利低波ETF', kind: 'etf', sector: '宽基指数', price: 1.284, dayChg: 0.31, note: '防守型候选，波动低' },
   ];
 
   /* ---------- 对话式问股 样本问答 ---------- */
@@ -284,9 +286,9 @@
         { t: `具体操作：今天 254 附近一次减 ${sellTo('002594', 15)} 股（整手），仓位落到约 ${weightAfter('002594', sellTo('002594', 15))}%，已经回到上限内；剩下的 ${BYD.shares - sellTo('002594', 15)} 股用 241 这条止损线守着，不必再减。`, k: 'plan' },
       ],
       cites: [
-        { src: '持仓明细', txt: `002594 比亚迪 · ${fmt(BYD.shares, 0)} 股 · 成本 ${fmt(BYD.cost, 2)} · 现价 ${fmt(BYD.price, 2)} · 当日 ${pct(BYD.dayChg)}` },
+        { src: '持仓明细', txt: `002594 比亚迪 · ${fmt(BYD.shares, 0)} 股 · 成本 ${fmt(BYD.cost, priceDec(BYD.kind))} · 现价 ${fmt(BYD.price, priceDec(BYD.kind))} · 当日 ${pct(BYD.dayChg)}` },
         { src: '组合诊断', txt: `单票集中度 ${wp('002594')}%（上限 25%），前三行业合计占持仓 ${agg.top3Sector.toFixed(1)}%` },
-        { src: '行情快照', txt: `10-24 收盘 ${fmt(BYD.price, 2)}，昨收 ${fmt(BYD.prev, 2)}，跌破 20 日线与 60 日线` },
+        { src: '行情快照', txt: `10-24 收盘 ${fmt(BYD.price, priceDec(BYD.kind))}，昨收 ${fmt(BYD.prev, priceDec(BYD.kind))}，跌破 20 日线与 60 日线` },
       ],
       chips: ['分两笔的话，第一笔挂什么价？', '降到 15% 后风险会小多少？', '换成什么标的更好？'],
     },
@@ -307,7 +309,7 @@
       q: '博威转债是不是要赎回了？',
       a: [
         { t: '结论：已发布「可能强赎」提示公告，按条款在 11-20 前需要处理，别拖到最后一天。', k: 'conclusion' },
-        { t: '你的 80 张成本 132.40、现价 127.15，浮亏 -3.96%；转股价值 113.2、溢价率 12.4%，靠正股再涨修复溢价的时间窗已经很窄。', k: 'body' },
+        { t: '你的 80 张成本 132.400、现价 127.150，浮亏 -3.96%；转股价值 113.2、溢价率 12.4%，靠正股再涨修复溢价的时间窗已经很窄。', k: 'body' },
         { t: '两条路：① 11-12 前二级卖出，成交均价 127 上下；② 转股后卖出正股，需承担次日价格风险。若拿不定，先卖一半锁定价差。', k: 'plan' },
       ],
       cites: [ { src: '公告', txt: '10-14 关于赎回公司债券的提示性公告 · 最后交易日 11-20' }, { src: '持仓明细', txt: '113650 博威转债 · 80 张 · 现价 127.150' } ],
@@ -497,7 +499,7 @@
       const np = Math.max(0.001, h.price + step);
       const el = document.querySelector(`[data-tick="${h.code}"]`);
       if (el) {
-        el.textContent = fmt(np, h.kind === 'etf' ? 3 : 2);
+        el.textContent = fmt(np, priceDec(h.kind));
         el.classList.remove('flash-up', 'flash-down');
         void el.offsetWidth;
         el.classList.add(np >= h.price ? 'flash-up' : 'flash-down');
@@ -523,7 +525,7 @@
   }
 
   ZM = {
-    fmt, money, pct, wan, dirClass, ICONS,
+    fmt, money, pct, wan, dirClass, priceDec, ICONS,
     ws, indices, holdings, kindLabel, watchlist, advice, alerts, qa, sessions,
     equity, P, wp, wsec, sellTo, weightAfter,
     marketClock, chrome, toast, tickPrices, stripHTML, recalc, totalMvAll,

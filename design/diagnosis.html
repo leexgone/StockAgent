@@ -262,7 +262,7 @@
     const loser = [...D.holdings].sort((a, b) => a.pnlPct - b.pnlPct)[0];
     if (loser && loser.pnl < 0) out.push({
       p: 3, t: `${loser.name} 浮亏 ${D.pct(loser.pnlPct)}，但还没有止损线`,
-      d: `亏不可怕，没有边界才可怕。给它一个失效价：跌破 ${D.fmt(loser.price * 0.93, 2)} 无条件减半，写进「仓位纪律」里，微信会盯着。`,
+      d: `亏不可怕，没有边界才可怕。给它一个失效价：跌破 ${D.fmt(loser.price * 0.93, D.priceDec(loser.kind))} 无条件减半，写进「仓位纪律」里，微信会盯着。`,
       c: () => `按 7% 止损计算，最大追加亏损约 ${D.money(loser.mv * 0.07, 0)}（占总资产 ${(loser.mv * 0.07 / ta * 100).toFixed(2)}%）`,
       code: loser.code, side: 'sell',
     });

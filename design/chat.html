@@ -156,7 +156,7 @@
         { t: `${hit.name}当前建议「${A ? A.action : '持有'}」，${A ? A.position : '维持现仓位'}。`, k: 'conclusion' },
         { t: A ? A.dims.map(d => `${d.k} ${d.s} 分：${d.t}`).join(' ') : '样本问答库中没有这只标的的完整分析，接入后可即时生成。', k: 'body' },
         { t: A && A.target ? `参考区间 ${A.target[0]} — ${A.target[1]}，止损 ${A.stop}；按你现有 ${D.fmt(hit.shares, 0)} 股计算，跌破止损对总资产影响约 ${(Math.abs(hit.price - A.stop) * hit.shares / D.totalAssets * 100).toFixed(2)}%。` : '这只没有设目标价与止损位，建议先补上纪律参数。', k: 'plan' },
-      ], cites: [{ src: '持仓明细', txt: `${hit.code} ${hit.name} · ${D.fmt(hit.shares, 0)} · 成本 ${D.fmt(hit.cost, 2)} · 现价 ${D.fmt(hit.price, 2)} · ${D.pct(hit.dayChg)}` },
+      ], cites: [{ src: '持仓明细', txt: `${hit.code} ${hit.name} · ${D.fmt(hit.shares, 0)} · 成本 ${D.fmt(hit.cost, D.priceDec(hit.kind))} · 现价 ${D.fmt(hit.price, D.priceDec(hit.kind))} · ${D.pct(hit.dayChg)}` },
         { src: 'AI 分析', txt: A ? `综合 ${A.score} 分 · 置信度 ${(A.conf * 100).toFixed(0)}% · ${A.horizon}` : '无' }],
         chips: [`${hit.name}要不要止损？`, '把它设为微信预警'] };
     }

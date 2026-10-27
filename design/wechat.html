@@ -268,7 +268,7 @@
   const A = D.advice['002594'];
   function renderPreview() {
     const priceLine = state.withPrice
-      ? `现价 ${D.fmt(b.price, 2)}，成本 ${D.fmt(b.cost, 2)}，浮亏 ${D.pct(b.pnlPct)}。`
+      ? `现价 ${D.fmt(b.price, D.priceDec(b.kind))}，成本 ${D.fmt(b.cost, D.priceDec(b.kind))}，浮亏 ${D.pct(b.pnlPct)}。`
       : '已触及你设的「跌破成本」条件（价格已隐藏）。';
     document.getElementById('card-preview').innerHTML = `
       <div class="hd"><span>${D.ICONS.bell}</span>子木 · 持仓预警<span class="num" style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">10:32</span></div>

@@ -28,7 +28,7 @@ pub fn lot_size(kind: Kind) -> i64 {
     }
 }
 
-/// 报价小数位（03 §1 表格；转债 3 位为定稿口径，抽屉显示 bug 由 B4/P1-T3 修）
+/// 报价小数位（03 §1 表格；B4 已随 P1-T3 修复——原型统一走 data.js `priceDec(kind)`）
 pub fn price_decimals(kind: Kind) -> u32 {
     match kind {
         Kind::Stock => 2,

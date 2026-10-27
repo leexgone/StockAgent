@@ -176,7 +176,7 @@
   let scope = 'hold', code = params.get('code') || '300750';
   const all = () => scope === 'hold'
     ? D.holdings.map(h => ({ code: h.code, name: h.name, kind: h.kind, sector: h.sector, h }))
-    : D.watchlist.map(w => ({ code: w.code, name: w.name, kind: w.code[0] === '5' ? 'etf' : 'stock', sector: w.sector, w }));
+    : D.watchlist.map(w => ({ code: w.code, name: w.name, kind: w.kind, sector: w.sector, w }));
   // 自选没有分析库时，生成一份保守的「观察中」结论
   function adviceFor(c) {
     if (D.advice[c]) return D.advice[c];
@@ -244,7 +244,7 @@
     for (let g = 0; g <= 3; g++) {
       const v = (lo - rg * .06) + (rg * 1.12) * g / 3, yy = y(v);
       s += `<line class="grid-line" x1="0" x2="${w}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"/>`;
-      s += `<text x="3" y="${(yy - 4).toFixed(1)}">${D.fmt(v, last2(item))}</text>`;
+      s += `<text x="3" y="${(yy - 4).toFixed(1)}">${D.fmt(v, D.priceDec(item.kind))}</text>`;
     }
     data.forEach((k, i) => {
       const cx = step * i + step / 2, up = k.c >= k.o, col = C.color(up ? '--up' : '--down');
@@ -262,11 +262,10 @@
     el.innerHTML = s;
     const last = data[data.length - 1], first = data[0];
     document.getElementById('k-read').textContent =
-      `${period === 1 ? '日' : '周'}线 ${data.length} 根 · 区间 ${(last.c / first.o - 1) * 100 >= 0 ? '+' : ''}${((last.c / first.o - 1) * 100).toFixed(2)}% · MA5 ${D.fmt(m5[m5.length - 1] || last.c, last2(item))}`;
+      `${period === 1 ? '日' : '周'}线 ${data.length} 根 · 区间 ${(last.c / first.o - 1) * 100 >= 0 ? '+' : ''}${((last.c / first.o - 1) * 100).toFixed(2)}% · MA5 ${D.fmt(m5[m5.length - 1] || last.c, D.priceDec(item.kind))}`;
     document.getElementById('k-sub').textContent =
-      `${period === 1 ? '每日' : '每周'} OHLC 为演示样本，末根锚定现价 ${D.fmt(last.c, last2(item))}`;
+      `${period === 1 ? '每日' : '每周'} OHLC 为演示样本，末根锚定现价 ${D.fmt(last.c, D.priceDec(item.kind))}`;
   }
-  function last2(item) { return item.kind === 'etf' ? 3 : 2; }
 
   /* ---------- 渲染 ---------- */
   function render() {
@@ -289,7 +288,7 @@
     tag.textContent = tagText;
     tag.className = 'verdict-tag ' + (TAG[A.action] || 'vt-hold');
     document.getElementById('a-action-line').innerHTML =
-      `现价 <b class="num">${D.fmt(price, last2(item))}</b> <span class="${D.dirClass(chg)} num">${D.pct(chg)}</span> · ${A.horizon} · ${A.position}`;
+      `现价 <b class="num">${D.fmt(price, D.priceDec(item.kind))}</b> <span class="${D.dirClass(chg)} num">${D.pct(chg)}</span> · ${A.horizon} · ${A.position}`;
     document.getElementById('a-reason').textContent = A.reason;
     const conf = document.getElementById('a-conf');
     conf.className = 'pill ' + (A.conf >= 0.68 ? 'accent' : '');
@@ -297,10 +296,10 @@
     C.gauge('#a-gauge', A.score, '综合得分');
 
     const facts = [
-      ['现价 / 昨收', `${D.fmt(price, last2(item))} / ${D.fmt(h ? h.prev : price / (1 + chg / 100), last2(item))}`],
-      ['成本 / 盈亏', h ? `${D.fmt(h.cost, last2(item))} / ${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}` : '— / —'],
+      ['现价 / 昨收', `${D.fmt(price, D.priceDec(item.kind))} / ${D.fmt(h ? h.prev : price / (1 + chg / 100), D.priceDec(item.kind))}`],
+      ['成本 / 盈亏', h ? `${D.fmt(h.cost, D.priceDec(item.kind))} / ${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}` : '— / —'],
       ['目标区间', A.target ? `${A.target[0]} — ${A.target[1]}` : '未设'],
-      ['止损 / 支撑', A.stop ? D.fmt(A.stop, last2(item)) : '未设'],
+      ['止损 / 支撑', A.stop ? D.fmt(A.stop, D.priceDec(item.kind)) : '未设'],
       ['建议仓位', A.position.split('→')[1] ? A.position.split('→')[1].trim() : '—'],
       ['信号一致度', `${Math.round(A.conf * 100)} / 100`],
     ];
@@ -332,7 +331,7 @@
         <td class="txt num" style="color:var(--muted);font-size:11.5px">${x.date}</td>
         <td class="txt"><span class="pill ${TAG[x.action] ? (x.action === '减仓' || x.action === '卖出' ? 'down' : x.action === '持有' || x.action === '定投' ? '' : 'up') : ''}">${x.action}</span></td>
         <td class="num">${x.score}</td>
-        <td class="num">${D.fmt(x.price, last2(item))}</td>
+        <td class="num">${D.fmt(x.price, D.priceDec(item.kind))}</td>
         <td class="txt" style="white-space:normal;max-width:34ch;font-size:12px;color:var(--muted)">${x.note}</td>
         <td class="num ${D.dirClass(x.verify)}">${x.verify == null ? '—' : D.pct(x.verify)}</td>
       </tr>`).join('');
@@ -358,7 +357,7 @@
 
   function buildPlan(item, A) {
     const h = item.h;
-    const prec = last2(item);
+    const prec = D.priceDec(item.kind);
     if (A.watchOnly) return [
       { t: '先不动，设一个触发条件', d: `突破 ${D.fmt(item.w.price * 1.03, prec)} 且成交额 > 20 日均量 1.5 倍时提醒你；在此之前不建仓。` },
       { t: '若要试仓，上限 3%', d: `${D.money(item.w.price * (item.code[0] === '6' ? 100 : 100), 0)} 起（1 手），试错仓位不影响主组合判断。` },

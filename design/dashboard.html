@@ -279,7 +279,7 @@
       <tr data-clickable data-href="analysis.html?code=${h.code}" data-od-id="dash-hrow-${h.code}">
         <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt} · ${D.kindLabel[h.kind]}</div></td>
         <td class="txt" style="width:110px">${C.spark(h.spark, h.dayChg, 100, 30)}</td>
-        <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, h.kind === 'etf' ? 3 : 2)}</span></td>
+        <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, D.priceDec(h.kind))}</span></td>
         <td class="num ${D.dirClass(h.dayChg)}">${D.pct(h.dayChg)}</td>
         <td class="num ${D.dirClass(h.pnl)}">${(h.pnl > 0 ? '+' : '') + D.fmt(h.pnl, 0)}</td>
         <td class="num" style="color:var(--muted)">${(h.mv / D.totalAssets * 100).toFixed(1)}%</td>
@@ -294,7 +294,7 @@
     <a class="list-item" href="analysis.html?code=${w.code}" data-od-id="watch-item-${i}">
       <span class="li-main"><span class="li-title">${w.name} <span class="code num">${w.code}</span></span>
       <span class="li-desc">${w.sector} · ${w.note}</span></span>
-      <span class="li-right"><span class="num" style="font-size:13px">${D.fmt(w.price, w.price < 10 ? 3 : 2)}</span>
+      <span class="li-right"><span class="num" style="font-size:13px">${D.fmt(w.price, D.priceDec(w.kind))}</span>
       <span class="num ${D.dirClass(w.dayChg)}" style="font-size:11.5px;display:block">${D.pct(w.dayChg)}</span></span>
     </a>`).join('');
   document.getElementById('watch-add').addEventListener('click', () => D.toast('在搜索框输入代码或名称即可加入自选（演示）', 'info'));

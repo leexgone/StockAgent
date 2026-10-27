@@ -108,7 +108,7 @@
 
       <div class="footnote" data-od-id="h-disclaimer">
         <span style="color:var(--muted)">i</span>
-        <span>费用按「佣金万 2.5（单笔最低 5 元）+ 卖出印花税 0.05% + 沪市过户费 0.001%」估算，可转债免印花税，实际以券商结算为准。演示数据不构成投资建议。</span>
+        <span>费用按「佣金万 2.5（单笔最低 5 元）+ 卖出印花税 0.05% + 过户费 0.001%（沪深两市均收）」估算，可转债免印花税，实际以券商结算为准。演示数据不构成投资建议。</span>
       </div>
     </main>
   </div>
@@ -225,8 +225,8 @@
         <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt}</div></td>
         <td class="txt"><span class="pill plain" style="border-color:var(--border)">${h.sector}</span><div class="sub">${D.kindLabel[h.kind]}</div></td>
         <td class="num">${D.fmt(h.shares, 0).replace(/,/g, ',')} <span style="color:var(--muted);font-size:11px">${units[h.kind]}</span></td>
-        <td class="num">${D.fmt(h.cost, h.kind === 'etf' ? 3 : 2)}</td>
-        <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, h.kind === 'etf' ? 3 : 2)}</span></td>
+        <td class="num">${D.fmt(h.cost, D.priceDec(h.kind))}</td>
+        <td class="num strong"><span class="tick" data-tick="${h.code}">${D.fmt(h.price, D.priceDec(h.kind))}</span></td>
         <td class="num ${D.dirClass(h.dayChg)}">${D.pct(h.dayChg)}</td>
         <td class="num">${moneyShort(h.mv)}</td>
         <td class="num ${D.dirClass(h.pnl)}">${(h.pnl > 0 ? '+' : '') + moneyShort(h.pnl)}<div class="sub ${D.dirClass(h.pnl)}">${D.pct(h.pnlPct)}</div></td>
@@ -275,7 +275,7 @@
   function find(code) { return D.holdings.find(h => h.code === code) || D.watchlist.find(h => h.code === code); }
   function meta(h) {
     const kind = h.kind || 'stock';
-    return { kind, lot: lots[kind], unit: units[kind], prec: kind === 'etf' ? 3 : 2, prev: h.prev || h.price / (1 + (h.dayChg || 0) / 100) };
+    return { kind, lot: lots[kind], unit: units[kind], prec: D.priceDec(kind), prev: h.prev || h.price / (1 + (h.dayChg || 0) / 100) };
   }
   function openTrade(code, s) {
     cur = find(code); if (!cur) return;
@@ -320,7 +320,7 @@
   function fee(amount, kind, side) {
     let f = Math.max(5, amount * 0.00025);
     if (side === 'sell' && kind !== 'cb' && kind !== 'etf') f += amount * 0.0005;   // 印花税
-    if (kind === 'stock') f += amount * 0.00001;                                    // 过户费（沪市，估算）
+    if (kind === 'stock') f += amount * 0.00001;                                    // 过户费（2022-04-29 起沪深两市均收，估算）
     return f;
   }
   function calc() {
@@ -375,10 +375,10 @@
   }
 
   const LOG = [
-    { t: '2026-10-20 09:42', code: '600276', name: '恒瑞医药', side: '买入', qty: 200, price: 55.30, fee: 5.00, rp: null },
-    { t: '2026-10-16 14:18', code: '110074', name: '精达转债', side: '买入', qty: 40, price: 122.800, fee: 5.00, rp: null },
-    { t: '2026-10-09 10:05', code: '510300', name: '沪深300ETF', side: '买入', qty: 2000, price: 4.118, fee: 5.00, rp: null },
-    { t: '2026-09-25 14:50', code: '002594', name: '比亚迪', side: '卖出', qty: 100, price: 271.60, fee: 34.28, rp: 680.00 },
+    { t: '2026-10-20 09:42', code: '600276', name: '恒瑞医药', kind: 'stock', side: '买入', qty: 200, price: 55.30, fee: 5.00, rp: null },
+    { t: '2026-10-16 14:18', code: '110074', name: '精达转债', kind: 'cb', side: '买入', qty: 40, price: 122.800, fee: 5.00, rp: null },
+    { t: '2026-10-09 10:05', code: '510300', name: '沪深300ETF', kind: 'etf', side: '买入', qty: 2000, price: 4.118, fee: 5.00, rp: null },
+    { t: '2026-09-25 14:50', code: '002594', name: '比亚迪', kind: 'stock', side: '卖出', qty: 100, price: 271.60, fee: 34.28, rp: 680.00 },
   ];
   function renderLog() {
     document.querySelector('#log-table tbody').innerHTML = LOG.map((l, i) => `
@@ -386,7 +386,7 @@
         <td class="txt" style="font-family:var(--font-mono);font-size:11.5px;color:var(--muted)">${l.t}</td>
         <td class="txt"><span class="name">${l.name}</span> <span class="code">${l.code}</span></td>
         <td class="txt"><span class="pill ${l.side === '买入' ? 'up' : 'down'}">${l.side}</span></td>
-        <td class="num">${D.fmt(l.qty, 0)}</td><td class="num">${D.fmt(l.price, l.price < 10 ? 3 : 2)}</td>
+        <td class="num">${D.fmt(l.qty, 0)}</td><td class="num">${D.fmt(l.price, D.priceDec(l.kind))}</td>
         <td class="num" style="color:var(--muted)">${D.fmt(l.fee, 2)}</td>
         <td class="num ${l.rp == null ? '' : D.dirClass(l.rp)}">${l.rp == null ? '—' : (l.rp > 0 ? '+' : '') + D.fmt(l.rp, 2)}</td>
       </tr>`).join('');
@@ -409,10 +409,10 @@
       cur.shares -= qty; rp = (price - cur.cost) * qty - f; D.ws.cash += amount - f;
       if (cur.shares <= 0) D.holdings.splice(D.holdings.indexOf(cur), 1);
     }
-    LOG.unshift({ t: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-').slice(0, 16), code: cur.code, name: cur.name, side: side === 'buy' ? '买入' : '卖出', qty, price, fee: f, rp });
+    LOG.unshift({ t: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-').slice(0, 16), code: cur.code, name: cur.name, kind: m.kind, side: side === 'buy' ? '买入' : '卖出', qty, price, fee: f, rp });
     const note = document.getElementById('in-note').value;
     D.recalc(); renderSummary(); render(); renderLog(); renderRules(); close();
-    D.toast(`已记入：${side === 'buy' ? '买入' : '卖出'} ${cur.name} ${qty} ${m.unit} @ ${D.fmt(price, 2)}${note ? ' · ' + note : ''}`, 'check');
+    D.toast(`已记入：${side === 'buy' ? '买入' : '卖出'} ${cur.name} ${qty} ${m.unit} @ ${D.fmt(price, m.prec)}${note ? ' · ' + note : ''}`, 'check');
   });
 
   /* ---------- 仓位纪律 ---------- */

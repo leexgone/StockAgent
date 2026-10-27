@@ -21,7 +21,7 @@ export function lotSize(kind: Kind): number {
   }
 }
 
-/** 报价小数位（03 §1 表格；转债 3 位为定稿口径，抽屉显示 bug 由 B4/P1-T3 修） */
+/** 报价小数位（03 §1 表格；B4 已随 P1-T3 修复——原型统一走 data.js `priceDec(kind)`） */
 export function priceDecimals(kind: Kind): number {
   switch (kind) {
     case "stock":
