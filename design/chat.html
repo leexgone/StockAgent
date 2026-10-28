@@ -115,7 +115,8 @@
   D.chrome({ active: 'chat.html', crumb: '工作台 / <b>智能问答</b>', onRefresh: renderCtx });
   const thread = document.getElementById('thread');
   const input = document.getElementById('input');
-  const KEY = 'zimu:chat:me';
+  // 空态走查与演示模式的会话历史分开存，避免带出演示回答（A2 / P1-T1）
+  const KEY = 'zimu:chat:me' + (D.emptyState ? ':empty' : '');
   let busy = false;
 
   /* ---------- 上下文面板 ---------- */
@@ -127,24 +128,37 @@
       <div class="row"><span>持仓只数</span><span class="v">${D.holdings.length} 只</span></div>
       <div class="row"><span>可用现金</span><span class="v">${D.money(D.cash)}</span></div>
       <div class="row"><span>仓位</span><span class="v">${(D.totalMv / (D.totalMv + D.cash) * 100).toFixed(1)}%</span></div>
-      <div class="row"><span>前三大</span><span class="v" style="font-size:11.5px">${top3.map(h => `${h.name} ${(h.mv / D.totalAssets * 100).toFixed(1)}%`).join(' · ')}</span></div>
+      <div class="row"><span>前三大</span><span class="v" style="font-size:11.5px">${top3.length ? top3.map(h => `${h.name} ${(h.mv / D.totalAssets * 100).toFixed(1)}%`).join(' · ') : '暂无持仓'}</span></div>
       <div class="row"><span>待处理预警</span><span class="v">${D.alerts.filter(a => !a.done).length} 条</span></div>
       <div class="row"><span>数据时点</span><span class="v" style="font-size:11.5px">${new Date().toTimeString().slice(0, 8)}</span></div>`;
   }
   renderCtx();
-  document.getElementById('recent').innerHTML = D.sessions.map((s, i) => `
+  document.getElementById('recent').innerHTML = D.sessions.length ? D.sessions.map((s, i) => `
     <div class="list-item" data-od-id="recent-item-${i}">
       <span class="li-main"><span class="li-title">${s.who}</span><span class="li-desc">${s.text}</span></span>
       <span class="li-right"><span class="num" style="font-size:11px;color:var(--muted)">${s.t}</span>
       ${s.read ? '' : '<span class="pill accent" style="display:block;margin-top:5px">未读</span>'}</span>
-    </div>`).join('');
+    </div>`).join('')
+    : '<div class="empty" style="padding:22px 14px">还没有历史会话 · 微信消息与定时任务完成后会归档在这里</div>';
 
   /* ---------- 问答库 ---------- */
   const byCode = c => D.holdings.find(h => h.code === c);
   function match(q) {
     const t = q.toLowerCase();
+    const noHold = !D.holdings.length;
     for (const item of D.qa) if (t.includes(item.q.slice(0, 6).toLowerCase()) || item.q === q) return item;
-    if (/今天|该做|复盘|总结/.test(q)) return { q, a: [
+    // 录入引导（A2 / P1-T1）：空态主路径问题的专属回答
+    if (/录入|第一笔|建仓|怎么开始|怎么加/.test(q)) return { q, a: [
+      { t: '录入第一笔：打开「持仓管理」，点「＋ 录入第一笔」——表单会预选一个可录入的候选标的（演示池）；真实实现里候选来自行情搜索，券商 CSV 导入是后续增强。', k: 'conclusion' },
+      { t: '表单按口径手册校验三类规则：数量必须是整手的整数倍（股票 / ETF 100，转债 10）；委托价不得越过当日涨跌停（按板块 ±10% / ±20%）；佣金、印花税与过户费现算进预览，摊薄成本即时重算。', k: 'body' },
+      { t: '记入之后，工作台、仪表盘与诊断页立即有数可算，预警监控同时生效。建议先试一笔 100 股，看预览把哪些数字算给你了。', k: 'plan' }],
+      cites: [{ src: '口径手册', txt: '03 §1 报价精度 · §2 涨跌停 · §4 费用与摊薄成本（演示样本，正式实现与黄金向量同源）' }],
+      chips: ['今天该做什么？', '微信推送怎么开？'] };
+    if (/今天|该做|复盘|总结/.test(q)) return noHold ? { q, a: [
+      { t: '账户里还没有持仓，今天没有需要盯的标的——先录入第一笔，监控才会启动。', k: 'conclusion' },
+      { t: `总资产目前 ${D.money(D.cash)}（全部现金），没有价格变动、预警与归因记录。`, k: 'body' },
+      { t: '录入入口在「持仓管理」页的「＋ 录入第一笔」；想先了解规则，问我「第一笔持仓怎么录入？」即可。', k: 'plan' }],
+      cites: [{ src: '账户状态', txt: '0 只持仓 · 0 条待处理预警 · 监控未启动' }], chips: ['第一笔持仓怎么录入？'] } : { q, a: [
       { t: `今天三件事：${D.alerts.filter(a => !a.done).map(a => a.name + ' ' + a.type).join('；')}。`, k: 'conclusion' },
       { t: `组合${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元（${D.pct(D.dayPnlPct)}），仓位 ${(D.totalMv / (D.totalMv + D.cash) * 100).toFixed(1)}%，最大单票占资产 ${Math.max(...D.holdings.map(h => h.mv)) / D.totalAssets * 100 > 25 ? '已超过 25% 上限' : '仍在 25% 上限内'}。`, k: 'body' },
       { t: '优先级：先处理有期限的（转债强赎），再处理仓位失衡的（减集中度），最后才看要不要补新标的。', k: 'plan' }
@@ -210,7 +224,17 @@
 
   let store = [];
   try { store = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { store = []; }
-  if (!store.length) {
+  if (!store.length && D.emptyState) {
+    // 空态专属欢迎消息（A2 / P1-T1）：不引用演示持仓
+    store = [{ role: 'ai', id: 'seed', time: new Date().toTimeString().slice(0, 5), conf: 60, msg: {
+      a: [
+        { k: 'conclusion', t: `欢迎使用子木。你的账户还没有持仓——总资产 ${D.money(D.cash)} 目前全部是现金；录入第一笔之后，建议才会带上你的成本与仓位。` },
+        { k: 'body', t: '录入入口在「持仓管理」页：手工逐笔加仓，数量按整手校验（股票 / ETF 100 股、转债 10 张），委托价受当日涨跌停约束，费用与摊薄成本在预览里即时试算。' },
+        { k: 'plan', t: '点持仓页的「＋ 录入第一笔」即可开始；拿不准规则就先问我「第一笔持仓怎么录入？」，也可以切到「AI 分析建议」的自选范围看看结论形态。' }],
+      cites: [{ src: '账户状态', txt: `${D.ws.name} · 0 只持仓 · 可用现金 ${D.money(D.cash)} · 监控未启动` }],
+      chips: ['第一笔持仓怎么录入？', '你能帮我做什么？'],
+    } }];
+  } else if (!store.length) {
     store = [{ role: 'ai', id: 'seed', time: '15:05', conf: 64, msg: {
       a: [{ k: 'conclusion', t: '收盘了。今天组合 ' + (D.dayPnl >= 0 ? '盈利' : '亏损') + ' ' + D.fmt(Math.abs(D.dayPnl), 0) + ' 元，' + D.alerts.filter(a => !a.done).length + ' 条预警等你处理。' },
         { k: 'body', t: `正贡献主要来自 ${[...D.holdings].sort((a, b) => b.dayVal - a.dayVal)[0].name}，拖累最大的是 ${[...D.holdings].sort((a, b) => a.dayVal - b.dayVal)[0].name}。比亚迪的浮亏扩大是今天唯一需要你决定的事。` },
@@ -274,7 +298,9 @@
   });
   document.getElementById('push-last').addEventListener('click', () => D.toast('最后一条回答已推送到微信', 'check'));
 
-  const SUG = D.qa.map(x => x.q).concat(['588000 今天要不要减？', '科创50 和创业板指有什么关系？', '帮我留够下个月要用的钱']);
+  const SUG = D.emptyState
+    ? ['第一笔持仓怎么录入？', '今天该做什么？', '微信推送怎么开？', '你能帮我做什么？']
+    : D.qa.map(x => x.q).concat(['588000 今天要不要减？', '科创50 和创业板指有什么关系？', '帮我留够下个月要用的钱']);
   document.getElementById('suggest').innerHTML = SUG.map(s => `<button data-ask="${C0(s)}">${C0(s)}</button>`).join('');
   document.getElementById('suggest').addEventListener('click', e => { const b = e.target.closest('[data-ask]'); if (b) ask(b.dataset.ask); });
 

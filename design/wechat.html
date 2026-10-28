@@ -209,7 +209,8 @@
 
   /* ---------- 订阅 ---------- */
   const sel = document.getElementById('quiet');
-  sel.innerHTML = D.holdings.map(h => `<option value="${h.code}">${h.name} ${h.code}</option>`).join('');
+  sel.innerHTML = D.holdings.map(h => `<option value="${h.code}">${h.name} ${h.code}</option>`).join('')
+    + (D.holdings.length ? '' : '<option value="" disabled selected>暂无可静音的标的 · 先录入持仓</option>');
   function syncQuiet() { [...sel.options].forEach(o => o.selected = state.quiet.includes(o.value)); }
   function renderSubs() {
     document.getElementById('subs').innerHTML = state.subs.map((s, i) => `
@@ -267,6 +268,15 @@
   const b = D.holdings.find(h => h.code === '002594');
   const A = D.advice['002594'];
   function renderPreview() {
+    if (!b || !A) {
+      // 空持仓（A2 / P1-T1）：保留卡片模板结构供走查，文案换成占位、按钮禁用
+      document.getElementById('card-preview').innerHTML = `
+        <div class="hd"><span>${D.ICONS.bell}</span>子木 · 持仓预警<span class="num" style="margin-left:auto;font-size:11px;color:var(--muted);font-weight:400">--:--</span></div>
+        <div class="bd"><h5>预警卡片模板 · 占位示意</h5>
+          <p>还没有持仓：录入第一笔后，这里会按真实触发渲染标的名称、现价 / 成本、浮亏幅度与建议动作（含目标价、止损与失效条件）。以下为模板结构，不含真实标的。</p></div>
+        <div class="ft"><button data-pv="open" disabled>查看详情</button><button data-pv="later" disabled>今天先不动</button><button data-pv="mute" disabled>静音此标的</button></div>`;
+      return;
+    }
     const priceLine = state.withPrice
       ? `现价 ${D.fmt(b.price, D.priceDec(b.kind))}，成本 ${D.fmt(b.cost, D.priceDec(b.kind))}，浮亏 ${D.pct(b.pnlPct)}。`
       : '已触及你设的「跌破成本」条件（价格已隐藏）。';
@@ -278,7 +288,7 @@
   }
 
   /* ---------- 日志 ---------- */
-  const LOG = [
+  const LOG = D.emptyState ? [] : [
     { t: '15:05', name: '复盘日报 → 我的微信', ok: true },
     { t: '14:47', name: '科创50ETF 止盈提醒', ok: true },
     { t: '10:32', name: '宁德时代 放量突破', ok: true },
@@ -287,6 +297,10 @@
     { t: '08:30', name: '盘前摘要 → 桌面通知', ok: true },
   ];
   function renderLog() {
+    if (!LOG.length) {
+      document.getElementById('push-log').innerHTML = '<div class="empty" style="padding:22px 14px">还没有推送记录 · 完成绑定并在持仓触发首个条件后开始留档</div>';
+      return;
+    }
     document.getElementById('push-log').innerHTML = LOG.slice(0, 6).map((l, i) => `
       <div class="list-item" data-od-id="pushlog-${i}">
         <span style="width:8px;height:8px;border-radius:50%;flex:none;background:var(--${l.ok ? 'ok' : 'warn'})"></span>
@@ -325,6 +339,7 @@
     }
     const pv = e.target.closest('[data-pv]');
     if (pv) {
+      if (!b) { D.toast('暂无持仓标的 · 录入第一笔后卡片交互才会带上真实标的', 'info'); return; }
       const kind = pv.dataset.pv;
       if (kind === 'mute') { if (!state.quiet.includes(b.code)) state.quiet.push(b.code); syncQuiet(); save(); D.toast(`已把 ${b.name} 加入静音列表`, 'check'); }
       else if (kind === 'later') { LOG.unshift({ t: new Date().toTimeString().slice(0, 5), name: '「今天先不动」→ 明日 09:15 再提醒', ok: true }); renderLog(); D.toast('已记录，明日 09:15 再提醒一次', 'check'); }
@@ -355,6 +370,7 @@
     renderLog(); D.toast(`测试推送已通过「${usable[0].name}」发出`, 'check');
   });
   document.getElementById('try-send').addEventListener('click', () => {
+    if (!b) { D.toast('暂无持仓标的 · 录入第一笔后才能按真实触发电试发卡片', 'info'); return; }
     LOG.unshift({ t: new Date().toTimeString().slice(0, 5), name: `卡片模板试发 → ${b.name}`, ok: true });
     renderLog(); D.toast('模板卡片已试发，手机微信一般 1 分钟内到达', 'check');
   });

@@ -45,6 +45,7 @@
       svg += `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="${s.color}" stop-opacity=".18"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient></defs>`;
       const all = s.series.reduce((a, x) => a.concat(x.data), []);
+      if (!all.length) { el.innerHTML = ''; return; }   // 空序列（空持仓态）不画，页面另行渲染引导
       const sc = scale(all, s.pad, iw, ih);
       // 横向网格 + Y 轴标签
       for (let g = 0; g <= 3; g++) {
@@ -93,6 +94,7 @@
   /* ---------- 迷你走势线（表格内联） ---------- */
   function spark(data, dir, width, height) {
     width = width || 96; height = height || 30;
+    if (!data || !data.length) return '';   // 无走势数据时留空（空态防御）
     const sc = scale(data, .12, width - 2, height - 4);
     const pts = data.map((v, i) => [sc.x(i) + 1, sc.y(v) + 2]);
     const col = dir >= 0 ? css('--up') : css('--down');
@@ -105,6 +107,7 @@
   /* ---------- 柱（量能） ---------- */
   function bars(data, dir, height) {
     height = height || 34;
+    if (!data || !data.length) return '';   // 无量能数据时留空（空态防御）
     const w = 96, mx = Math.max(...data), gap = 1.6;
     const bw = w / data.length - gap;
     const col = dir >= 0 ? css('--up') : css('--down');

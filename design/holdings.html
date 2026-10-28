@@ -193,7 +193,15 @@
     const pnl = D.holdings.reduce((s, h) => s + h.pnl, 0);
     const cost = D.holdings.reduce((s, h) => s + h.cost * h.shares, 0);
     const win = D.holdings.filter(h => h.pnl > 0).length;
-    const rows = [
+    const empty = !D.holdings.length;
+    const rows = empty ? [
+      ['总资产', D.money(ta), '当前全部为现金'],
+      ['持仓市值', D.money(mv), '仓位 0.0%'],
+      ['当日浮动盈亏', '—', '录入第一笔后开始统计'],
+      ['累计盈亏', '—', '录入第一笔后开始统计'],
+      ['可用现金', D.money(D.cash), `占总资产 ${(D.cash / ta * 100).toFixed(1)}%`],
+      ['盈利标的', '0 / 0', '—'],
+    ] : [
       ['总资产', D.money(ta), ''],
       ['持仓市值', D.money(mv), `仓位 ${(mv / ta * 100).toFixed(1)}%`],
       ['当日浮动盈亏', (day > 0 ? '+' : '') + D.fmt(day, 2), D.pct(day / (ta - day) * 100)],
@@ -205,12 +213,15 @@
       <div data-od-id="sum-${i}"><div class="k">${r[0]}</div>
       <div class="v ${i === 2 ? D.dirClass(day) : i === 3 ? D.dirClass(pnl) : ''}">${r[1]}</div>
       <div class="hint" style="margin:5px 0 0">${r[2]}</div></div>`).join('');
+    // 空持仓时主按钮即「录入第一笔」入口（ADR-0006：复用本抽屉表单）
+    document.getElementById('trade-btn').textContent = empty ? '＋ 录入第一笔' : '＋ 记一笔加减仓';
     document.getElementById('h-foot-sum').textContent =
       `共 ${D.holdings.length} 只标的 · 投入成本 ${D.money(cost)} · 市值 ${D.money(mv)} · 现金 ${D.money(D.cash)}`;
-    document.getElementById('h-desc').textContent =
-      `组合里最大的一只占总资产 ${Math.max(...D.holdings.map(h => h.weight)).toFixed(1)}%，`
-      + `前三大合计 ${D.holdings.map(h => h.weight).sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0).toFixed(1)}%。`
-      + `点「加减仓」试算一笔委托，摊薄成本与占比会即时重算。`;
+    document.getElementById('h-desc').textContent = empty
+      ? '账户里还没有持仓。点右上角「录入第一笔」手工逐笔加仓：填数量与价格，整手、涨跌停与摊薄成本即时校验和试算。'
+      : `组合里最大的一只占总资产 ${Math.max(...D.holdings.map(h => h.weight)).toFixed(1)}%，`
+        + `前三大合计 ${D.holdings.map(h => h.weight).sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0).toFixed(1)}%。`
+        + `点「加减仓」试算一笔委托，摊薄成本与占比会即时重算。`;
   }
 
   /* ---------- 表格 ---------- */
@@ -236,7 +247,9 @@
           <button class="btn btn-sm" data-trade="${h.code}" data-side="sell">减仓</button>
           <a class="btn btn-sm" href="analysis.html?code=${h.code}">分析</a>
         </div></td>
-      </tr>`).join('') : `<tr><td colspan="10"><div class="empty">没有匹配的持仓 · 试试搜索「宁德」或代码 300750</div></td></tr>`;
+      </tr>`).join('') : D.holdings.length
+        ? `<tr><td colspan="10"><div class="empty">没有匹配的持仓 · 试试搜索「宁德」或代码 300750</div></td></tr>`
+        : `<tr><td colspan="10">${D.emptyBlock({ od: 'h-table-empty', title: '还没有持仓', desc: '录入第一笔后，市值、成本、涨跌与仓位占比立刻现算。候选标的可先从演示自选里挑（真实实现里来自行情搜索）。' })}</td></tr>`;
     document.getElementById('h-count').textContent = `显示 ${list.length} / ${D.holdings.length} 只 · 按${{ shares: '持仓数量', cost: '成本价', price: '现价', dayChg: '今日涨跌', mv: '市值', pnl: '浮动盈亏', weight: '占组合' }[sortKey] || sortKey}${sortDir < 0 ? '降序' : '升序'}`;
     document.querySelectorAll('#h-table .tbl-sort').forEach(s => {
       const th = s.closest('th');
@@ -262,8 +275,15 @@
   });
   document.getElementById('h-search').addEventListener('input', e => { query = e.target.value; render(); });
   document.getElementById('show-weight').addEventListener('change', render);
-  document.getElementById('export-btn').addEventListener('click', () => D.toast('已生成 holdings-2026-10-24.csv（演示，不落盘）', 'check'));
-  document.getElementById('trade-btn').addEventListener('click', () => openTrade('002594', 'sell'));
+  document.getElementById('export-btn').addEventListener('click', () => D.holdings.length
+    ? D.toast('已生成 holdings-2026-10-24.csv（演示，不落盘）', 'check')
+    : D.toast('暂无持仓可导出 · 先录入第一笔', 'info'));
+  // 主按钮：有持仓时演示「记一笔加减仓」；空持仓时 = 录入第一笔入口（预选演示自选候选，ADR-0006 手工表单先行）
+  document.getElementById('trade-btn').addEventListener('click', () => {
+    if (D.holdings.length) { openTrade('002594', 'sell'); return; }
+    const cand = D.watchlist[0];
+    if (cand) openTrade(cand.code, 'buy'); else D.toast('没有可用候选标的', 'info');
+  });
 
   /* ---------- 抽屉 ---------- */
   const drawer = document.getElementById('trade-drawer'), scrim = document.getElementById('scrim');
@@ -281,6 +301,8 @@
     cur = find(code); if (!cur) return;
     side = s || 'buy';
     const m = meta(cur);
+    // 对空仓标的买入 = 新建持仓（录入第一笔的同一表单，ADR-0006），标题随之切换
+    document.getElementById('drawer-title').textContent = (cur.shares || side === 'sell') ? '加减仓' : '录入第一笔';
     document.querySelectorAll('#side-seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.side === side));
     sel.value = cur.code;
     document.getElementById('in-price').value = D.fmt(cur.price, m.prec);
@@ -376,13 +398,18 @@
     document.getElementById('drawer-submit').disabled = !(ok && document.getElementById('confirm-flag').checked);
   }
 
-  const LOG = [
+  const LOG = D.emptyState ? [] : [
     { t: '2026-10-20 09:42', code: '600276', name: '恒瑞医药', kind: 'stock', side: '买入', qty: 200, price: 55.30, fee: 5.00, rp: null },
     { t: '2026-10-16 14:18', code: '110074', name: '精达转债', kind: 'cb', side: '买入', qty: 40, price: 122.800, fee: 5.00, rp: null },
     { t: '2026-10-09 10:05', code: '510300', name: '沪深300ETF', kind: 'etf', side: '买入', qty: 2000, price: 4.118, fee: 5.00, rp: null },
     { t: '2026-09-25 14:50', code: '002594', name: '比亚迪', kind: 'stock', side: '卖出', qty: 100, price: 271.60, fee: 34.28, rp: 680.00 },
   ];
   function renderLog() {
+    if (!LOG.length) {
+      document.querySelector('#log-table tbody').innerHTML =
+        '<tr><td colspan="7"><div class="empty">还没有委托 / 成交记录 · 记入第一笔后这里自动留档</div></td></tr>';
+      return;
+    }
     document.querySelector('#log-table tbody').innerHTML = LOG.map((l, i) => `
       <tr data-od-id="log-row-${i}">
         <td class="txt" style="font-family:var(--font-mono);font-size:11.5px;color:var(--muted)">${l.t}</td>
@@ -425,6 +452,15 @@
     { k: '现金最低保留', v: 10, cur: () => D.cash / (D.totalMvAll() + D.cash) * 100, unit: '%', inverse: true },
   ];
   function renderRules() {
+    if (!D.holdings.length) {
+      // 空持仓没有「当前值」可对比，纪律条不渲染（避免 -Infinity / 0÷0 的伪安全）
+      document.getElementById('rules').innerHTML = D.emptyBlock({
+        icon: 'shield', cta: false, od: 'h-rules-empty',
+        title: '仓位纪律待首笔持仓生效',
+        desc: '录入第一笔后，这里逐条现算单票上限、行业集中度、转债占比与现金下限，触及即在预警与微信里给出建议动作。',
+      });
+      return;
+    }
     document.getElementById('rules').innerHTML = RULES.map((r, i) => {
       const c = r.cur(), hit = r.inverse ? c < r.v : c > r.v;
       // 进度条语义统一「满格 = 触及限制」：上限类取 c/v；下限类（现金最低保留）取 v/c，现金降到下限即满格（c=0 → Infinity 由 min 截为 100，无 NaN）
@@ -447,6 +483,10 @@
   if (qp.get('code')) {
     openTrade(qp.get('code'), qp.get('side') === 'sell' ? 'sell' : 'buy');
     if (qp.get('qty')) { document.getElementById('in-qty').value = qp.get('qty'); calc(); }
+  } else if (qp.get('add')) {
+    // 空态引导的「录入第一笔」入口：直接打开表单抽屉（预选第一个可录入候选）
+    const cand = D.holdings[0] || D.watchlist[0];
+    if (cand) openTrade(cand.code, 'buy');
   }
 
   // 盘中自动跳动：tickPrices 内部已重算快照并同步行情条，返回 true 才需要重绘本页

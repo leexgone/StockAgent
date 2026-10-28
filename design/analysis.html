@@ -72,8 +72,8 @@
           </section>
         </div>
 
-        <!-- 右：分析结果 -->
-        <div class="grid" style="gap:16px">
+        <!-- 右：分析结果（空范围时隐藏，显示下方引导卡） -->
+        <div class="grid" id="a-result" style="gap:16px">
           <section class="card" data-od-id="verdict-card">
             <div class="card-head">
               <div>
@@ -150,6 +150,13 @@
             </div>
           </section>
         </div>
+      </div>
+
+        <!-- 空态引导（A2 / P1-T1）：内容由脚本经 ZM.emptyBlock 填充 -->
+        <section class="card" id="a-empty" data-od-id="analysis-empty-card" hidden>
+          <div class="card-head"><div><div class="card-title">分析建议以你的持仓为上下文</div><div class="card-sub">当前范围内没有标的</div></div></div>
+          <div class="card-body" id="a-empty-body"></div>
+        </section>
       </div>
 
       <div class="footnote" data-od-id="a-disclaimer">
@@ -268,8 +275,25 @@
   }
 
   /* ---------- 渲染 ---------- */
+  // 范围内无标的（空态持仓 / 空自选）：隐藏结果卡，显示录入引导（A2 / P1-T1）
+  function renderEmpty() {
+    document.getElementById('a-result').hidden = true;
+    const emptyCard = document.getElementById('a-empty');
+    emptyCard.hidden = false;
+    document.getElementById('a-empty-body').innerHTML = D.emptyBlock({
+      icon: 'spark', od: 'analysis-empty',
+      title: scope === 'hold' ? '还没有持仓可分析' : '自选里还没有标的',
+      desc: '录入第一笔后，助理按你的成本与仓位现算得分、目标价与止损，给出「结论 / 为什么 / 怎么做」三段式建议；也可以切到「自选」范围先看观察类结论的演示形态。',
+    });
+    document.getElementById('pick').innerHTML = '<div class="empty" style="padding:18px 10px">该范围内没有标的</div>';
+    document.querySelector('#rank tbody').innerHTML = '<tr><td colspan="3"><div class="empty">暂无标的</div></td></tr>';
+    cache = null;
+  }
   function render() {
     const items = all();
+    if (!items.length) { renderEmpty(); return; }
+    document.getElementById('a-result').hidden = false;
+    document.getElementById('a-empty').hidden = true;
     if (!items.find(x => x.code === code)) code = items[0].code;
     const item = items.find(x => x.code === code);
     const A = adviceFor(code);
@@ -360,9 +384,11 @@
     const prec = D.priceDec(item.kind);
     if (A.watchOnly) {
       const lot = item.kind === 'cb' ? 10 : 100;
+      // 已录入但演示分析库没有该标的时（空态记入第一笔后的状态）也会走这里，价格取持仓侧
+      const px = (item.w || item.h).price;
       return [
-        { t: '先不动，设一个触发条件', d: `突破 ${D.fmt(item.w.price * 1.03, prec)} 且成交额 > 20 日均量 1.5 倍时提醒你；在此之前不建仓。` },
-        { t: '若要试仓，上限 3%', d: `${D.money(item.w.price * lot, 0)} 起（1 手），试错仓位不影响主组合判断。` },
+        { t: '先不动，设一个触发条件', d: `突破 ${D.fmt(px * 1.03, prec)} 且成交额 > 20 日均量 1.5 倍时提醒你；在此之前不建仓。` },
+        { t: '若要试仓，上限 3%', d: `${D.money(px * lot, 0)} 起（1 手），试错仓位不影响主组合判断。` },
       ];
     }
     if (A.action === '减仓' || A.action === '卖出') {

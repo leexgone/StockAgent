@@ -2,7 +2,7 @@
 
 面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险。发布形态是**常驻 Web 服务**——浏览器访问全部界面，也可以通过微信 / QQ 与助理对话、接收预警与盘后复盘（与 robit 的桌面端定位不同）。
 
-**当前阶段：P3 口径可执行化已收官，P1 原型定稿推进中（余 T1 空态壳、T9 人工验收），下一主线 P4 数据管道（C5/C8 已拍板，见 ADR-0006/0007）。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
+**当前阶段：P3 口径可执行化已收官，P1 原型定稿推进中（T1 空态 ✅ 2026-10-28，余 T9 人工验收），下一主线 P4 数据管道（C5/C8 已拍板，见 ADR-0006/0007）。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
 
 ```powershell
 # 运行（生产形态：后端托管前端构建产物，单端口）

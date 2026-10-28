@@ -49,7 +49,7 @@
 
 ## 组件清单（`ui.css` 的分区）
 
-`外壳（.shell/.sidebar/.topbar/.strip/.mtabs/.mtab）` · `页面骨架（.page/.page-head/.page-title/.eyebrow/.card/.grid/.g-2/.g-3/.g-4/.g-even/.g-main）` · `指标（.metric-label/.metric-value(-sm/-lg)/.metric-meta/.delta/.pill(.accent/.up/.down/.warn/.ok/.danger/.buy/.sell/.plain)）` · `表格（.tbl-wrap/.tbl）` · `控件（.btn/.btn-primary/.btn-sm/.seg/.input/.textarea/.select/.switch/.kbd/.hint/.ic）` · `图表（.chart/.spark/.crosshair-tip/.bar-line/.progress）` · `浮层（.scrim/.drawer/.modal/.toasts/.toast）` · `列表与时间线（.list/.list-item/.tl/.tl-item/.empty）` · `页脚免责（.footnote）`
+`外壳（.shell/.sidebar/.topbar/.strip/.mtabs/.mtab）` · `页面骨架（.page/.page-head/.page-title/.eyebrow/.card/.grid/.g-2/.g-3/.g-4/.g-even/.g-main）` · `指标（.metric-label/.metric-value(-sm/-lg)/.metric-meta/.delta/.pill(.accent/.up/.down/.warn/.ok/.danger/.buy/.sell/.plain)）` · `表格（.tbl-wrap/.tbl）` · `控件（.btn/.btn-primary/.btn-sm/.seg/.input/.textarea/.select/.switch/.kbd/.hint/.ic）` · `图表（.chart/.spark/.crosshair-tip/.bar-line/.progress）` · `浮层（.scrim/.drawer/.modal/.toasts/.toast）` · `列表与时间线（.list/.list-item/.tl/.tl-item/.empty）` · `空态引导（.empty-hero，P1-T1，经 ZM.emptyBlock() 渲染）` · `页脚免责（.footnote）`
 
 新增组件请放进 `ui.css` 对应分区（分区以 `/* === */` 注释标出），不要新建顶层分区。
 

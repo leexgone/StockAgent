@@ -506,6 +506,17 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 .empty { padding: 44px 18px; text-align: center; color: var(--muted); font-size: 13px; }
 
+/* 空态引导块（P1-T1 / A2）：图标 + 标题 + 说明 + CTA，各页统一经 ZM.emptyBlock() 渲染 */
+.empty-hero { display: flex; flex-direction: column; align-items: center; gap: 11px; padding: 40px 22px 42px; text-align: center; }
+.empty-hero .eh-ic {
+  width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--border-2); color: var(--fg-2);
+}
+.empty-hero .eh-ic svg { width: 19px; height: 19px; }
+.empty-hero .eh-title { font-family: var(--font-display); font-size: 15.5px; font-weight: 590; letter-spacing: -.02em; }
+.empty-hero .eh-desc { font-size: 12.5px; color: var(--muted); line-height: 1.7; max-width: 46ch; }
+.empty-hero .eh-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 3px; }
+
 /* ============================================================
    页脚免责
    ============================================================ */

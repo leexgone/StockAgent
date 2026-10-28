@@ -178,6 +178,7 @@
 
   /* ---------- 曲线 ---------- */
   function renderCurve() {
+    if (D.emptyState) return;   // 空态由 renderEmptyAll 渲染引导，resize 不再重画
     const k = kpis();
     const base = k.nav[0];
     C.line('#curve', {
@@ -300,7 +301,34 @@
     }).join('');
   }
 
-  function renderAll() { renderKpi(); renderCurve(); renderConcCached = renderConc(); renderFixes(); renderTable(); }
+  // 空持仓引导（A2 / P1-T1）：指标不伪装成「0 = 安全」，全部改渲染说明态
+  function renderEmptyAll() {
+    document.getElementById('kpi').innerHTML = ['区间收益', '超额收益', '年化波动率', '最大回撤', '与基准相关系数', '日度跑赢频率'].map((k2, i) => `
+      <div data-od-id="kpi-empty-${i}"><div class="k">${k2}</div>
+      <div class="v">—</div><div class="s">待首笔持仓</div></div>`).join('');
+    document.getElementById('curve-sub').textContent = '尚无净值序列 · 从录入第一笔后逐交易日记录';
+    document.getElementById('curve').innerHTML = D.emptyBlock({
+      icon: 'spark', cta: false, od: 'diag-curve-empty',
+      title: '组合曲线需要先在持仓里“有东西”', desc: '净值序列（含现金）从第一笔起按交易日推进，与基准的对比、回撤与相关性都由它派生。',
+    });
+    document.getElementById('curve-read').textContent = '';
+    document.getElementById('underwater').innerHTML = '<div class="empty" style="padding:22px 12px">暂无回撤记录</div>';
+    document.getElementById('stack').innerHTML = '';
+    document.getElementById('stack-legend').innerHTML = '';
+    const hb = document.getElementById('hhi-badge'); hb.className = 'pill'; hb.textContent = '待数据';
+    document.getElementById('sector-bars').innerHTML = '<div class="empty" style="padding:22px 12px">行业权重在录入第一笔后现算</div>';
+    document.getElementById('fixes').innerHTML = D.emptyBlock({
+      icon: 'shield', od: 'diag-fixes-empty',
+      title: '再平衡清单需要一个组合',
+      desc: '录入第一笔后，清单按「影响大小 × 操作成本」排序，每条附现算的测算与试算入口；未触及纪律上限时这里就是空的。',
+    });
+    document.getElementById('fix-sum').textContent = '0 条待处理 · 录入第一笔后开始诊断';
+    document.querySelector('#wtable tbody').innerHTML = '<tr><td colspan="6"><div class="empty">暂无可对比的区间样本</div></td></tr>';
+  }
+  function renderAll() {
+    if (D.emptyState) { renderEmptyAll(); return; }
+    renderKpi(); renderCurve(); renderConcCached = renderConc(); renderFixes(); renderTable();
+  }
   renderAll();
 
   document.getElementById('window').addEventListener('click', e => {
@@ -315,12 +343,14 @@
     D.toast('已标记为知悉，下次盘后复盘不再重复提醒', 'check');
   });
   document.getElementById('apply-all').addEventListener('click', () => {
+    if (D.emptyState) { D.toast('还没有组合可试算 · 录入第一笔后生成清单', 'info'); return; }
     const list = renderFixes();
     const first = list.find(f => f.code);
     D.toast(`按清单生成 1 组委托试算，送到持仓页确认`, 'check');
     if (first) setTimeout(() => location.href = `holdings.html?code=${first.code}&side=${first.side || 'sell'}`, 420);
   });
   document.getElementById('report-btn').addEventListener('click', () => {
+    if (D.emptyState) { D.toast('暂无组合可诊断 · 录入第一笔后报告才有内容', 'info'); return; }
     const k = kpis();
     D.toast(`诊断报告已生成：${win} 日超额 ${k.ex >= 0 ? '+' : ''}${k.ex.toFixed(1)} pct，回撤 ${k.m1.toFixed(1)}%，已推送到微信`, 'check');
   });

@@ -97,10 +97,20 @@
     document.getElementById('greet-eyebrow').textContent =
       new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + c.state;
     const pend = D.alerts.filter(a => !a.done);
-    document.getElementById('greet-desc').textContent =
-      `${c.state === '已收盘' ? '今日已收盘' : c.live ? '现在' + c.state : c.next}。${pend.length} 条预警待处理，`
-      + `${D.holdings.find(x => x.code === '002594').name} 浮亏扩大至 ${D.pct(D.holdings.find(x => x.code === '002594').pnlPct)}，`
-      + `组合最大单票占资产 ${(D.holdings.reduce((m, x) => Math.max(m, x.mv), 0) / D.totalAssets * 100).toFixed(1)}%。`;
+    if (D.emptyState) {
+      // 空持仓引导（A2 / P1-T1）：不再引用演示持仓，动作按钮换成「录入第一笔」
+      document.getElementById('greet-desc').textContent =
+        `${c.state === '已收盘' ? '今日已收盘' : c.live ? '现在' + c.state : c.next}。你的持仓还是空的——录入第一笔后，`
+        + `助理开始替你盯盘、发预警、做盘后复盘；总资产目前等于现金。`;
+      document.querySelector('.page-actions').innerHTML =
+        `<a class="btn" href="chat.html?empty=1&q=${encodeURIComponent('第一笔持仓怎么录入？')}">问一句</a>`
+        + `<a class="btn btn-primary" href="${D.ENTRY_HREF}">＋ 录入第一笔</a>`;
+    } else {
+      document.getElementById('greet-desc').textContent =
+        `${c.state === '已收盘' ? '今日已收盘' : c.live ? '现在' + c.state : c.next}。${pend.length} 条预警待处理，`
+        + `${D.holdings.find(x => x.code === '002594').name} 浮亏扩大至 ${D.pct(D.holdings.find(x => x.code === '002594').pnlPct)}，`
+        + `组合最大单票占资产 ${(D.holdings.reduce((m, x) => Math.max(m, x.mv), 0) / D.totalAssets * 100).toFixed(1)}%。`;
+    }
     document.getElementById('s-assets').textContent = D.money(D.totalAssets);
     document.getElementById('s-exposure').innerHTML = `<span class="muted">持仓市值 ${D.money(D.totalMv)} · 仓位 ${D.exposure.toFixed(1)}%</span>`;
     const day = document.getElementById('s-day');
@@ -117,12 +127,12 @@
 
   /* 界面入口 */
   const SCREENS = [
-    { href: 'dashboard.html', icon: 'grid', name: '总览仪表盘', desc: '资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。', stat: () => `${D.equity.dates.length} 日净值 · ${D.alerts.length} 条预警` },
+    { href: 'dashboard.html', icon: 'grid', name: '总览仪表盘', desc: '资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。', stat: () => D.emptyState ? '录入第一笔后开始记录净值与预警' : `${D.equity.dates.length} 日净值 · ${D.alerts.length} 条预警` },
     { href: 'holdings.html', icon: 'wallet', name: '持仓管理', desc: '股票 / ETF / 可转债分组明细，加减仓会实时重算摊薄成本与仓位。', stat: () => `${D.holdings.length} 只标的 · ${D.money(D.cash)} 现金` },
-    { href: 'analysis.html', icon: 'spark', name: 'AI 分析建议', desc: '买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。', stat: () => `已覆盖 ${Object.keys(D.advice).length} 只标的` },
-    { href: 'chat.html', icon: 'chat', name: '智能问答', desc: '用大白话问股，回答会引用你的持仓、行情与公告原文。', stat: () => `${D.qa.length} 个示例问题 · 3 段历史会话` },
-    { href: 'diagnosis.html', icon: 'shield', name: '组合诊断', desc: '行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。', stat: () => `HHI ${D.hhi.toFixed(3)} · 回撤 ${D.P.mdd.toFixed(1)}%` },
-    { href: 'wechat.html', icon: 'wechat', name: '微信助理接入', desc: '绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。', stat: () => '1 个微信账号 · 6 类推送' },
+    { href: 'analysis.html', icon: 'spark', name: 'AI 分析建议', desc: '买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。', stat: () => D.emptyState ? '尚无分析标的 · 以你的持仓为上下文' : `已覆盖 ${Object.keys(D.advice).length} 只标的` },
+    { href: 'chat.html', icon: 'chat', name: '智能问答', desc: '用大白话问股，回答会引用你的持仓、行情与公告原文。', stat: () => D.emptyState ? '可以先问「第一笔持仓怎么录入」' : `${D.qa.length} 个示例问题 · ${D.sessions.length} 段历史会话` },
+    { href: 'diagnosis.html', icon: 'shield', name: '组合诊断', desc: '行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。', stat: () => D.emptyState ? '尚无组合可诊断 · 待首笔持仓' : `HHI ${D.hhi.toFixed(3)} · 回撤 ${D.P.mdd.toFixed(1)}%` },
+    { href: 'wechat.html', icon: 'wechat', name: '微信助理接入', desc: '绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。', stat: () => D.emptyState ? '6 类推送待启用 · 录入后开始盯盘' : '1 个微信账号 · 6 类推送' },
   ];
   document.getElementById('screens').innerHTML = SCREENS.map((s, i) => `
     <a class="card" href="${s.href}" data-od-id="screen-card-${i}" style="display:block;padding:18px;transition:border-color .14s, box-shadow .14s"
@@ -138,17 +148,29 @@
     </a>`).join('');
 
   /* 时间线 */
-  document.getElementById('home-tl').innerHTML = D.sessions.concat([
-    { t: '今日 08:30', who: '定时任务', text: '盘前要闻 6 条已生成，其中 1 条与你持仓相关', reply: '博威转债强赎提示', read: true },
-  ]).slice(0, 5).map(s => `
-    <div class="tl-item ${s.read ? '' : 'hot'}">
-      <div class="tl-time">${s.t} · ${s.who}</div>
-      <div class="tl-title">${s.text}</div>
-      ${s.reply ? `<div class="tl-body">${s.reply}</div>` : ''}
-    </div>`).join('');
+  if (D.emptyState) {
+    document.getElementById('home-tl').innerHTML = D.emptyBlock({
+      icon: 'spark', cta: false, od: 'home-tl-empty',
+      title: '这里会记录助理的动作',
+      desc: '录入第一笔持仓后，盘前要闻、盘中预警与盘后复盘都会逐条写进这条时间线，并按你的微信设置推送。',
+    });
+  } else {
+    document.getElementById('home-tl').innerHTML = D.sessions.concat([
+      { t: '今日 08:30', who: '定时任务', text: '盘前要闻 6 条已生成，其中 1 条与你持仓相关', reply: '博威转债强赎提示', read: true },
+    ]).slice(0, 5).map(s => `
+      <div class="tl-item ${s.read ? '' : 'hot'}">
+        <div class="tl-time">${s.t} · ${s.who}</div>
+        <div class="tl-title">${s.text}</div>
+        ${s.reply ? `<div class="tl-body">${s.reply}</div>` : ''}
+      </div>`).join('');
+  }
 
-  /* 待决事项 */
-  const ATT = [
+  /* 待决事项：空态下换成三步引导路径（A2） */
+  const ATT = D.emptyState ? [
+    { t: '录入第一笔持仓', d: '手工逐笔加仓：填数量与价格，整手、涨跌停与费用即时校验、试算预览', href: D.ENTRY_HREF, pill: '第一步', cls: '' },
+    { t: '问一句「第一笔怎么录入」', d: '智能问答会引用录入规则与当前账户状态，支持「结论 / 为什么 / 怎么做」三段式追问', href: 'chat.html?empty=1&q=' + encodeURIComponent('第一笔持仓怎么录入？'), pill: '随时', cls: '' },
+    { t: '浏览演示数据，看完整形态', d: '切回含 10 只演示标的与预警、建议、诊断的完整界面（?empty=0 退出空态）', href: 'index.html?empty=0', pill: '参照', cls: '' },
+  ] : [
     { t: '把比亚迪仓位降到 15% 附近', d: '减 200 股（整手）即可，不必拆很多笔', href: 'analysis.html?code=002594', pill: '减仓', cls: 'sell' },
     { t: '科创50ETF 触及 +12% 止盈线', d: '可分批止盈 3,000 份，或把止盈线上移到 +18%', href: 'holdings.html', pill: '止盈', cls: 'warn' },
     { t: '11-20 前处理博威转债', d: '强赎最后交易日前卖出或转股，逾期将承担额外损失', href: 'analysis.html?code=113650', pill: '限期', cls: 'danger' },

@@ -4,9 +4,7 @@
 
 ## 阻断
 
-### A2 · 首笔持仓没有入口
-
-所有界面假设账户里已经有 10 只标的。真实用户第一次打开时持仓为空，`totalAssets = cash`。除零防护已随 A1/B1 修复做进 `recalc()`（空持仓时各比率为 0，不再是 NaN，已在沙箱验证），但「录入第一笔」的空态与引导路径仍然缺失（`.empty` 样式已存在，见 `ui.css:465` 分区）；`dashboard.html` 的头图与收盘摘要、`index.html` 的问候语在空持仓下会因取 `holdings[0]` 报错，也要一并处理。关联决策 C5（已决 2026-10-28，ADR-0006：手工逐笔先行，入口即录入表单抽屉）。
+暂无——A2「首笔持仓没有入口」已随 P1-T1 解决（2026-10-28，存档见「已修复」）。
 
 ## 一致性
 
@@ -117,6 +115,14 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 **修复**：收进契约层——`recalc()` 统一派生 `h.weight`（`data.js:109`，与 `wp()` 同分母），`totalMvAll()` 由 `data.js:125` 导出；删除 `holdings.html` 的本地定义。分析页**没有**加 `|| 0` 兜底（那会把报错变成静默的 0.0%）。
 
 **验证**：vm 沙箱加载 `data.js`，复现原崩溃表达式可正常求值；每只持仓 `weight` 存在且 `Σweight === exposure`、`weight.toFixed(1) === wp(code)`；七个页面内联脚本全部通过语法编译。
+
+### A2 · 首笔持仓没有入口 —— 2026-10-28 修复（P1-T1）
+
+**原现象**：所有界面假设账户里已有 10 只标的。真实用户第一次打开时持仓为空、`totalAssets = cash`，但空态引导与「录入第一笔」路径缺失；`dashboard.html` 头图与收盘摘要、`index.html` 问候语在空持仓下取 `holdings[0]`/`find(...).name` 直接抛错。除零防护此前已随 A1/B1 做进 `recalc()`。
+
+**修复**：`data.js` 增加空持仓演示模式——任意页 `?empty=1` 进入（sessionStorage `zimu:demo:empty` 跨页保持）、`?empty=0` 退出；空态清空持仓 / 预警 / 问答 / 会话 / 建议库 / 净值序列，`watchlist` 保留为「可录入候选」演示池（真实实现候选来自行情搜索，P4 边界）。各屏分支渲染空态引导（共享 `ZM.emptyBlock()`，样式 `.empty-hero` 进 `ui.css`）：index 问候 / 动作按钮 / 导航统计 / 时间线 / 待决事项换三步引导路径；dashboard 头图、归因、预警、持仓表、收盘摘要各归各位的引导；holdings 表内引导 + 主按钮变「＋ 录入第一笔」+ 抽屉标题随语境切「录入第一笔」（入口 = 复用录入表单抽屉，ADR-0006）+ `?add=1` 自动开抽屉 + 流水 / 纪律空态；analysis 范围内无标的时隐藏结果卡显示引导卡（可切「自选」看观察类结论）；chat 空态专属欢迎与「第一笔怎么录入 / 今天该做什么」问答、会话历史按模式分 key（`zimu:chat:me:empty`）；diagnosis 指标不伪装「0 = 安全」全部改说明态；wechat 卡片模板留结构换占位文案、按钮禁用、推送日志空态。`charts.js` 对空序列加防御（`line/spark/bars` 留空不抛）。
+
+**验证**：headless Edge 冒烟四组全绿——`.file-versions/smoke-headless.ps1`（file + http 正常模式回归）与新脚本 `.file-versions/smoke-headless-empty.ps1`（file + http，7 页 `?empty=1`：0 console 错误、空态标记齐全、正文无 `NaN`/`-Infinity`/`undefined` 泄漏）；`check-p1t1-add.ps1` 验证 `?empty=1&add=1` 自动打开抽屉且标题为「录入第一笔」。T9 人工验收补充项：空态下逐页走查引导话术与 CTA 落点。
 
 ### B1 · 行情跳动后同一屏内数字自相矛盾 —— 2026-10-24 修复
 

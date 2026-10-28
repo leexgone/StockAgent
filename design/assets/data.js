@@ -50,6 +50,21 @@
     return { lo: cut(false), hi: cut(true) };
   }
 
+  /* ---------- 空持仓演示模式（A2 / P1-T1） ----------
+   * `?empty=1` 进入空态并记入 sessionStorage（跨页走查保持同一状态），`?empty=0` 退出。
+   * 空态清空持仓与由持仓派生的演示数据（预警 / 问答 / 会话 / 分析库 / 净值序列），
+   * 各页改为渲染空态引导；watchlist 保留，作为「可录入的候选标的」演示池
+   *（录入抽屉靠它提供可选项；真实实现中候选来自行情搜索，属 P4 边界）。 */
+  const EMPTY = (function () {
+    const qp = new URLSearchParams(location.search);
+    const KEY = 'zimu:demo:empty';
+    try {
+      if (qp.get('empty') === '1') sessionStorage.setItem(KEY, '1');
+      else if (qp.get('empty') === '0') sessionStorage.removeItem(KEY);
+      return sessionStorage.getItem(KEY) === '1';
+    } catch (e) { return qp.get('empty') === '1'; }
+  })();
+
   /* ---------- 个人账户 ---------- */
   const ws = { name: '我的账户', init: '我', style: '均衡成长', cash: 46800.00, broker: '华泰证券 · 沪深 A 股账户（*8842）', wechat: '已绑定 · 微信' };
 
@@ -65,7 +80,7 @@
   /* ---------- 持仓（股票 / ETF / 可转债） ----------
    * limitPct = 涨跌幅比例（03 §2 定稿：标板 ±10、创业板/科创板 ±20、转债 ±20；
    * 比例是标的属性，ETF 无法由代码推断——演示样本手工配置，P4 由行情源自动填充）。 */
-  const holdings = [
+  const holdings = EMPTY ? [] : [
     { code: '600519', name: '贵州茅台', mkt: 'SH', kind: 'stock', sector: '食品饮料', shares: 100,  cost: 1512.00, price: 1618.00, prev: 1601.50, limitPct: 10, tscore: 71 },
     { code: '300750', name: '宁德时代', mkt: 'SZ', kind: 'stock', sector: '电力设备', shares: 400,  cost: 196.40,  price: 212.35,  prev: 207.80,  limitPct: 20, tscore: 78 },
     { code: '002594', name: '比亚迪',   mkt: 'SZ', kind: 'stock', sector: '汽车',     shares: 500,  cost: 264.80,  price: 254.10,  prev: 259.40,  limitPct: 10, tscore: 44 },
@@ -150,11 +165,11 @@
   };
   const weightAfter = (c, qty) => ((H(c).mv - qty * H(c).price) / agg.totalAssets * 100).toFixed(1);
 
-  // 权益曲线（近 90 个交易日）
+  // 权益曲线（近 90 个交易日）；空态不构造序列——净值从录入第一笔后才有意义
   const equity = {
     dates: [], nav: [], bench: [],
   };
-  (function () {
+  if (!EMPTY) (function () {
     const n = 90;
     const port = walk('PORT90', n, agg.totalAssets, 0.018, 0.0009);
     const bench = walk('HS300_90', n, 4528.66 / (1 + 0.086), 0.011, 0.0008);
@@ -194,10 +209,11 @@
       winRate: ret.filter((r, i) => r > vol[i]).length / ret.length * 100,
     };
   }
-  const P = perf(equity.nav, equity.bench);
+  const P = equity.nav.length ? perf(equity.nav, equity.bench)
+    : { cum: 0, benchCum: 0, annVol: 0, benchVol: 0, mdd: 0, benchMdd: 0, sharpe: 0, winRate: 0 };
 
   /* ---------- 预警 ---------- */
-  const alerts = [
+  const alerts = EMPTY ? [] : [
     { time: '10:32', code: '300750', name: '宁德时代', type: '放量突破', level: 'up', text: '成交额明显高于 20 日均量，价格站上 60 日均线', done: false },
     { time: '09:58', code: '002594', name: '比亚迪', type: '跌破成本', level: 'down', text: `现价 ${fmt(BYD.price, priceDec(BYD.kind))} 低于成本 ${fmt(BYD.cost, priceDec(BYD.kind))}，浮亏扩大至 ${pct(BYD.pnlPct)}`, done: false },
     { time: '14:47', code: '588000', name: '科创50ETF', type: '止盈提醒', level: 'warn', text: `累计收益 ${pct(H('588000').pnlPct)}，触及你设定的 +12% 止盈线`, done: false },
@@ -206,7 +222,7 @@
   ];
 
   /* ---------- AI 分析建议库 ---------- */
-  const advice = {
+  const advice = EMPTY ? {} : {
     '300750': {
       score: 78, action: '加仓', horizon: '中线 1–3 月', conf: 0.72, position: '当前 14.4% → 建议 18%',
       target: [226, 241], stop: 191.4, reason: '储能出货增速超市场预期，技术面完成三角收敛向上突破。',
@@ -289,7 +305,7 @@
   ];
 
   /* ---------- 对话式问股 样本问答 ---------- */
-  const qa = [
+  const qa = EMPTY ? [] : [
     {
       q: '比亚迪今天亏了，要不要止损？',
       a: [
@@ -329,7 +345,7 @@
     },
   ];
 
-  const sessions = [
+  const sessions = EMPTY ? [] : [
     { t: '10-24 09:12', who: '微信 · 语音', text: '「茅台今天能不能补？」', reply: '已答：28% 集中度已到上限，建议回落到 25% 以下再补。', read: true },
     { t: '10-23 20:41', who: '定时任务', text: '盘后复盘日报已推送到我的微信', reply: '', read: true },
     { t: '10-23 14:07', who: '微信 · 文字', text: '「科创50 跌了 2 个点，要不要跑？」', reply: '已答：仓位仅 1.5%，属于承受范围内，建议持有观察 10 日线。', read: false },
@@ -391,6 +407,18 @@
     { href: 'diagnosis.html', icon: 'shield', label: '组合诊断', short: '诊断', kbd: '5' },
   ];
 
+  // 空态引导块（P1-T1 / A2）：图标 + 标题 + 说明 + 动作按钮，默认 CTA 是「录入第一笔」
+  //（入口 = 手工录入表单抽屉，ADR-0006）。cta:false 渲染无按钮的轻量版。
+  const ENTRY_HREF = 'holdings.html?empty=1&add=1';
+  function emptyBlock(o) {
+    const acts = o.actions || (o.cta === false ? [] : [{ label: o.ctaLabel || '＋ 录入第一笔', href: o.href || ENTRY_HREF, primary: true }]);
+    return `<div class="empty-hero"${o.od ? ` data-od-id="${o.od}"` : ''}>
+      <span class="eh-ic">${ICONS[o.icon || 'wallet']}</span>
+      <div class="eh-title">${o.title}</div>${o.desc ? `<div class="eh-desc">${o.desc}</div>` : ''}
+      ${acts.length ? `<div class="eh-actions">${acts.map(a => `<a class="btn ${a.primary ? 'btn-primary' : ''}" href="${a.href}">${a.label}</a>`).join('')}</div>` : ''}
+    </div>`;
+  }
+
   function chrome(opts) {
     const here = opts.active;
     const root = document.getElementById('sidebar');
@@ -440,6 +468,8 @@
     }
     if (!document.querySelector('.toasts')) document.body.insertAdjacentHTML('beforeend', '<div class="toasts" id="toasts"></div>');
     bindChrome(opts);
+    // 空态演示模式标识：每页加载提示一次，告知退出方式（走查与 T9 用）
+    if (EMPTY) setTimeout(() => toast('空持仓演示模式 · 地址栏加 ?empty=0 恢复演示数据', 'info'), 120);
   }
 
   function stripHTML() {
@@ -481,6 +511,7 @@
 
     const ab = document.getElementById('alert-btn');
     if (ab) ab.addEventListener('click', () => {
+      if (!alerts.length) { toast('暂无预警 · 录入第一笔持仓后开始盯盘', 'info'); return; }
       toast(`待处理预警 ${alerts.filter(a => !a.done).length} 条 · 最近一条 ${alerts[0].time} ${alerts[0].name} ${alerts[0].type}`, 'info');
     });
 
@@ -541,6 +572,7 @@
     ws, indices, holdings, kindLabel, watchlist, advice, alerts, qa, sessions,
     equity, P, wp, wsec, sellTo, weightAfter,
     marketClock, chrome, toast, tickPrices, stripHTML, recalc, totalMvAll,
+    emptyState: EMPTY, emptyBlock, ENTRY_HREF,
   };
   W.ZM = ZM;
   publish(); // 把汇总快照（cash/totalAssets/sectors/hhi…）写入导出对象，此后每次 recalc() 自动同步

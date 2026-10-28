@@ -105,8 +105,9 @@
 
 | 键 | 内容 | 出处 |
 |---|---|---|
-| `zimu:chat:me` | 问答会话，最多 30 条 | `chat.html` |
+| `zimu:chat:me` | 问答会话，最多 30 条；空态模式（见下）另存 `zimu:chat:me:empty`，两种演示态的历史互不串 | `chat.html` |
 | `zimu:wechat:v2` | 通道开关、订阅、静音标的、绑定状态、推送参数 | `wechat.html` |
+| `zimu:demo:empty`（sessionStorage） | 空持仓演示模式开关（P1-T1）：`?empty=1` 写入、`?empty=0` 清除；仅当前标签页有效，关掉标签即回演示数据 | `data.js` |
 
 约定：键名统一 `zimu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。
 

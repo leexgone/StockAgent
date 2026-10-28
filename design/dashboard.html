@@ -162,6 +162,12 @@
     const clock = D.marketClock();
     document.getElementById('d-eyebrow').textContent =
       new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }) + ' · ' + clock.state;
+    if (D.emptyState) {
+      // 空持仓引导（A2 / P1-T1）：不引用演示持仓
+      document.getElementById('d-desc').textContent =
+        '账户还没有持仓：总资产目前全部是现金。录入第一笔后，这里开始总结当日涨跌、归因与仓位提醒。';
+      return;
+    }
     const worst = [...D.holdings].sort((a, b) => a.dayVal - b.dayVal)[0];
     const best = [...D.holdings].sort((a, b) => b.dayVal - a.dayVal)[0];
     document.getElementById('d-desc').textContent =
@@ -173,6 +179,23 @@
   /* ---------- 净值曲线 ---------- */
   let n = 90;
   function renderEquity() {
+    if (D.emptyState) {
+      // 空持仓：净值序列尚未开始，图位渲染引导（A2 / P1-T1）
+      document.getElementById('d-assets').textContent = D.money(D.totalAssets);
+      document.getElementById('d-day').textContent = '—';
+      document.getElementById('d-day').className = 'metric-value num';
+      document.getElementById('d-range').textContent = '—';
+      document.getElementById('d-range').className = 'metric-value num';
+      const eb = document.getElementById('equity-badge');
+      eb.className = 'pill'; eb.textContent = '待首笔持仓';
+      document.getElementById('equity-sub').textContent = '净值序列从录入第一笔后开始逐交易日记录（含现金）';
+      document.getElementById('equity-chart').innerHTML = D.emptyBlock({
+        icon: 'spark', od: 'dash-equity-empty',
+        title: '录入第一笔后，这里开始画组合净值 vs 沪深 300',
+        desc: '曲线按真实交易日推进；归因、预警与收盘摘要读的是同一份快照。',
+      });
+      return;
+    }
     const s = D.equity.nav.slice(-n), b = D.equity.bench.slice(-n), L = D.equity.dates.slice(-n);
     const from = s[0], to = s[s.length - 1];
     const ret = (to / from - 1) * 100, bret = (b[b.length - 1] / b[0] - 1) * 100;
@@ -225,6 +248,11 @@
 
   /* ---------- 当日归因 ---------- */
   function renderAttribution() {
+    if (D.emptyState) {
+      document.getElementById('attribution').innerHTML = '<div class="empty" style="padding:26px 12px">还没有持仓可归因 · 录入第一笔后自动统计</div>';
+      document.getElementById('attr-note').textContent = '当日无标的贡献 —— 账户目前全部是现金。';
+      return;
+    }
     const att = D.holdings.map(h => ({ k: h.name, v: h.dayVal })).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
     const maxAbs = Math.max(...att.map(a => Math.abs(a.v)));
     document.getElementById('attribution').innerHTML = att.map(a => `
@@ -243,8 +271,16 @@
   /* ---------- 预警 ---------- */
   function renderAlerts() {
     const open = D.alerts.filter(a => !a.done);
-    document.getElementById('alert-count').textContent = open.length ? `${open.length} 条待处理` : '已全部处理';
+    document.getElementById('alert-count').textContent = open.length ? `${open.length} 条待处理` : D.emptyState ? '未启动' : '已全部处理';
     document.getElementById('alert-count').className = 'pill ' + (open.length ? 'warn' : '');
+    if (!D.alerts.length) {
+      document.getElementById('alert-list').innerHTML = D.emptyBlock({
+        icon: 'bell', od: 'dash-alerts-empty',
+        title: '监控还没有启动',
+        desc: '录入第一笔持仓后，助理按你在「微信助理接入」里的规则盯价格条件、公告事件与止盈止损，触发即出现在这里并推送到手机。',
+      });
+      return;
+    }
     document.getElementById('alert-list').innerHTML = D.alerts.map((a, i) => `
       <div class="list-item" data-od-id="alert-item-${i}" style="${a.done ? 'opacity:.55' : ''}">
         <span class="dot ${a.level === 'up' ? 'live' : ''}" style="background:var(--${a.level === 'flat' ? 'muted' : a.level});width:8px;height:8px;border-radius:50%;flex:none"></span>
@@ -269,12 +305,18 @@
     D.toast('已标记处理，该预警不再出现在首屏', 'check');
   });
   document.getElementById('alert-all').addEventListener('click', () => {
+    if (!D.alerts.length) { D.toast('暂无预警可归档 · 录入第一笔后开始监控', 'info'); return; }
     D.alerts.forEach(a => a.done = true); renderAlerts(); D.toast('全部预警已归档', 'check');
   });
 
   /* ---------- 持仓表 ---------- */
   function renderHoldings() {
     const rows = [...D.holdings].sort((a, b) => b.mv - a.mv);
+    if (!rows.length) {
+      document.querySelector('#dash-holdings tbody').innerHTML =
+        '<tr><td colspan="6"><div class="empty">还没有持仓 · 在「持仓管理」页可以录入第一笔</div></td></tr>';
+      return;
+    }
     document.querySelector('#dash-holdings tbody').innerHTML = rows.map(h => `
       <tr data-clickable data-href="analysis.html?code=${h.code}" data-od-id="dash-hrow-${h.code}">
         <td class="txt"><div class="name">${h.name}</div><div class="sub code">${h.code} · ${h.mkt} · ${D.kindLabel[h.kind]}</div></td>
@@ -301,6 +343,20 @@
 
   /* ---------- 收盘摘要 ---------- */
   function renderBrief() {
+    if (D.emptyState) {
+      // 空态路径引导（A2 / P1-T1）：复用摘要的三格编号结构
+      const steps = [
+        ['录入第一笔持仓', '入口在持仓管理页：手工逐笔加仓，数量按整手校验、价格受当日涨跌停约束，费用与摊薄成本在预览里即时试算。'],
+        ['录入后即被监控', '助理基于同一份快照计算派生数字与净值序列；价格条件、公告事件触发时生成预警，按你的设置推送微信。'],
+        ['收盘自动生成摘要', '15:05 归档当日盈亏、仓位提醒与下日关注点——摘要里的每个数字都可回溯到口径手册。'],
+      ];
+      document.getElementById('brief').innerHTML = steps.map((x, i) => `
+        <div data-od-id="brief-empty-${i}">
+          <div class="eyebrow">${String(i + 1).padStart(2, '0')} · ${x[0]}</div>
+          <p style="margin-top:9px;font-size:13px;line-height:1.7;color:var(--fg-2);max-width:60ch">${x[1]}</p>
+        </div>`).join('');
+      return;
+    }
     const rows = [...D.holdings].sort((a, b) => b.mv - a.mv);
     const brief = [
       { t: '组合今天怎么了', b: `${D.dayPnl >= 0 ? '盈利' : '亏损'} ${D.fmt(Math.abs(D.dayPnl), 0)} 元（${D.pct(D.dayPnlPct)}）。银行、电力设备贡献正向，汽车仓位是唯一明显拖累。` },
