@@ -1,6 +1,6 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T2–T8 ✅，余 T1 空态壳、T9 人工验收）。下一步主线 P1 → P4（数据管道，前置 C5/C8 拍板）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
+个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T2–T8 ✅，余 T1 空态壳、T9 人工验收）。下一步主线 P1 → P4（数据管道；C5/C8 已于 2026-10-28 拍板，见 ADR-0006/0007）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
 
 产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
@@ -76,7 +76,7 @@ docs/decisions/    ADR 决策记录
 
 - 有取舍的决定写进 `docs/decisions/NNNN-<slug>.md`（模板见该目录 README），编号递增，状态 `提议 / 接受 / 已取代`。
 - 未定事项集中在 `docs/07-backlog.md`（问题）与 `docs/06-roadmap.md`（阶段）。
-- 后端栈、前端框架、真实行情源已由 ADR-0005 定案；当前待拍板：C5 录入方式（P4 前）、C8 打分生成（P4-T6 前）、C4 微信渠道（P5 前），见 `06-roadmap.md` 决策闸门表。
+- 后端栈、前端框架、真实行情源已由 ADR-0005 定案；C5 录入方式（ADR-0006：手工逐笔先行，CSV 后续增强）与 C8 打分生成（ADR-0007：规则打分 + 模型写文案）已于 2026-10-28 拍板。当前待拍板只剩 C4 微信渠道（P5 前），见 `06-roadmap.md` 决策闸门表。
 
 ## 安全与责任边界
 

@@ -45,3 +45,5 @@ B …
 | [0003](./0003-defer-stack-choice.md) | 暂缓后端与前端框架选型 | 已取代（by 0005） |
 | [0004](./0004-demo-data-behind-contract.md) | 演示样本固定在 `ZM` 契约后面 | 接受 |
 | [0005](./0005-tech-route-rust-robit-react-sidecar.md) | 技术路线：Rust + robit 基建、React 前端、Python 行情 sidecar | 接受 |
+| [0006](./0006-first-position-entry-manual-first.md) | 首笔持仓录入：手工逐笔先行，CSV 导入作后续增强（C5） | 接受 |
+| [0007](./0007-hybrid-scoring-rules-plus-model.md) | 分析结论生成：规则打分 + 模型写文案的混合方式（C8） | 接受 |
