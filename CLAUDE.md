@@ -1,16 +1,17 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T1–T8 ✅，T1 空态引导与录入入口壳 2026-10-28 落地——任意页 `?empty=1` 走查空持仓态、`?empty=0` 退出；余 T9 人工验收）。P4 数据管道开工（2026-10-28）：P4-T2 ✅ `zimu-store` SQLite schema/迁移（六表 + user_version 逐版迁移，`restart_does_not_lose_data` 通过，B12 奇零股存储就绪）；P4-T1 后端录入完成 🔨——`/api/holdings` `/api/holdings/trade` `/api/trades` `/api/account` 端点 + 录入事务（校验全复用 `zimu-domain`），C5 关闭（ADR-0006 手工逐笔先行），剩前端抽屉接 API（随 P5-T2）；P4-T3 ✅ `datafetch` 正式化——`zimu_datafetch` 包四端点 + 兜底链/熔断/限频/缓存 + `DfError` 错误契约，`ZIMU_DF_DISABLE` 注入验证「主源故障降级不崩」，baostock 复测恢复进兜底链（契约边界见 `04` 附录 B）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
+个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T1–T8 ✅，T1 空态引导与录入入口壳 2026-10-28 落地——任意页 `?empty=1` 走查空持仓态、`?empty=0` 退出；余 T9 人工验收）。P4 数据管道开工（2026-10-28）：P4-T2 ✅ `zimu-store` SQLite schema/迁移（六表 + user_version 逐版迁移，`restart_does_not_lose_data` 通过，B12 奇零股存储就绪）；P4-T1 后端录入完成 🔨——`/api/holdings` `/api/holdings/trade` `/api/trades` `/api/account` 端点 + 录入事务（校验全复用 `zimu-domain`），C5 关闭（ADR-0006 手工逐笔先行），剩前端抽屉接 API（随 P5-T2）；P4-T3 ✅ `datafetch` 正式化——`zimu_datafetch` 包四端点 + 兜底链/熔断/限频/缓存 + `DfError` 错误契约，`ZIMU_DF_DISABLE` 注入验证「主源故障降级不崩」，baostock 复测恢复进兜底链（契约边界见 `04` 附录 B）；P4-T4 ✅ `zimu-market` 行情适配器（sidecar 唯一消费入口）+ `/api/market/*` 六端点——刷新回写走 `recalc` 重算、市场时钟按 `03` §9 生产口径（恒 Asia/Shanghai、交易日历优先、sidecar 挂了降级 503/启发式时钟不瘫）、当日 bar 合成见 `04` 附录 B。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
 
 产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
 ## 现在这个仓库里有什么
 
 ```
-backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API）
+backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API）
                    crates/zimu-agent-cli（robit 集成 spike：Agent REPL + echo 工具，P2-T2）
                    crates/zimu-domain（领域纯函数库，P3-T3：03 数字口径唯一 Rust 实现 + 黄金向量测试）
-                   crates/zimu-store（存储层，P4-T1/T2：SQLite schema 与迁移 + 录入事务，校验复用 zimu-domain，.db 不入库）
+                   crates/zimu-store（存储层，P4-T1/T2：SQLite schema 与迁移 + 录入事务 + 行情回写，校验复用 zimu-domain，.db 不入库）
+                   crates/zimu-market（行情适配器，P4-T4：datafetch sidecar 唯一消费入口——类型化契约/降级三分类/市场时钟/当日 bar 合成）
 frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话）；
                    src/domain/ 为领域纯函数 TS 共享层（P3-T4：镜像 zimu-domain，vitest 跑同一份黄金向量），令牌在 src/styles/tokens.css
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare/baostock）：P4-T3 正式化——`zimu_datafetch/` 包（/quote /kline /cb_list /calendar，兜底链+熔断+限频+缓存+错误契约），spike 探测脚本保留为复现入口
@@ -55,7 +56,7 @@ docs/decisions/    ADR 决策记录
 
 ## 验证方式
 
-数字口径有自动化验收：两边 runner 跑**同一份** `fixtures/golden/`——backend `cargo test -p zimu-domain`（Rust 领域库），frontend `npm test`（vitest，TS 共享层）。改口径的顺序固定：**先改 `docs/03` 与 fixtures，再改两边实现**；实现之间永不互相对拍。录入流程与持久化用 `cargo test -p zimu-store`（事务/拒绝/重启不丢数据）；存储层只复用 domain 校验，**不新定义任何口径**。
+数字口径有自动化验收：两边 runner 跑**同一份** `fixtures/golden/`——backend `cargo test -p zimu-domain`（Rust 领域库），frontend `npm test`（vitest，TS 共享层）。改口径的顺序固定：**先改 `docs/03` 与 fixtures，再改两边实现**；实现之间永不互相对拍。录入流程与持久化用 `cargo test -p zimu-store`（事务/拒绝/重启不丢数据/行情回写）；存储层只复用 domain 校验，**不新定义任何口径**。行情链路用 `cargo test -p zimu-market -p zimu-server`（适配器单测 + API 集成测试：API 数字与 `zimu-domain::recalc` 逐位等价、FakeApi 注入的 sidecar 降级，全离线）。
 
 `design/` 原型没有测试框架，改完请人工过一遍（浏览器控制台必须无报错）：
 

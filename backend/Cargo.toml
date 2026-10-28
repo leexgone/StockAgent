@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zimu-server", "crates/zimu-agent-cli", "crates/zimu-domain", "crates/zimu-store"]
+members = ["crates/zimu-server", "crates/zimu-agent-cli", "crates/zimu-domain", "crates/zimu-store", "crates/zimu-market"]
 resolver = "2"
 
 [workspace.package]
@@ -22,6 +22,7 @@ tokio = { version = "1.53", features = [
     "sync",     # mpsc / oneshot（Agent 通道）
     "io-std",   # stdin（REPL）
     "io-util",  # AsyncBufReadExt
+    "time",     # 探测超时（P4-T4：status 端点有界降级；此前经 reqwest 间接启用，显式声明）
 ] }
 async-trait = "0.1"
 axum = "0.8"
@@ -36,3 +37,10 @@ anyhow = "1.0"
 # 版本必须与 robit-agent 的 rusqlite 对齐（0.40）：libsqlite3-sys 的 links
 # 约束全依赖图只允许一份 libsqlite3，不同主版本会直接解析冲突。
 rusqlite = { version = "0.40", features = ["bundled"] }
+# P4-T4 行情适配器：版本与特性跟 robit 侧的 reqwest 对齐（0.13，default-features
+# 关）——同一份已编译依赖，不引入 native-tls 等新增重量。0.13 起 query() 在
+# 独立 feature 里（serde_urlencoded，robit 已启用，零新增编译单元）。
+reqwest = { version = "0.13", default-features = false, features = ["json", "query"] }
+# P4-T4 市场时钟：只用固定偏移（Asia/Shanghai = UTC+8，03 §9 生产口径），
+# 不引时区数据库；clock 特性提供 Utc::now。
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

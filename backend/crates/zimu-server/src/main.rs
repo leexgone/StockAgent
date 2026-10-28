@@ -1,18 +1,23 @@
 //! 子木 · zimu-server —— 常驻 Web 服务（P2-T3：接入 robit Agent，SSE 事件流）。
 //!
 //! 端点：
-//! - `GET  /api/health`       健康检查（含 agent_online）
+//! - `GET  /api/health`       健康检查（含 agent_online / market_url）
 //! - `GET  /api/chat/stream`  SSE：Agent 事件流（首帧 connected，之后 text_delta / tool_* / …）
 //! - `POST /api/chat`         发送用户消息 `{ "text": "…" }`
 //! - `POST /api/chat/confirm` 工具确认答复 `{ "tool_call_id": "…", "approved": true }`
 //! - `POST /api/chat/cancel`  取消当前轮次
-//! - `GET  /api/holdings`     组合全景（存储 + recalc，P4-T1）
-//! - `POST /api/holdings/trade` 手工逐笔录录入（校验/试算/落库，ADR-0006）
-//! - `GET  /api/trades`       委托/成交流水
+//! - `/api/holdings*` `/api/trades` `/api/account`   持仓录入 API（P4-T1，见 lib holdings_api）
+//! - `/api/market/*`          行情 API（P4-T4，见 lib market_api：status/quote/kline/
+//!                            cb_list/calendar/refresh——sidecar 挂了整体降级不瘫）
 //! - 其余路径                 静态托管 `frontend/dist`，回落 `index.html`（SPA 路由）
+//!
+//! 业务路由在库目标（`lib.rs` 的 `api_router`）里装配，bin 只剩启动接线——
+//! 集成测试用同一函数拉起 API 面。
 //!
 //! 启动（在 `backend/` 下）：`cargo run -p zimu-server`
 //! 数据库位置：`ZIMU_DB_PATH` 覆盖；默认 `<cwd>/zimu.db`（*.db 已在 .gitignore，永不入库）。
+//! 行情 sidecar：`ZIMU_MARKET_URL` 覆盖（默认 http://127.0.0.1:8300），
+//! `ZIMU_MARKET_TIMEOUT_MS` 覆盖超时（默认 10000）；sidecar 不在也能启动。
 //! robit 配置读取与 zimu-agent-cli 相同（`<cwd>/.robit/config.toml` → `~/.robit/config.toml`）；
 //! 找不到配置时**服务照常起**，仅 /api/chat* 返回 503（静态首页仍可用）。
 //!
@@ -22,15 +27,17 @@
 //! 公网入站（ADR-0005）。
 
 mod agent_bridge;
-mod holdings_api;
 
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use agent_bridge::{spawn_agent, AgentBridge};
-use holdings_api::SharedStore;
 use anyhow::Context;
+use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
+use zimu_market::MarketApi as _; // base_url() 是 trait 方法
+use zimu_server::holdings_api::SharedStore;
+use zimu_server::{api_router, market_api};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -51,7 +58,9 @@ struct AppState {
     static_dir: PathBuf,
     /// None = robit 配置缺失或 Agent 启动失败：chat 端点降级 503，静态托管照常
     agent: Option<Arc<AgentBridge>>,
-    // 持仓存储（P4-T1）不从这里走：/api/holdings* 用独立 SharedStore 状态 merge 进来
+    /// 行情 sidecar 基地址（health 诊断透出；在线状态看 /api/market/status）
+    market_url: String,
+    // 持仓存储（P4-T1）与行情路由（P4-T4）不从这里走：api_router 用独立状态 merge 进来
 }
 
 #[derive(Serialize)]
@@ -64,6 +73,8 @@ struct Health {
     static_ready: bool,
     /// Agent 是否在线（false = 缺 robit 配置或启动失败）
     agent_online: bool,
+    /// 行情 sidecar 基地址（是否在线由 /api/market/status 探测，health 不打网络）
+    market_url: String,
 }
 
 async fn health(State(state): State<AppState>) -> Json<Health> {
@@ -74,6 +85,7 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         static_dir: state.static_dir.clone(),
         static_ready: state.static_dir.join("index.html").exists(),
         agent_online: state.agent.is_some(),
+        market_url: state.market_url.clone(),
     })
 }
 
@@ -257,6 +269,17 @@ async fn main() -> anyhow::Result<()> {
         store.lock().unwrap_or_else(|e| e.into_inner()).version()?
     );
 
+    // 行情适配器（P4-T4）：sidecar 唯一消费入口。sidecar 不在也能起服务——
+    // 行情端点届时 503 降级（market_unavailable），持仓/会话/静态托管照常。
+    let market_client = HttpMarketClient::from_env().unwrap_or_else(|e| {
+        tracing::warn!("按环境装配行情适配器失败（{e}），回落默认配置");
+        HttpMarketClient::new(DEFAULT_BASE_URL, DEFAULT_TIMEOUT)
+            .expect("默认配置的行情客户端构建不应失败")
+    });
+    let market_url = market_client.base_url().to_string();
+    tracing::info!("行情适配器就绪：{market_url}（sidecar 不在线时 /api/market/* 降级 503）");
+    let market = market_api::new_market(Arc::new(market_client));
+
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/chat/stream", get(chat_stream))
@@ -266,16 +289,10 @@ async fn main() -> anyhow::Result<()> {
         .with_state(AppState {
             static_dir: static_dir.clone(),
             agent,
+            market_url,
         })
-        // 持仓 API 用独立状态类型（SharedStore），merge 前各自擦除
-        .merge(
-            Router::new()
-                .route("/api/holdings", get(holdings_api::get_holdings))
-                .route("/api/holdings/trade", post(holdings_api::record_trade))
-                .route("/api/trades", get(holdings_api::get_trades))
-                .route("/api/account", post(holdings_api::update_account))
-                .with_state(store),
-        )
+        // 业务路由（持仓 P4-T1 + 行情 P4-T4）在库目标装配，各自带独立状态
+        .merge(api_router(store, market))
         // SPA 回落：dist 里不存在的路径返回 index.html。
         // 注意必须用 .fallback() 而不是 .not_found_service()：后者会把状态码强制成 404
         //（tower-http 0.6 的设计，body 照常返回），客户端路由刷新就会拿到 404。

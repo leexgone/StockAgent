@@ -205,4 +205,38 @@
   的两只转债恰是退市样本，未覆盖活券；P4-T3 用 `sh110076/sz128136/sz127025` 补测确认，
   统一解析器成立。
 - 日线尾部时点：spike 曾见「当日 bar」，P4-T3 冒烟见当日收盘后新浪/baostock 尾部为
-  **上一交易日**（更新滞后数小时）——盘中当日 bar 需由实时行情合成，口径留给 P4-T4。
+  **上一交易日**（更新滞后数小时）——盘中当日 bar 需由实时行情合成，口径见下条（P4-T4 定稿）。
+
+### 盘中当日 bar 合成（P4-T4 定稿，2026-10-28）
+
+`zimu-market` 适配器在 `/api/market/kline` 上提供 `with_today=1` 语义：
+
+- 合成条件（全部满足）：实时行 `date` == 今天（上海）**且** `status == ok` **且**
+  `price > 0` **且** 日线尾部日期 < 今天（日线为空也允许合成）。
+- 合成 bar：`{ date: 今天, open/high/low: 实时行同名字段（缺失回落到 price）,
+  close: price, volume, amount }`——单位随实时行（股票/ETF 已归一到股/份；转债
+  为源侧「张」，与日线同源同单位，量比口径一致）。
+- 合成后追加进 `kline` 尾部、`count` +1，响应顶层带 `today_synthesized: true`；
+  **盘中合成 bar 随实时行情变动，不是定稿 bar**——收盘后日线源更新到位，
+  合成条件（尾部 < 今天）自然失效。
+- 实时行 `no_data` / 停牌无价（`price` 空）不合成；日历不参与其中（实时行
+  `date == 今天` 本身就是「今天在交易」的证据，节假日拿不到当日实时行）。
+
+### 适配器边界（P4-T4）
+
+`backend/crates/zimu-market` 是 sidecar 的**唯一消费入口**：zimu-server 端点与
+后续 agent 领域工具（P4-T6）全部经它，代码库中不允许出现第二处对 sidecar 的
+HTTP 调用。要点：
+
+- symbol 前缀由持仓/自选的显式 `mkt` 字段拼装（B7：`SH/SZ → sh/sz`，不做号段猜测；
+  北交所超出产品范围，拼不出前缀即拒绝）。
+- 错误三分类：`Unavailable`（sidecar 进程不可达/超时——**降级信号**）/
+  `Upstream`（sidecar 错误契约透传，含状态码与 `code`）/ `Contract`（响应反序列化
+  失败——两边版本漂移，按 502 处理）。
+- sidecar 不可用时主程序降级不瘫：持仓/流水/录入照常（`/api/holdings*` 读库存
+  陈旧行情字段），行情端点 503 `market_unavailable`，市场时钟退工作日启发式
+  （`03` §9 生产口径），`POST /api/market/refresh` 拒绝刷新但返回契约化错误。
+- 行情回写只更新 `holdings.price/prev/name` 与 COALESCE `limit_pct`（推断走
+  `zimu-domain::price_limit::limit_pct`，`st=false`——ST 识别依赖行情字段，
+  03 §2；ETF 推断为 None → 保持数据层配置不被覆盖）。回写后组合数字一律
+  重新过 `zimu-domain::recalc`（服务端 `recalc()` 等价链，03 §5 口径）。

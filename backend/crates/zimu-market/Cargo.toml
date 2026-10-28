@@ -1,0 +1,17 @@
+[package]
+name = "zimu-market"
+description = "子木 · 行情适配器（P4-T4：datafetch sidecar 的唯一消费入口——类型化契约、降级三分类、市场时钟、当日 bar 合成）"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

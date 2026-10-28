@@ -3034,12 +3034,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "zimu-market"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "zimu-server"
 version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "chrono",
+ "reqwest",
  "robit-agent",
  "robit-ai",
  "robit-web",
@@ -3050,6 +3065,8 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "zimu-domain",
+ "zimu-market",
  "zimu-store",
 ]
 

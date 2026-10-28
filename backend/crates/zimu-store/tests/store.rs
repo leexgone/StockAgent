@@ -313,3 +313,98 @@ fn restart_does_not_lose_data() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ============================================================================
+// 行情回写（P4-T4）
+// ============================================================================
+
+use zimu_store::QuoteUpdate;
+
+fn qu(code: &str, price: Option<f64>, prev: Option<f64>) -> QuoteUpdate {
+    QuoteUpdate {
+        code: code.into(),
+        price,
+        prev,
+        name: None,
+        limit_pct: None,
+        ts: "2026-10-28 15:05".into(),
+    }
+}
+
+#[test]
+fn apply_quotes_updates_price_prev_name_and_ts() {
+    let s = seed_store(300_000.0);
+    s.record_trade(&buy("600519", 100, 1500.0, meta(("600519", "贵州茅台"), Kind::Stock, Some(1490.0), Some(10))))
+        .unwrap();
+    let n = s
+        .apply_quotes(&[QuoteUpdate {
+            name: Some("贵州茅台A".into()),
+            ..qu("600519", Some(1437.0), Some(1421.0))
+        }])
+        .unwrap();
+    assert_eq!(n, 1);
+    let h = &s.holdings().unwrap()[0];
+    assert_eq!(h.price, Some(1437.0));
+    assert_eq!(h.prev, Some(1421.0));
+    assert_eq!(h.name, "贵州茅台A");
+    assert_eq!(h.updated_at, "2026-10-28 15:05");
+    // cost/shares 是录入事实，行情回写永不触碰
+    assert_eq!(h.shares, 100);
+    // portfolio 立即用新价重算（recalc 链）：mv = 143700，day_chg = 16/1421×100
+    let p = s.portfolio().unwrap();
+    assert!((p.per[0].mv - 143_700.0).abs() < 1e-9);
+    assert!((p.per[0].day_chg - 16.0 / 1421.0 * 100.0).abs() < 1e-9);
+}
+
+#[test]
+fn apply_quotes_coalesce_keeps_existing_on_none() {
+    let s = seed_store(300_000.0);
+    // meta 带数据层配置的 limit_pct（ETF 无法推断，03 §2）
+    let mut m = meta(("510300", "沪深300ETF"), Kind::Etf, Some(4.0), Some(10));
+    m.mkt = "SH".into();
+    s.record_trade(&buy("510300", 1000, 4.0, m)).unwrap();
+    // price=None（无价不覆盖）、limit_pct=None（数据层配置不被抹掉）
+    let n = s
+        .apply_quotes(&[QuoteUpdate {
+            name: Some("300ETF".into()),
+            ..qu("510300", None, Some(4.05))
+        }])
+        .unwrap();
+    assert_eq!(n, 1);
+    let h = &s.holdings().unwrap()[0];
+    assert_eq!(h.price, Some(4.0), "None 不覆盖原值（COALESCE）");
+    assert_eq!(h.prev, Some(4.05), "Some 正常更新");
+    assert_eq!(h.limit_pct, Some(10), "数据层配置不被 None 覆盖");
+    assert_eq!(h.name, "300ETF");
+}
+
+#[test]
+fn missing_prev_degrades_to_zero_day_pnl() {
+    // 03 §5 无行情降级（P4-T4 定稿）：prev 缺失视为等于 price → dayChg/dayVal = 0。
+    // 回归：曾因 prev.unwrap_or(0.0) 把 dayVal 算成整笔市值（伪造当日盈利）。
+    let s = seed_store(300_000.0);
+    s.record_trade(&buy("600519", 100, 1500.0, meta(("600519", "贵州茅台"), Kind::Stock, None, None)))
+        .unwrap();
+    let p = s.portfolio().unwrap();
+    assert_eq!(p.per[0].day_chg, 0.0);
+    assert_eq!(p.per[0].day_val, 0.0);
+    assert_eq!(p.agg.day_pnl, 0.0);
+    assert_eq!(p.agg.day_pnl_pct, 0.0);
+    // mv 照常按成交占位价算（录入时 price=成交价，03 §5 降级只影响当日口径）
+    assert!((p.per[0].mv - 1500.0 * 100.0).abs() < 1e-9);
+}
+
+#[test]
+fn apply_quotes_unknown_code_skipped_silently() {
+    let s = seed_store(300_000.0); // 600519 @1500×100 = 15 万，现金要够建仓
+    s.record_trade(&buy("600519", 100, 1500.0, meta(("600519", "贵州茅台"), Kind::Stock, Some(1490.0), Some(10))))
+        .unwrap();
+    let n = s
+        .apply_quotes(&[
+            qu("600519", Some(1437.0), None),
+            qu("999999", Some(1.0), None), // 不在持仓里：跳过，不报错
+        ])
+        .unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(s.holdings().unwrap().len(), 1);
+}

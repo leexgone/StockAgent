@@ -6,6 +6,8 @@ edition.workspace = true
 
 [dependencies]
 zimu-store = { path = "../zimu-store" }
+zimu-domain = { path = "../zimu-domain" }
+zimu-market = { path = "../zimu-market" }
 robit-ai.workspace = true
 robit-agent.workspace = true
 robit-web.workspace = true
@@ -19,3 +21,8 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+
+[dev-dependencies]
+# 集成测试（tests/market_api.rs）：真实 HTTP 打本机回环临时端口 + 日期构造
+reqwest.workspace = true
+chrono.workspace = true

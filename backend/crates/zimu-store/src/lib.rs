@@ -498,8 +498,9 @@ impl Store {
     }
 
     /// 组合全景：存储行 + `zimu-domain::recalc` 的逐笔派生与汇总（03 §5 口径）。
-    /// price/prev 缺失时按「无行情」降级：price 暂以成本占位（不产生假涨跌），
-    /// prev 置 0 → dayChg/dayVal 为 0。
+    /// price/prev 缺失时按「无行情降级」（03 §5，P4-T4 定稿）：price 以成本顶替，
+    /// prev 视为等于 price → dayChg/dayVal 取 0，**不伪造盈亏**（prev 置 0 会把
+    /// dayVal 算成整笔市值——禁止）。
     pub fn portfolio(&self) -> Result<PortfolioView> {
         let holdings = self.holdings()?;
         let account = self.account()?;
@@ -507,14 +508,17 @@ impl Store {
             cash: account.cash,
             holdings: holdings
                 .iter()
-                .map(|h| Holding {
-                    code: h.code.clone(),
-                    kind: h.kind,
-                    sector: h.sector.clone(),
-                    shares: h.shares as f64,
-                    cost: h.cost,
-                    price: h.price.unwrap_or(h.cost),
-                    prev: h.prev.unwrap_or(0.0),
+                .map(|h| {
+                    let price = h.price.unwrap_or(h.cost);
+                    Holding {
+                        code: h.code.clone(),
+                        kind: h.kind,
+                        sector: h.sector.clone(),
+                        shares: h.shares as f64,
+                        cost: h.cost,
+                        price,
+                        prev: h.prev.unwrap_or(price),
+                    }
                 })
                 .collect(),
         };
@@ -858,4 +862,55 @@ pub struct PortfolioView {
     /// 与 holdings 同序对齐（recalc 输出按输入序）
     pub per: Vec<PerHolding>,
     pub agg: Agg,
+}
+
+// ============================================================================
+// 行情回写（P4-T4）
+// ============================================================================
+
+/// 行情回写条目。**口径边界**：有效性过滤（status==ok、price>0）与 `limit_pct`
+/// 推断（`zimu-domain::price_limit::limit_pct`）都在调用方（server 适配层）完成，
+/// 存储层只负责持久化——COALESCE 语义：`None` 字段保持原值不动
+///（数据层已配置的 `limit_pct` 永不被推断值/空值覆盖，03 §2）。
+#[derive(Debug, Clone)]
+pub struct QuoteUpdate {
+    pub code: String,
+    pub price: Option<f64>,
+    pub prev: Option<f64>,
+    pub name: Option<String>,
+    pub limit_pct: Option<i64>,
+    /// 回写时刻（上海，YYYY-MM-DD HH:MM，与录入流水同格式）
+    pub ts: String,
+}
+
+impl Store {
+    /// 批量回写行情（单事务，全成或全不成）。返回实际更新的行数；
+    /// `code` 不在 holdings 里静默跳过（调用方多给了标的不是存储层错误）。
+    pub fn apply_quotes(&self, ups: &[QuoteUpdate]) -> Result<usize> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| -> Result<usize> {
+            let mut n = 0;
+            for u in ups {
+                n += self.conn.execute(
+                    "UPDATE holdings SET
+                       price=COALESCE(?1, price), prev=COALESCE(?2, prev),
+                       name=COALESCE(?3, name), limit_pct=COALESCE(?4, limit_pct),
+                       updated_at=?5
+                     WHERE code=?6",
+                    params![u.price, u.prev, u.name, u.limit_pct, u.ts, u.code],
+                )?;
+            }
+            Ok(n)
+        })();
+        match result {
+            Ok(n) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(n)
+            }
+            Err(e) => {
+                self.conn.execute_batch("ROLLBACK").ok();
+                Err(e)
+            }
+        }
+    }
 }
