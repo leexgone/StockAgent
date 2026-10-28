@@ -2,14 +2,18 @@
 
 面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险。发布形态是**常驻 Web 服务**——浏览器访问全部界面，也可以通过微信 / QQ 与助理对话、接收预警与盘后复盘（与 robit 的桌面端定位不同）。
 
-**当前阶段：技术基座 Spike（路线图 P2）。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。**最简运行框架已立起**：`backend/`（axum）+ `frontend/`（React），启动服务即可在浏览器进首页；`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
+**当前阶段：P3 口径可执行化已收官，P1 原型定稿推进中（余 T1 空态壳、T9 人工验收），下一主线 P4 数据管道（C5/C8 已拍板，见 ADR-0006/0007）。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
 
 ```powershell
-# 运行最简框架（生产形态：后端托管前端构建产物，单端口）
+# 运行（生产形态：后端托管前端构建产物，单端口）
 cd frontend; npm install; npm run build
-cd ..\backend; cargo run                  # → http://127.0.0.1:8080
+cd ..\backend; cargo run -p zimu-server   # → http://127.0.0.1:8080（workspace 多 bin，必须带 -p）
 
 # 开发形态：前端热更新（5173，/api 反代 8080），细节见 backend/README.md
+
+# 口径测试：两边跑同一份 fixtures/golden/（改口径先改 docs/03 与 fixtures）
+cd backend; cargo test -p zimu-domain     # Rust 领域库
+cd frontend; npm test                     # TS 共享层（vitest）
 ```
 
 ```bash
@@ -21,10 +25,11 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 
 | 路径 | 内容 |
 |---|---|
-| `backend/` | Rust 服务（Cargo workspace，axum）：health + SPA 静态托管，robit agent 集成在 P2-T2 |
-| `frontend/` | React + TS + Vite 前端：首页骨架 + 设计令牌迁移（`design/assets/ui.css` 为令牌来源） |
+| `backend/` | Rust 服务（Cargo workspace）：`zimu-server`（axum 主服务——health + SPA 静态托管 + Agent SSE 会话）、`zimu-domain`（领域纯函数库：`docs/03` 全部数字口径的 Rust 实现 + 黄金向量测试）、`zimu-agent-cli`（robit 集成调试入口）；细节见 `backend/README.md` |
+| `frontend/` | React + TS + Vite 前端：index 工作台静态复刻 + 智能问答视图（SSE 会话）；`src/domain/` 为 TS 领域共享层（镜像 `zimu-domain`），设计令牌在 `src/styles/tokens.css` |
 | `datafetch/` | Python 行情 sidecar（uv + FastAPI + akshare）：P2-T1 spike 产物，生产化在 P4-T3 |
 | `design/` | 界面原型（7 个页面 + 共享样式/数据/图表层），原型自带的说明见 `design/README.md` |
+| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（8 组 76 用例），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
 | `docs/` | 产品规格与工程规范：范围、界面、业务口径、数据契约、设计系统、路线图、待办 |
 | `docs/decisions/` | 决策记录（ADR）—— 每个「为什么这样做」都留档 |
 | `CLAUDE.md` | 给 Claude Code 的工程约定，动手前先读这个 |
@@ -47,7 +52,7 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 
 - `docs/01-vision-and-scope.md` —— 做什么、不做什么、合规边界
 - `docs/02-screens.md` —— 每屏模块与数据依赖
-- `docs/03-domain-rules.md` —— **口径手册**：整手、费用、摊薄成本、涨跌停、仓位纪律、波动测算
+- `docs/03-domain-rules.md` —— **口径手册**：整手、费用、摊薄成本、涨跌停、仓位纪律、波动测算（附录＝黄金向量 schema）
 - `docs/04-data-contract.md` —— `window.ZM` 数据契约，接真实数据时唯一的替换边界
 - `docs/05-design-system.md` —— 视觉令牌、红涨绿跌语义、断点
 - `docs/06-roadmap.md` / `docs/07-backlog.md` —— 阶段计划与已知问题
