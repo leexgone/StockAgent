@@ -111,7 +111,7 @@
 
 约定：键名统一 `zimu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。
 
-## 附录 · 行情源实测与字段对照（P2-T1 spike，2026-10-26）
+## 附录 A · 行情源实测与字段对照（P2-T1 spike，2026-10-26）
 
 环境：akshare 1.19.3 / pandas 3.1.0 / Python 3.13.1，周一盘后实测。复现：`cd datafetch && uv run spike_probe.py`（三轮，脚本带接口候选名自动发现，失败本身也是结论）。
 
@@ -137,7 +137,7 @@
 1. **东财对 akshare 封装做指纹反爬**：spike 期间 akshare 的东财实时系接口（`stock_zh_a_spot_em` / `stock_bid_ask_em` / `stock_individual_info_em` / `fund_etf_spot_em` / `stock_zh_index_spot_em` / ETF与指数日线 em）全部 `RemoteDisconnected`，连打 7 次均拒；而带浏览器 UA 直连 `push2.eastmoney.com` 返回 HTTP 200。**sidecar 的东财通道必须直连 + UA + 重试熔断，不得依赖 akshare 的东财封装。**且带 UA 的直连同样间歇（同一端点第二轮 200、第三轮被拒），熔断要快速触发并切新浪。
 2. **雪球源已死**：`stock_individual_spot_xq` 要求 `xq_a_token`（400016），不要规划进通道。
 3. **同花顺 ETF 表不适用**：`fund_etf_spot_ths` 是场外净值口径，场内实时价用新浪。
-4. **退市/停牌标的返回静默脏数据**：新浪 hq 对已退市转债返回 `open=0、volume=0、price=昨收定格`（110074），对已摘牌标的返回**空串**（127022）。适配器必须输出 `status` 字段区分（`ok / halted_or_delisted / empty_or_delisted`，见 `datafetch/app.py`），不得当正常行情喂给契约层。演示样本受此影响，见 `07-backlog.md` B10。
+4. **退市/停牌标的返回静默脏数据**：新浪 hq 对已退市转债返回 `open=0、volume=0、price=昨收定格`（110074），对已摘牌标的返回**空串**（127022）。适配器必须输出 `status` 字段区分（`ok / halted_or_delisted / empty_or_delisted`，P4-T3 起实现在 `zimu_datafetch/sources.py`，另加源整行缺失的 `no_data`），不得当正常行情喂给契约层。演示样本受此影响，见 `07-backlog.md` B10。
 5. **限频**：东财被拦期间快速失败（~0.4s），熔断可快速触发；新浪 hq 与新浪日线接口在三轮 spike 中多次调用无限频迹象。全市场快照类（20s+/次）只用于低频扫描，禁止进分钟级轮询。
 
 ### 实时行情字段 → 契约对照（新浪 hq，逗号分隔位序）
@@ -177,5 +177,32 @@
 ### 盘中频率结论（P4-T7 预警轮询参数依据）
 
 - 新浪 hq 直连：单请求多标的（5 标的 ~0.3s），**持仓+自选合并成一次请求、每分钟一轮**完全可行。
-- 分钟级轮询禁止使用全市场快照类接口。
 - 东财备份通道被拦时快速失败，适合做熔断切换而非重试等待。
+
+## 附录 B · sidecar 正式契约（P4-T3，2026-10-28）
+
+`datafetch/` 由 spike 骨架重写为 `zimu_datafetch` 包；端点、错误契约、治理参数、
+环境变量的权威描述见 `datafetch/README.md`。这里只记录**与契约层（`window.ZM`）相关的边界**：
+
+- **symbol 显式前缀**（B7 落实）：`/quote` `/kline` 的标的必须带 `sh/sz/bj` 前缀，
+  裸代码 400 `BAD_SYMBOL`——前缀由持有 `mkt` 字段的调用方（P4-T4 Rust 适配器）拼装，
+  sidecar 不做号段猜测；号段推断只剩 kline 缺省 `kind` 时的内部路由（`kind_routed` 标注）。
+- **实时行形状统一**（所有通道同键）：`symbol/code/mkt/kind/name/price/prev/open/high/
+  low/volume/amount/chg_pct/date/time/status/source`；行情时点随行内 `date/time` 显式
+  （适配器要求第 4 条）。`status` 三态 + `no_data`（源整行缺失），退市回归样本
+  `110074/127022` 联网冒烟复验通过（B10 的 sidecar 侧防线）。
+- **兜底链现实性更新**：spike 的通道结论全部沿用；**baostock 复测恢复**（P4-T3 当日
+  登录+日线+日历全 OK，spike 的 10002007 是暂时故障），进股票/指数日线与日历的
+  兜底链；东财直连备份通道改用 `fltt=2` 直接取小数，联网冒烟与新浪价格逐位一致
+  （dev=0.0000）。
+- **降级可观测**：响应带 `degraded` + `attempts[]`（逐源原因：disabled/熔断/异常），
+  全链失败 502 `UPSTREAM_ALL_FAILED`——主程序（P4-T4）据此区分「主源正常」与
+  「凑合活着」，`/healthz` 暴露熔断与缓存状态。
+- **口径边界重申**：sidecar 不定义业务口径；ETF `limit_pct` 等标的属性由数据层
+  （holdings meta）携带。成交量单位：股票/ETF 归一到股/份（东财 ×100），转债日线
+  为源侧「张」口径（量比若需校准留给 P4-T4）。
+- **活券布局补测**（spike 盲区）：新浪 hq 转债行与股票同为 33/34 位布局——spike 冒烟
+  的两只转债恰是退市样本，未覆盖活券；P4-T3 用 `sh110076/sz128136/sz127025` 补测确认，
+  统一解析器成立。
+- 日线尾部时点：spike 曾见「当日 bar」，P4-T3 冒烟见当日收盘后新浪/baostock 尾部为
+  **上一交易日**（更新滞后数小时）——盘中当日 bar 需由实时行情合成，口径留给 P4-T4。

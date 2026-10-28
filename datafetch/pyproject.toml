@@ -1,7 +1,7 @@
 [project]
 name = "zimu-datafetch"
-version = "0.0.1"
-description = "子木行情 sidecar（P2-T1 spike：验证 akshare 字段/频率/限频，产出 docs/04 附录字段对照表）"
+version = "0.1.0"
+description = "子木行情 sidecar（P4-T3 正式化：/quote /kline /cb_list /calendar，兜底链+熔断+限频+缓存，错误契约）"
 requires-python = ">=3.13"
 dependencies = [
     "akshare",
@@ -9,4 +9,17 @@ dependencies = [
     "fastapi",
     "httpx>=0.28.1",
     "uvicorn",
+    # spike 里 requests 靠 akshare 传递依赖碰巧可用；正式化后显式声明（直连通道的核心依赖）
+    "requests",
+    "pandas",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 未做 pip 安装（uv 虚拟项目），把项目根加进 sys.path 供 zimu_datafetch 与 conftest 导入
+pythonpath = ["."]
