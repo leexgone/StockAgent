@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zimu-server", "crates/zimu-agent-cli", "crates/zimu-domain"]
+members = ["crates/zimu-server", "crates/zimu-agent-cli", "crates/zimu-domain", "crates/zimu-store"]
 resolver = "2"
 
 [workspace.package]
@@ -32,3 +32,7 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1.0"
+# P4-T2 存储：bundled 自带 SQLite 编译，不依赖系统库。
+# 版本必须与 robit-agent 的 rusqlite 对齐（0.40）：libsqlite3-sys 的 links
+# 约束全依赖图只允许一份 libsqlite3，不同主版本会直接解析冲突。
+rusqlite = { version = "0.40", features = ["bundled"] }

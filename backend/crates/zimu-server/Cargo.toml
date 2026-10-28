@@ -1,10 +1,11 @@
 [package]
 name = "zimu-server"
-description = "子木 · 股票智能助理 Web 服务（health + 静态托管 + Agent SSE 会话，P2-T3）"
+description = "子木 · 股票智能助理 Web 服务（health + 静态托管 + Agent SSE 会话 + 持仓录入 API）"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+zimu-store = { path = "../zimu-store" }
 robit-ai.workspace = true
 robit-agent.workspace = true
 robit-web.workspace = true

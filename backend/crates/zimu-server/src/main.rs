@@ -6,9 +6,13 @@
 //! - `POST /api/chat`         发送用户消息 `{ "text": "…" }`
 //! - `POST /api/chat/confirm` 工具确认答复 `{ "tool_call_id": "…", "approved": true }`
 //! - `POST /api/chat/cancel`  取消当前轮次
+//! - `GET  /api/holdings`     组合全景（存储 + recalc，P4-T1）
+//! - `POST /api/holdings/trade` 手工逐笔录录入（校验/试算/落库，ADR-0006）
+//! - `GET  /api/trades`       委托/成交流水
 //! - 其余路径                 静态托管 `frontend/dist`，回落 `index.html`（SPA 路由）
 //!
 //! 启动（在 `backend/` 下）：`cargo run -p zimu-server`
+//! 数据库位置：`ZIMU_DB_PATH` 覆盖；默认 `<cwd>/zimu.db`（*.db 已在 .gitignore，永不入库）。
 //! robit 配置读取与 zimu-agent-cli 相同（`<cwd>/.robit/config.toml` → `~/.robit/config.toml`）；
 //! 找不到配置时**服务照常起**，仅 /api/chat* 返回 503（静态首页仍可用）。
 //!
@@ -18,12 +22,14 @@
 //! 公网入站（ADR-0005）。
 
 mod agent_bridge;
+mod holdings_api;
 
 use std::convert::Infallible;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use agent_bridge::{spawn_agent, AgentBridge};
+use holdings_api::SharedStore;
 use anyhow::Context;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -45,6 +51,7 @@ struct AppState {
     static_dir: PathBuf,
     /// None = robit 配置缺失或 Agent 启动失败：chat 端点降级 503，静态托管照常
     agent: Option<Arc<AgentBridge>>,
+    // 持仓存储（P4-T1）不从这里走：/api/holdings* 用独立 SharedStore 状态 merge 进来
 }
 
 #[derive(Serialize)]
@@ -238,6 +245,18 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // 持仓数据库（P4-T1）：ZIMU_DB_PATH 覆盖，默认 <cwd>/zimu.db——*.db 已被 .gitignore 挡住，
+    // 真实持仓永不入库（git）。打开即跑迁移（zimu-store::migrate，幂等）。
+    let db_path = std::env::var("ZIMU_DB_PATH").unwrap_or_else(|_| "zimu.db".into());
+    let store = SharedStore::new(Mutex::new(
+        zimu_store::Store::open(&db_path).with_context(|| format!("打开持仓数据库失败：{db_path}"))?,
+    ));
+    tracing::info!(
+        "持仓数据库就绪：{}（schema v{}）",
+        db_path,
+        store.lock().unwrap_or_else(|e| e.into_inner()).version()?
+    );
+
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/chat/stream", get(chat_stream))
@@ -248,6 +267,15 @@ async fn main() -> anyhow::Result<()> {
             static_dir: static_dir.clone(),
             agent,
         })
+        // 持仓 API 用独立状态类型（SharedStore），merge 前各自擦除
+        .merge(
+            Router::new()
+                .route("/api/holdings", get(holdings_api::get_holdings))
+                .route("/api/holdings/trade", post(holdings_api::record_trade))
+                .route("/api/trades", get(holdings_api::get_trades))
+                .route("/api/account", post(holdings_api::update_account))
+                .with_state(store),
+        )
         // SPA 回落：dist 里不存在的路径返回 index.html。
         // 注意必须用 .fallback() 而不是 .not_found_service()：后者会把状态码强制成 404
         //（tower-http 0.6 的设计，body 照常返回），客户端路由刷新就会拿到 404。

@@ -76,8 +76,8 @@
 
 | # | 任务 | 产出/验收 | 估算 | 状态 |
 |---|---|---|---|---|
-| P4-T1 | 录入流程实现：手工逐笔先行（ADR-0006 已决），券商 CSV 导入为后续增强单独立项 | backlog C5 关闭 | 0.5d + 实现 | ⬜ 待开工 |
-| P4-T2 | SQLite schema：holdings / trades / advice_history（带生成时间与数据版本，解 B9）/ alerts / equity_snapshots / push_log，含迁移机制 | 重启不丢数据 | 1d | ⬜ |
+| P4-T1 | 录入流程实现：手工逐笔先行（ADR-0006 已决），券商 CSV 导入为后续增强单独立项 | backlog C5 关闭 | 0.5d + 实现 | 🔨 2026-10-28：后端录入完成——`zimu-store` 事务（校验/试算/落库全复用 `zimu-domain`，不重定义口径）+ `zimu-server` 端点 `/api/holdings` `/api/holdings/trade` `/api/trades` `/api/account`；16 项集成测试 + e2e 全绿（首笔建仓/加仓摊薄/清仓移除/整手拦截/涨跌停拦截/现金不足回滚/超上限警告/重启不丢）。C5 关闭（见 `07`）；CSV 后续增强单独立项。**剩：前端抽屉接 API（随 P5-T2）** |
+| P4-T2 | SQLite schema：holdings / trades / advice_history（带生成时间与数据版本，解 B9）/ alerts / equity_snapshots / push_log，含迁移机制 | 重启不丢数据 | 1d | ✅ 2026-10-28：`zimu-store` crate——v1 schema 六表齐（`account/holdings/trades/advice_history/alerts/equity_snapshots/push_log`）；`PRAGMA user_version` 逐版迁移、每版一事务、只前进；`rusqlite` bundled（自带 libsqlite3，版本对齐 robit-agent 的 0.40 避免 links 冲突）。`holdings.shares` 为普通整数（奇零股存得下，解 B12 存储前提，见 `07`）；`advice_history` 带 `generated_at + data_version`（B9 正式解，字段留待 P4-T6 写入）；`trades` 拆三分项费用可审计；`.db` 已在 `.gitignore`（真实持仓永不入 git）。`restart_does_not_lose_data` 测试验证重启不丢 |
 | P4-T3 | `datafetch` 正式化：`/quote` `/kline` `/cb_list` `/calendar`，akshare→baostock 兜底、限频与缓存、错误契约 | 主源故障时降级不崩 | 1–2d | ⬜ |
 | P4-T4 | Rust 行情适配器（唯一消费入口，sidecar 挂了主程序降级）+ 服务端 `recalc()` 等价实现 + 交易日历/时区口径 | API 数字与 `03` 口径一致 | 1–2d | ⬜ |
 | P4-T5 | `04` 契约 → OpenAPI + serde 结构体（前后端类型同源），顺带解决 B6（模板插值替代正则） | 契约测试：样例响应过 schema 校验 | 1d | ⬜ |

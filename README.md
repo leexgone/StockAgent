@@ -2,7 +2,7 @@
 
 面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险。发布形态是**常驻 Web 服务**——浏览器访问全部界面，也可以通过微信 / QQ 与助理对话、接收预警与盘后复盘（与 robit 的桌面端定位不同）。
 
-**当前阶段：P3 口径可执行化已收官，P1 原型定稿推进中（T1 空态 ✅ 2026-10-28，余 T9 人工验收），下一主线 P4 数据管道（C5/C8 已拍板，见 ADR-0006/0007）。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
+**当前阶段：P4 数据管道开工——录入 API + SQLite schema 后端完成（2026-10-28，C5 关闭）；P1 原型定稿余 T9 人工验收。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）+ **手工逐笔录录入 API（`/api/holdings/trade` 等，校验复用领域库、落 SQLite 事务）**；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
 
 ```powershell
 # 运行（生产形态：后端托管前端构建产物，单端口）
@@ -13,6 +13,7 @@ cd ..\backend; cargo run -p zimu-server   # → http://127.0.0.1:8080（workspac
 
 # 口径测试：两边跑同一份 fixtures/golden/（改口径先改 docs/03 与 fixtures）
 cd backend; cargo test -p zimu-domain     # Rust 领域库
+cd backend; cargo test -p zimu-store      # 存储层：录入事务 / 校验拒绝 / 重启不丢
 cd frontend; npm test                     # TS 共享层（vitest）
 ```
 
@@ -25,7 +26,7 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 
 | 路径 | 内容 |
 |---|---|
-| `backend/` | Rust 服务（Cargo workspace）：`zimu-server`（axum 主服务——health + SPA 静态托管 + Agent SSE 会话）、`zimu-domain`（领域纯函数库：`docs/03` 全部数字口径的 Rust 实现 + 黄金向量测试）、`zimu-agent-cli`（robit 集成调试入口）；细节见 `backend/README.md` |
+| `backend/` | Rust 服务（Cargo workspace）：`zimu-server`（axum 主服务——health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API）、`zimu-domain`（领域纯函数库：`docs/03` 全部数字口径的 Rust 实现 + 黄金向量测试）、`zimu-store`（存储层：SQLite schema + 迁移 + 录入事务，P4）、`zimu-agent-cli`（robit 集成调试入口）；细节见 `backend/README.md` |
 | `frontend/` | React + TS + Vite 前端：index 工作台静态复刻 + 智能问答视图（SSE 会话）；`src/domain/` 为 TS 领域共享层（镜像 `zimu-domain`），设计令牌在 `src/styles/tokens.css` |
 | `datafetch/` | Python 行情 sidecar（uv + FastAPI + akshare）：P2-T1 spike 产物，生产化在 P4-T3 |
 | `design/` | 界面原型（7 个页面 + 共享样式/数据/图表层），原型自带的说明见 `design/README.md` |

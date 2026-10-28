@@ -1,0 +1,12 @@
+[package]
+name = "zimu-store"
+description = "子木 · 存储层（P4-T1/T2）：SQLite schema 与迁移机制 + 手工逐笔录录入事务；校验口径全部复用 zimu-domain，不在此重定义"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+zimu-domain = { path = "../zimu-domain" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

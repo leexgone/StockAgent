@@ -1,15 +1,16 @@
 # CLAUDE.md — 子木 · 股票智能助理（StockAgent）
 
-个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T1–T8 ✅，T1 空态引导与录入入口壳 2026-10-28 落地——任意页 `?empty=1` 走查空持仓态、`?empty=0` 退出；余 T9 人工验收）。下一步主线 P1 → P4（数据管道；C5/C8 已于 2026-10-28 拍板，见 ADR-0006/0007）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
+个人股票助理程序。当前阶段：**P3 口径可执行化收官（2026-10-28）**——黄金测试向量（`fixtures/golden/`）八组 76 用例两边全绿：Rust `zimu-domain`（`cargo test -p zimu-domain`）与 frontend TS 共享层 `src/domain/`（`npm test`）跑同一份 fixture，无 pending 组（`price_limit` 已随 P1-T2 涨跌停口径定稿转 active）。P2 技术基座已收官（axum + robit SSE / React 工作台 / Python 行情，Web 桥沉淀为 robit `robit-web` v0.1.26）。P1 原型定稿推进中（T1–T8 ✅，T1 空态引导与录入入口壳 2026-10-28 落地——任意页 `?empty=1` 走查空持仓态、`?empty=0` 退出；余 T9 人工验收）。P4 数据管道开工（2026-10-28）：P4-T2 ✅ `zimu-store` SQLite schema/迁移（六表 + user_version 逐版迁移，`restart_does_not_lose_data` 通过，B12 奇零股存储就绪）；P4-T1 后端录入完成 🔨——`/api/holdings` `/api/holdings/trade` `/api/trades` `/api/account` 端点 + 录入事务（校验全复用 `zimu-domain`），C5 关闭（ADR-0006 手工逐笔先行）；剩前端抽屉接 API（随 P5-T2）。`design/` 零构建原型保留为设计参照与验收基准。技术路线定案见 ADR-0005：Rust + robit agent 基建 / React + Vite 前端 / Python 行情 sidecar。
 
 产品形态：发布后是**常驻 Web 服务**（浏览器访问）+ 微信/QQ 双向会话入口，不是桌面程序——这一点与 robit（TUI/GUI 桌面端）有意区分，做架构决定时别把两者混同。
 
 ## 现在这个仓库里有什么
 
 ```
-backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管）
+backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API）
                    crates/zimu-agent-cli（robit 集成 spike：Agent REPL + echo 工具，P2-T2）
                    crates/zimu-domain（领域纯函数库，P3-T3：03 数字口径唯一 Rust 实现 + 黄金向量测试）
+                   crates/zimu-store（存储层，P4-T1/T2：SQLite schema 与迁移 + 录入事务，校验复用 zimu-domain，.db 不入库）
 frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话）；
                    src/domain/ 为领域纯函数 TS 共享层（P3-T4：镜像 zimu-domain，vitest 跑同一份黄金向量），令牌在 src/styles/tokens.css
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare），P2-T1 spike 产物
@@ -54,7 +55,7 @@ docs/decisions/    ADR 决策记录
 
 ## 验证方式
 
-数字口径有自动化验收：两边 runner 跑**同一份** `fixtures/golden/`——backend `cargo test -p zimu-domain`（Rust 领域库），frontend `npm test`（vitest，TS 共享层）。改口径的顺序固定：**先改 `docs/03` 与 fixtures，再改两边实现**；实现之间永不互相对拍。
+数字口径有自动化验收：两边 runner 跑**同一份** `fixtures/golden/`——backend `cargo test -p zimu-domain`（Rust 领域库），frontend `npm test`（vitest，TS 共享层）。改口径的顺序固定：**先改 `docs/03` 与 fixtures，再改两边实现**；实现之间永不互相对拍。录入流程与持久化用 `cargo test -p zimu-store`（事务/拒绝/重启不丢数据）；存储层只复用 domain 校验，**不新定义任何口径**。
 
 `design/` 原型没有测试框架，改完请人工过一遍（浏览器控制台必须无报错）：
 
