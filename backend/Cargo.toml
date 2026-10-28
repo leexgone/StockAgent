@@ -44,3 +44,8 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 # P4-T4 市场时钟：只用固定偏移（Asia/Shanghai = UTC+8，03 §9 生产口径），
 # 不引时区数据库；clock 特性提供 Utc::now。
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# P4-T5 契约同源：serde 结构体在定义处 derive ToSchema，编译期生成 OpenAPI 3.1
+# 文档（docs/api/openapi.json 由测试保证与代码一致）；前端类型自该文档生成。
+utoipa = "5"
+# P4-T5 契约测试（仅 zimu-server dev-dep）：实时响应与样例过 schema 校验。
+jsonschema = "0.60"

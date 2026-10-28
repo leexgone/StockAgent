@@ -1,0 +1,57 @@
+{
+  "holding_after": {
+    "code": "510300",
+    "cost": 4.055,
+    "kind": "etf",
+    "limit_pct": null,
+    "mkt": "SH",
+    "name": "样本sh510300",
+    "prev": 4.05,
+    "price": 4.1,
+    "sector": "宽基指数",
+    "shares": 2000,
+    "updated_at": "2026-10-28 19:42"
+  },
+  "preview": {
+    "fee_detail": {
+      "amount": 4100.0,
+      "commission": 5.0,
+      "stamp_tax": 0.0,
+      "total": 5.0,
+      "transfer_fee": 0.0
+    },
+    "outcome": {
+      "after_cost": 4.055,
+      "after_shares": 2000.0,
+      "amount": 4100.0,
+      "cash_after": 140646.0,
+      "fee": 5.0,
+      "insufficient_cash": false,
+      "over_limit": false,
+      "realized": null,
+      "realized_pct": null,
+      "ta_after": 293746.0,
+      "weight_after": 2.7915273739897732
+    },
+    "warnings": []
+  },
+  "removed": false,
+  "trade": {
+    "amount": 4100.0,
+    "cash_delta": -4105.0,
+    "code": "510300",
+    "fee": 5.0,
+    "fee_commission": 5.0,
+    "fee_stamp": 0.0,
+    "fee_transfer": 0.0,
+    "id": 4,
+    "kind": "etf",
+    "name": "样本sh510300",
+    "note": "契约样例：加仓",
+    "price": 4.1,
+    "qty": 1000,
+    "realized": null,
+    "side": "buy",
+    "ts": "2026-10-28 19:42"
+  }
+}

@@ -8,9 +8,13 @@
 //! - `holdings_api` —— 存储读写 + `zimu-domain` 校验/试算/重算的 HTTP 接线；
 //! - `market_api` —— `zimu-market` 适配器（sidecar 唯一消费入口）的 HTTP 接线。
 //!   两层都不定义数字口径：口径只在 `zimu-domain`（03 唯一来源）。
+//! - `openapi` —— API 契约汇编（P4-T5）：全部响应/请求 serde 结构体 →
+//!   OpenAPI 3.1（`docs/api/openapi.json` 由测试保证与代码一致），前端 TS
+//!   类型自该文档生成（前后端类型同源）。
 
 pub mod holdings_api;
 pub mod market_api;
+pub mod openapi;
 
 use axum::routing::{get, post};
 use axum::Router;
@@ -25,11 +29,14 @@ pub fn holdings_router(store: holdings_api::SharedStore) -> Router {
         .with_state(store)
 }
 
-/// 全部 `/api/*` 业务路由（持仓 + 行情）。不含 `/api/chat*` 与静态托管——
-/// 它们依赖 robit 装配与前端构建产物，留在 bin 侧。
+/// 全部 `/api/*` 业务路由（持仓 + 行情 + 契约文档）。不含 `/api/chat*` 与
+/// 静态托管——它们依赖 robit 装配与前端构建产物，留在 bin 侧。
 pub fn api_router(
     store: holdings_api::SharedStore,
     market: market_api::SharedMarket,
 ) -> Router {
-    holdings_router(store.clone()).merge(market_api::router(store, market))
+    Router::new()
+        .route("/api/openapi.json", get(openapi::openapi_doc))
+        .merge(holdings_router(store.clone()))
+        .merge(market_api::router(store, market))
 }

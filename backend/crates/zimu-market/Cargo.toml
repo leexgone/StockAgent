@@ -12,6 +12,7 @@ serde_json.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+utoipa.workspace = true # 契约模型（QuotePayload/KlinePayload/MarketClock…）derive ToSchema（P4-T5）
 
 [dev-dependencies]
 tokio.workspace = true

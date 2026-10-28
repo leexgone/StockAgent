@@ -17,6 +17,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use zimu_domain::dilution::{apply_trade, ApplyTradeInput, TradeOutcome, SINGLE_STOCK_LIMIT};
 use zimu_domain::fees::{fee, FeeBreakdown, FeeInput};
 use zimu_domain::lot::{lot_size, price_decimals, validate_qty, QtyReason};
@@ -155,7 +156,7 @@ fn side_str(s: Side) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AccountRow {
     pub name: String,
     pub init: String,
@@ -176,7 +177,7 @@ impl Default for AccountRow {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HoldingRow {
     pub code: String,
     pub name: String,
@@ -191,7 +192,7 @@ pub struct HoldingRow {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TradeRow {
     pub id: i64,
     pub ts: String,
@@ -217,7 +218,7 @@ pub struct TradeRow {
 
 /// 新建持仓所需的标的元信息（卖出与已有标的买入不需要）。
 /// 真实流程里这些来自行情搜索/行情源（P4-T4），P4-T1 由请求方携带。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct NewHoldingMeta {
     pub name: String,
     /// 'SH' | 'SZ'
@@ -230,7 +231,7 @@ pub struct NewHoldingMeta {
     pub limit_pct: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct TradeRequest {
     pub code: String,
     pub side: Side,
@@ -243,7 +244,7 @@ pub struct TradeRequest {
 }
 
 /// 试算预览（抽屉「预估」区的数据源；与原型 `holdings.html` calc() 同构）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SimPreview {
     pub fee_detail: FeeBreakdown,
     pub outcome: TradeOutcome,
@@ -251,7 +252,7 @@ pub struct SimPreview {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RecordReceipt {
     pub trade: TradeRow,
     /// 清仓后为 null（持仓行已移除）
@@ -855,7 +856,7 @@ fn holding_name_for(s: &RowState) -> String {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PortfolioView {
     pub account: AccountRow,
     pub holdings: Vec<HoldingRow>,

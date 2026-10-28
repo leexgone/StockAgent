@@ -2,6 +2,7 @@
 //! 所有派生值只出自这里；分母为 0 时各比率取 0，不产生 NaN。
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::{ratio, Kind};
 
@@ -22,7 +23,7 @@ pub struct PortfolioInput {
     pub holdings: Vec<Holding>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PerHolding {
     pub code: String,
     /// (price − prev) / prev × 100
@@ -38,7 +39,7 @@ pub struct PerHolding {
     pub weight: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SectorAgg {
     pub name: String,
     /// 行业市值
@@ -47,7 +48,7 @@ pub struct SectorAgg {
     pub w: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct Agg {
     pub cash: f64,
     pub mv_stocks: f64,

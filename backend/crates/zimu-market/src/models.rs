@@ -8,9 +8,10 @@
 //!   转 `zimu_domain::Kind` 在调用方做（本 crate 不依赖 domain，见 lib.rs）。
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// 实时行状态（P4-T3 四态）。未知值不 panic，归 `Unknown`（前向兼容）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QuoteStatus {
     Ok,
@@ -25,7 +26,7 @@ pub enum QuoteStatus {
 }
 
 /// 统一实时行（/quote `quotes[]`；所有通道同键，04 附录 B）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct QuoteRow {
     pub symbol: String,
     pub code: String,
@@ -48,13 +49,13 @@ pub struct QuoteRow {
 }
 
 /// 降级明细：逐源原因（disabled/熔断/异常），04 附录 B「降级可观测」。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Attempt {
     pub source: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct QuotePayload {
     pub as_of: String,
     pub count: usize,
@@ -65,7 +66,7 @@ pub struct QuotePayload {
 }
 
 /// 日线 bar（新浪系 amount 可缺省；单位：股票/ETF 股/份，转债 张）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct KlineBar {
     pub date: String,
     pub open: Option<f64>,
@@ -77,7 +78,7 @@ pub struct KlineBar {
     pub amount: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct KlinePayload {
     pub symbol: String,
     pub kind: String,
@@ -97,7 +98,7 @@ pub struct KlinePayload {
 
 /// 转债列表现券行 + 集思录强赎字段（redeem 源失败时 13 个 redeem 键全 null，
 /// `redeem_source` 为 null——降级不断供，P4-T3 契约）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CbItem {
     pub symbol: String,
     pub code: String,
@@ -148,7 +149,7 @@ pub struct CbItem {
     pub redeem_source: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CbListPayload {
     pub as_of: String,
     pub count: usize,
@@ -160,7 +161,7 @@ pub struct CbListPayload {
     pub items: Vec<CbItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CalendarPayload {
     pub start: String,
     pub end: String,
@@ -175,6 +176,7 @@ pub struct CalendarPayload {
 
 /// sidecar `/healthz`：只取 ok/version 强类型，其余（breakers/cache/
 /// disabled_sources）原样透传——运维排查用，不参与业务判断。
+/// 内部探测类型，不进 API 契约（status 端点响应是 server 侧的 SidecarStatus）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidecarHealth {
     pub ok: bool,

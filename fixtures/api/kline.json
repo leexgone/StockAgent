@@ -1,0 +1,33 @@
+{
+  "adjusted": "qfq",
+  "attempts": [],
+  "count": 2,
+  "degraded": false,
+  "end": "2026-10-28",
+  "kind": "stock",
+  "kind_routed": "explicit",
+  "kline": [
+    {
+      "amount": 10000000.0,
+      "close": 1421.0,
+      "date": "2026-10-27",
+      "high": 1421.0,
+      "low": 1421.0,
+      "open": 1421.0,
+      "volume": 10000.0
+    },
+    {
+      "amount": 100000.0,
+      "close": 1437.0,
+      "date": "2026-10-28",
+      "high": 1437.0,
+      "low": 1437.0,
+      "open": 1437.0,
+      "volume": 1000.0
+    }
+  ],
+  "source": "sina_stock_daily",
+  "start": "2026-10-01",
+  "symbol": "sh600519",
+  "today_synthesized": true
+}

@@ -33,6 +33,12 @@ config.local.*
 *.sqlite
 *.sqlite3
 *.db
+# SQLite WAL/日志边车：checkpoint 前含与 .db 同级的真实数据，同样永不入库
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite-shm
+*.sqlite-wal
 exports/
 data/cache/
 cache/

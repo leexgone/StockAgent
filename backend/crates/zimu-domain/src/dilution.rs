@@ -1,6 +1,7 @@
 //! 摊薄成本、已实现盈亏与调整后仓位（03 §4）：抽屉试算的纯函数形态。
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::fees::{fee, FeeInput};
 use crate::{Kind, Side, THRESHOLD_EPS};
@@ -24,7 +25,7 @@ pub struct ApplyTradeInput {
     pub others_mv: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TradeOutcome {
     pub amount: f64,
     pub fee: f64,

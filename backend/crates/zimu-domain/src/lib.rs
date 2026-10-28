@@ -23,6 +23,7 @@ pub mod recalc;
 pub mod vol_synth;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 /// 年化交易日常数（03 §7 / §8）
 pub const TRADING_DAYS: f64 = 244.0;
@@ -34,7 +35,7 @@ pub const SHARPE_EPS: f64 = 1e-9;
 pub const THRESHOLD_EPS: f64 = 1e-9;
 
 /// 标的类型（03 §1）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// A 股普通股
@@ -46,7 +47,7 @@ pub enum Kind {
 }
 
 /// 交易方向
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Side {
     Buy,

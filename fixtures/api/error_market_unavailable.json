@@ -1,0 +1,4 @@
+{
+  "error": "market_unavailable",
+  "message": "行情 sidecar 不可达，行情服务降级中：契约测试：模拟 sidecar 停止"
+}

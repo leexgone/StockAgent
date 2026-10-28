@@ -9,7 +9,11 @@
 //! - `/api/holdings*` `/api/trades` `/api/account`   持仓录入 API（P4-T1，见 lib holdings_api）
 //! - `/api/market/*`          行情 API（P4-T4，见 lib market_api：status/quote/kline/
 //!                            cb_list/calendar/refresh——sidecar 挂了整体降级不瘫）
+//! - `GET  /api/openapi.json` API 契约文档（P4-T5，见 lib openapi）
 //! - 其余路径                 静态托管 `frontend/dist`，回落 `index.html`（SPA 路由）
+//!
+//! health/chat 的响应与请求类型定义在 lib（`openapi.rs`）并进 OpenAPI 契约；
+//! bin 侧单测断言 Health 序列化键集与 schema 键集一致（doc-stub 不留漂移盲区）。
 //!
 //! 业务路由在库目标（`lib.rs` 的 `api_router`）里装配，bin 只剩启动接线——
 //! 集成测试用同一函数拉起 API 面。
@@ -37,13 +41,14 @@ use anyhow::Context;
 use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
 use zimu_market::MarketApi as _; // base_url() 是 trait 方法
 use zimu_server::holdings_api::SharedStore;
+use zimu_server::openapi::{ChatRequest, ConfirmRequest, Health};
 use zimu_server::{api_router, market_api};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -63,26 +68,12 @@ struct AppState {
     // 持仓存储（P4-T1）与行情路由（P4-T4）不从这里走：api_router 用独立状态 merge 进来
 }
 
-#[derive(Serialize)]
-struct Health {
-    ok: bool,
-    service: &'static str,
-    version: &'static str,
-    static_dir: PathBuf,
-    /// frontend/dist/index.html 是否存在（false = 前端还没构建）
-    static_ready: bool,
-    /// Agent 是否在线（false = 缺 robit 配置或启动失败）
-    agent_online: bool,
-    /// 行情 sidecar 基地址（是否在线由 /api/market/status 探测，health 不打网络）
-    market_url: String,
-}
-
 async fn health(State(state): State<AppState>) -> Json<Health> {
     Json(Health {
         ok: true,
-        service: "zimu-server",
-        version: env!("CARGO_PKG_VERSION"),
-        static_dir: state.static_dir.clone(),
+        service: "zimu-server".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        static_dir: state.static_dir.display().to_string(),
         static_ready: state.static_dir.join("index.html").exists(),
         agent_online: state.agent.is_some(),
         market_url: state.market_url.clone(),
@@ -90,19 +81,8 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
 }
 
 // ============================================================================
-// /api/chat* —— P2-T3 SSE 会话端点
+// /api/chat* —— P2-T3 SSE 会话端点（请求类型在 lib openapi.rs，进契约）
 // ============================================================================
-
-#[derive(Deserialize)]
-struct ChatRequest {
-    text: String,
-}
-
-#[derive(Deserialize)]
-struct ConfirmRequest {
-    tool_call_id: String,
-    approved: bool,
-}
 
 /// SSE 事件流。多客户端可同时观看（broadcast 扇出）；订阅前的事件不会补发，
 /// 首帧固定是 connected。
@@ -313,4 +293,48 @@ async fn main() -> anyhow::Result<()> {
 
     axum::serve(listener, app).await.context("服务异常退出")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! health/chat 实现在 bin、契约 doc-stub 在 lib（openapi.rs）——这里断言
+    //! 两边没有漂移：bin 构造的 `Health` 序列化键集 == OpenAPI schema 键集。
+    //!（chat 请求体直接消费 lib 类型，天然同源无需断言。）
+
+    #[test]
+    fn health_shape_matches_openapi_schema() {
+        let sample = zimu_server::openapi::Health {
+            ok: true,
+            service: "zimu-server".into(),
+            version: "0.0.1".into(),
+            static_dir: "frontend/dist".into(),
+            static_ready: true,
+            agent_online: false,
+            market_url: "http://127.0.0.1:8300".into(),
+        };
+        let value = serde_json::to_value(&sample).expect("Health 可序列化");
+        let doc: serde_json::Value =
+            serde_json::from_str(&zimu_server::openapi::openapi_json()).expect("契约文档可解析");
+        let schema = doc
+            .pointer("/components/schemas/Health")
+            .expect("契约里必须有 Health schema");
+        let mut schema_keys: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("Health schema 是对象")
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        let mut actual_keys: Vec<&str> = value
+            .as_object()
+            .expect("Health 序列化为对象")
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        schema_keys.sort_unstable();
+        actual_keys.sort_unstable();
+        assert_eq!(
+            schema_keys, actual_keys,
+            "main.rs 的 Health 构造与 openapi.rs 契约 schema 键集不一致"
+        );
+    }
 }

@@ -13,6 +13,7 @@
 
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Timelike, Weekday};
 use serde::Serialize;
+use utoipa::ToSchema;
 
 /// Asia/Shanghai = UTC+8 固定偏移（03 §9：不引时区数据库，产品范围仅沪深 A 股）
 pub const SHANGHAI_OFFSET_SECS: i32 = 8 * 3600;
@@ -84,7 +85,7 @@ fn guess_next_weekday(d: NaiveDate) -> NaiveDate {
     n
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MarketClock {
     /// 机器可读状态：pre_open / auction / am / lunch / pm / after_hours /
     /// closed / non_trading_day

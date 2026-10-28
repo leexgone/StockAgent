@@ -2,8 +2,8 @@
 
 ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开公网入站。
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
-Agent SSE 会话 + 持仓录入 API + 行情 API，P2-T3/P4-T1/P4-T4；P2-T5 起桥体消费
-robit `robit-web` crate）、`zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent
+Agent SSE 会话 + 持仓录入 API + 行情 API + OpenAPI 契约，P2-T3/P4-T1/P4-T4/P4-T5；
+P2-T5 起桥体消费 robit `robit-web` crate）、`zimu-agent-cli`（P2-T2 robit 集成 spike：最小 Agent
 REPL + echo 工具，保留为调试入口）、`zimu-domain`（P3-T3 领域纯函数库：`docs/03`
 全部数字口径的 Rust 实现，`cargo test -p zimu-domain` 跑 `fixtures/golden/`
 黄金向量）、`zimu-store`（P4-T1/T2 存储层：SQLite schema + 迁移 + 录入事务，
@@ -121,7 +121,37 @@ cd ..\datafetch; uv run uvicorn zimu_datafetch.server:app --host 127.0.0.1 --por
 cargo run -p zimu-server
 Invoke-RestMethod http://127.0.0.1:8080/api/market/status          # 时钟 + sidecar 在线
 Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/market/refresh  # 行情回写 + 重算
-cargo test -p zimu-market -p zimu-server   # 适配器 29 项 + API 集成 8 项（全离线，FakeApi 注入）
+cargo test -p zimu-market -p zimu-server   # 适配器 29 项 + server（集成 8 + 契约 3 + bin 单测 1，全离线）
+```
+
+## API 契约（P4-T5，OpenAPI + serde 同源）
+
+**前后端类型同源**：API 响应/请求全部是类型化 serde 结构体（`json!` 临时拼装
+已清除），在定义处 `#[derive(ToSchema)]`（zimu-domain / zimu-store /
+zimu-market / zimu-server 四 crate），`src/openapi.rs` 的 `ApiDoc`（utoipa 5）
+汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（36 schema、16 路径；文档
+永不手改）。前端 `npm run gen:api`（openapi-typescript）生成
+`src/api/schema.d.ts`，P5-T1 的 API client 直接消费。运行时
+`GET /api/openapi.json` 提供同一文档。
+
+契约测试（验收「样例响应过 schema 校验」，`tests/contract.rs` + jsonschema
+draft 2020-12）三连：
+
+1. 仓库 `docs/api/openapi.json` 与代码生成**逐字节一致**（改契约忘了再生成
+   会直接红）；
+2. seeded 测试服务（FakeApi 注入，`tests/common/` 共享装置）全端点**实时
+   响应**过其声明的响应 schema，含 422/404/400/503 错误契约；
+3. **`fixtures/api/` 15 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
+
+health/chat 实现在 bin（依赖 robit 装配），契约在 `openapi.rs` 以 doc-stub
+声明、类型定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化键集 == schema
+键集（无漂移盲区）。SSE wire schema 归 robit-web（`WebEvent`）。
+
+```powershell
+# 改契约结构体/标注后，再生成两个工件（然后 git diff 审样例变化）：
+cargo test -p zimu-server --lib -- --ignored regenerate_openapi_json   # docs/api/openapi.json
+$env:ZIMU_REGEN_API_SAMPLES='1'; cargo test -p zimu-server --test contract; Remove-Item Env:ZIMU_REGEN_API_SAMPLES
+cd ..\frontend; npm run gen:api                                        # src/api/schema.d.ts
 ```
 
 ## zimu-store（P4-T2 存储层）
@@ -201,13 +231,14 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 
 ```text
 Cargo.toml                  workspace（robit crates pin 本地 git tag v0.1.26，其余依赖版本与 robit workspace 对齐）
-crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API
-                            ├─ lib.rs            /api/* 业务路由装配（api_router，集成测试同一入口）
-                            ├─ main.rs           启动接线（robit 配置缺失时优雅降级；行情适配器装配）
+crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + OpenAPI 契约
+                            ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
+                            ├─ main.rs           启动接线（robit 配置缺失时优雅降级；行情适配器装配；bin 侧契约键集单测）
                             ├─ agent_bridge.rs   Agent 装配 + echo 工具（WebBridge 接线）
-                            ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1，错误→状态码映射）
-                            ├─ market_api.rs     /api/market/*（P4-T4：status/quote/kline/cb_list/calendar/refresh）
-                            └─ tests/market_api.rs  8 项集成测试（FakeApi 注入：口径等价 + 降级，离线）
+                            ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1，错误→状态码映射；utoipa::path 契约标注）
+                            ├─ market_api.rs     /api/market/*（P4-T4：status/quote/kline/cb_list/calendar/refresh；类型化响应结构体）
+                            ├─ openapi.rs        OpenAPI 3.1 汇编（P4-T5：ApiDoc + ApiError/Health 等共享契约类型 + 再生成入口）
+                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/样例过 schema）· common/ 共享装置（FakeApi/seed）
 crates/zimu-agent-cli/      robit 集成 spike：Agent REPL + echo 工具（P2-T2，调试入口）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit
                             └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/）

@@ -1,0 +1,2258 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "子木 · 股票智能助理 API",
+    "description": "子木常驻 Web 服务的 HTTP API（ADR-0005）。数字口径唯一来源是 docs/03（zimu-domain 实现、黄金向量锁死），本服务不另定义口径。本文档由 serde 结构体经 utoipa 生成，契约测试保证实时与样例响应过 schema 校验（cargo test -p zimu-server --test contract）；前端 TS 类型自本文档生成（frontend: npm run gen:api）。降级边界（04 附录 B）：行情 sidecar 缺席时 /api/market/* 返回 503 market_unavailable，持仓/录入/会话/静态托管照常。",
+    "license": {
+      "name": ""
+    },
+    "version": "0.0.1"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "本机部署（默认 http://127.0.0.1:8080，ZIMU_ADDR 覆盖；仅内网监听，ADR-0005）"
+    }
+  ],
+  "paths": {
+    "/api/account": {
+      "post": {
+        "tags": [
+          "holdings"
+        ],
+        "operationId": "update_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的账户（缺失字段保持原值）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "现金为负等输入问题",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "chat_send",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "已接受，回复经 SSE 流出"
+          },
+          "400": {
+            "description": "消息为空（text/plain）"
+          },
+          "503": {
+            "description": "Agent 未启动（text/plain）"
+          }
+        }
+      }
+    },
+    "/api/chat/cancel": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "chat_cancel",
+        "responses": {
+          "202": {
+            "description": "已请求取消当前轮次"
+          },
+          "503": {
+            "description": "Agent 未启动（text/plain）"
+          }
+        }
+      }
+    },
+    "/api/chat/confirm": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "chat_confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "确认已回填"
+          },
+          "404": {
+            "description": "没有匹配的待确认工具调用（text/plain）"
+          },
+          "503": {
+            "description": "Agent 未启动（text/plain）"
+          }
+        }
+      }
+    },
+    "/api/chat/stream": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "chat_stream",
+        "responses": {
+          "200": {
+            "description": "SSE 事件流：首帧 connected（宿主元数据：profile/model/tools），随后为 robit-web WebEvent（text_delta / tool_call / tool_result / confirm_request / turn_complete / error），wire schema 由 robit-web 定义（v0.1.26）",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "503": {
+            "description": "Agent 未启动（缺 robit 配置）"
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "服务健康。不打网络探测 sidecar——行情在线状态看 /api/market/status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/holdings": {
+      "get": {
+        "tags": [
+          "holdings"
+        ],
+        "operationId": "get_holdings",
+        "responses": {
+          "200": {
+            "description": "组合全景：存储行 + recalc() 逐笔派生（per，与 holdings 同序）与汇总（agg）+ 账户现金。无行情降级按 03 §5（price 缺失以成本顶替、prev 缺失视为等于 price）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioView"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误（细节只进日志）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/holdings/trade": {
+      "post": {
+        "tags": [
+          "holdings"
+        ],
+        "operationId": "record_trade",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "录入收据：trade 行 + 变动后持仓（清仓为 null）+ 试算预览 + warnings（纪律提示不拦提交，如「单票将超过 25% 上限」）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入问题：数量非整手/超可卖、价格非正、市场码非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "持仓里没有该标的（卖出/减仓）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "业务规则拦截：涨跌停越界（out_of_limit_range，带 limit_down/limit_up/decimals）、现金不足（insufficient_cash，带 cash_after）、新建持仓缺 meta（need_meta）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/calendar": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "operationId": "market_calendar",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "description": "起始日期 YYYY-MM-DD（缺省 = 默认窗口今天 ±180 天，走适配层 1h 缓存）",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "结束日期 YYYY-MM-DD",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "交易日历透传（升序 ISO 日期，含未来交易日）。默认窗口走适配层缓存（1h）；显式区间直连 sidecar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarPayload"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "sidecar 上游错误契约透传，或契约漂移",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "sidecar 不可达（降级信号）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/cb_list": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "operationId": "market_cb_list",
+        "responses": {
+          "200": {
+            "description": "转债列表（现券 + 集思录强赎字段）透传；强赎源整体降级时 redeem 键全 null、redeem_source=null（降级不断供）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CbListPayload"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "sidecar 上游错误契约透传，或契约漂移",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "sidecar 不可达（降级信号）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/kline/{symbol}": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "operationId": "market_kline",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "description": "标的 symbol（带 sh/sz 前缀，如 sh600519；B7：前缀由显式 mkt 字段拼装，不做号段猜测）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "bar 类型（当前仅日线；缺省由 sidecar 内部路由并标注 kind_routed）",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "description": "起始日期 YYYY-MM-DD（缺省用 sidecar 默认窗口）",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "description": "结束日期 YYYY-MM-DD",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "with_today",
+            "in": "query",
+            "description": "true = 用实时行情合成当日 bar（04 附录 B；盘中该 bar 随行就市，非定稿）",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "日线透传；with_today=true 且满足合成条件（实时行 date==今天、status=ok、price>0、日线尾部<今天）时追加当日 bar 并置 today_synthesized=true。实时拉取失败不影响日线供给（today_synthesized=false）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KlineResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "sidecar 上游错误契约透传，或契约漂移",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "sidecar 不可达（降级信号）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/quote": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "operationId": "market_quote",
+        "parameters": [
+          {
+            "name": "codes",
+            "in": "query",
+            "description": "逗号分隔的标的列表（带 sh/sz 前缀，如 sh600519,sz128136）。业务必填：\n缺失或全空 → 400 bad_params（本地拒绝，不打 sidecar）",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "实时行情透传（类型化契约）：degraded/attempts 降级可观测，行级 status 四态（ok/halted_or_delisted/empty_or_delisted/no_data）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotePayload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "codes 缺失或为空（bad_params，本地拒绝）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "sidecar 上游错误契约透传，或响应反序列化失败（market_contract，版本漂移要修代码）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "sidecar 不可达（market_unavailable，降级信号）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/refresh": {
+      "post": {
+        "tags": [
+          "market"
+        ],
+        "summary": "拉全部持仓实时行情 → 回写 `holdings.price/prev/name/limit_pct` →\n`store.portfolio()` 全量重算（派生与汇总只出自 `zimu-domain::recalc`，03 §5）。\nsidecar 不可达 → 503（不写库、不动旧数字）；个别标的无行情 → skipped 留原因，\n该行保持库存陈旧值（降级不断供）。",
+        "operationId": "market_refresh",
+        "responses": {
+          "200": {
+            "description": "行情回写 + recalc() 全量重算。仅 status=ok 且 price>0 的行回写；limit_pct 仅在数据层未配置时推断（ETF 不推断，不覆盖已配置值）；无行情标的进 skipped 保持旧值",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "sidecar 上游错误契约透传，或契约漂移",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "sidecar 不可达：拒绝刷新、不写库（market_unavailable）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/market/status": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "市场时钟 + sidecar 健康 + 日历可用性。永不失败：sidecar 全挂也返回 200，\n时钟退工作日启发式（`calendar_degraded: true`，03 §9 降级条款）。",
+        "operationId": "market_status",
+        "responses": {
+          "200": {
+            "description": "市场时钟 + sidecar 在线状态 + 日历可用性。永不失败：sidecar 全挂也 200，时钟退工作日启发式并标注 calendar_degraded（前端秒级轮询端点，探测有界 2s）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "`GET /api/openapi.json` —— 运行时提供本契约（与仓库内 docs/api/openapi.json\n同源同内容；前端离线生成类型读仓库文件，在线工具读这里）。",
+        "operationId": "openapi_doc",
+        "responses": {
+          "200": {
+            "description": "本契约文档（OpenAPI 3.1，由代码生成）",
+            "content": {
+              "application/json": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/trades": {
+      "get": {
+        "tags": [
+          "holdings"
+        ],
+        "operationId": "get_trades",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "行数上限：1–500，缺省 50（防御性截断，避免一次拉爆响应体）",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "委托/成交流水，最新在前（费用三分项留档可审计）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TradeRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountPatch": {
+        "type": "object",
+        "description": "首次配置/调整账户（onboarding 只带现金；缺失字段保持原值）。",
+        "properties": {
+          "broker": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cash": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "可用现金（负数拒绝 400——现金下限是业务事实，不是 UI 校验）"
+          },
+          "init": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "style": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AccountRow": {
+        "type": "object",
+        "required": [
+          "name",
+          "init",
+          "style",
+          "broker",
+          "cash"
+        ],
+        "properties": {
+          "broker": {
+            "type": "string"
+          },
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "init": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "style": {
+            "type": "string"
+          }
+        }
+      },
+      "Agg": {
+        "type": "object",
+        "required": [
+          "cash",
+          "mv_stocks",
+          "mv_etf",
+          "mv_cb",
+          "total_mv",
+          "total_assets",
+          "day_pnl",
+          "day_pnl_pct",
+          "total_pnl",
+          "cost_total",
+          "total_pnl_pct",
+          "exposure",
+          "sectors",
+          "hhi",
+          "top3_sector"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "cost_total": {
+            "type": "number",
+            "format": "double"
+          },
+          "day_pnl": {
+            "type": "number",
+            "format": "double"
+          },
+          "day_pnl_pct": {
+            "type": "number",
+            "format": "double",
+            "description": "分母 = 昨日总资产（total_assets − day_pnl），别改成今日（03 §5 注）"
+          },
+          "exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "hhi": {
+            "type": "number",
+            "format": "double",
+            "description": "Σw² / 10000，归一 0–1"
+          },
+          "mv_cb": {
+            "type": "number",
+            "format": "double"
+          },
+          "mv_etf": {
+            "type": "number",
+            "format": "double"
+          },
+          "mv_stocks": {
+            "type": "number",
+            "format": "double"
+          },
+          "sectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SectorAgg"
+            },
+            "description": "按市值降序（排序是黄金向量期望的一部分）"
+          },
+          "top3_sector": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_assets": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_mv": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_pnl": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_pnl_pct": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "description": "统一错误体：`error` 机器可读码、`message` 中文可直接展示。\n特定拒绝带附加数值字段（前端就地高亮用，其余场景不出现）：\n涨跌停越界 `limit_down/limit_up/decimals`（显示与拦截同一对限价，03 §2）、\n现金不足 `cash_after`。",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "cash_after": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "decimals": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "error": {
+            "type": "string",
+            "description": "错误码：bad_input / no_holding / need_meta / out_of_limit_range /\ninsufficient_cash / store_error / bad_params / market_unavailable /\nmarket_contract，或 sidecar 上游错误契约的原样透传（如\nUPSTREAM_ALL_FAILED / BAD_SYMBOL）"
+          },
+          "limit_down": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "limit_up": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "message": {
+            "type": "string",
+            "description": "中文说明，可直接展示给用户"
+          }
+        }
+      },
+      "Attempt": {
+        "type": "object",
+        "description": "降级明细：逐源原因（disabled/熔断/异常），04 附录 B「降级可观测」。",
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "CalendarPayload": {
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "count",
+          "trade_dates",
+          "degraded"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "end": {
+            "type": "string"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start": {
+            "type": "string"
+          },
+          "trade_dates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "升序 ISO 日期（YYYY-MM-DD），含未来交易日（时钟「下一交易日」依赖）"
+          }
+        }
+      },
+      "CalendarStatus": {
+        "type": "object",
+        "description": "交易日历可用性（时钟的判据来源）",
+        "required": [
+          "available",
+          "upstream_degraded"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "false = 日历不可用，时钟退工作日启发式（配 clock.calendar_degraded 判读）"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "窗口内交易日数量；不可用时 null",
+            "minimum": 0
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "日历源名（sina_calendar / baostock_calendar）；不可用时 null"
+          },
+          "upstream_degraded": {
+            "type": "boolean",
+            "description": "sidecar 日历自身降级（备源顶上）——如实透传"
+          }
+        }
+      },
+      "CbItem": {
+        "type": "object",
+        "description": "转债列表现券行 + 集思录强赎字段（redeem 源失败时 13 个 redeem 键全 null，\n`redeem_source` 为 null——降级不断供，P4-T3 契约）。",
+        "required": [
+          "symbol",
+          "code",
+          "mkt",
+          "kind",
+          "status"
+        ],
+        "properties": {
+          "amount": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "chg_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "code": {
+            "type": "string"
+          },
+          "convert_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "high": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "last_trade_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "low": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "maturity_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mkt": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "open": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "prev": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "现券行的昨基准是**结算价**（settlement）"
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "redeem_hint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redeem_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "redeem_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "本行 redeem 字段来自哪个源；null = 强赎源整体降级"
+          },
+          "redeem_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scale": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "scale_left": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "spot_source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuoteStatus"
+          },
+          "stock_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stock_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stock_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "ticktime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trigger_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "trigger_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "volume": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "CbListPayload": {
+        "type": "object",
+        "required": [
+          "as_of",
+          "count",
+          "degraded",
+          "items"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CbItem"
+            }
+          },
+          "redeem_source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spot_source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "description": "`POST /api/chat` 请求体（实现在 bin）",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "用户消息（非空；回复经 SSE 流出）"
+          }
+        }
+      },
+      "ConfirmRequest": {
+        "type": "object",
+        "description": "`POST /api/chat/confirm` 请求体（实现在 bin）",
+        "required": [
+          "tool_call_id",
+          "approved"
+        ],
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "tool_call_id": {
+            "type": "string"
+          }
+        }
+      },
+      "FeeBreakdown": {
+        "type": "object",
+        "required": [
+          "amount",
+          "commission",
+          "stamp_tax",
+          "transfer_fee",
+          "total"
+        ],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "format": "double"
+          },
+          "commission": {
+            "type": "number",
+            "format": "double"
+          },
+          "stamp_tax": {
+            "type": "number",
+            "format": "double"
+          },
+          "total": {
+            "type": "number",
+            "format": "double"
+          },
+          "transfer_fee": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "description": "`GET /api/health` 响应。实现在 bin（`main.rs`）；类型定义在这里进契约，\nbin 侧单测断言两边键集一致。",
+        "required": [
+          "ok",
+          "service",
+          "version",
+          "static_dir",
+          "static_ready",
+          "agent_online",
+          "market_url"
+        ],
+        "properties": {
+          "agent_online": {
+            "type": "boolean",
+            "description": "Agent 是否在线（false = 缺 robit 配置或启动失败，/api/chat* 降级 503）"
+          },
+          "market_url": {
+            "type": "string",
+            "description": "行情 sidecar 基地址（是否在线由 /api/market/status 探测，health 不打网络）"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "service": {
+            "type": "string",
+            "description": "恒 \"zimu-server\""
+          },
+          "static_dir": {
+            "type": "string",
+            "description": "静态目录（解析后的绝对路径）"
+          },
+          "static_ready": {
+            "type": "boolean",
+            "description": "frontend/dist/index.html 是否存在（false = 前端还没构建，仅 /api/* 可用）"
+          },
+          "version": {
+            "type": "string",
+            "description": "crate 版本"
+          }
+        }
+      },
+      "HoldingRow": {
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "mkt",
+          "kind",
+          "sector",
+          "shares",
+          "cost",
+          "updated_at"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "cost": {
+            "type": "number",
+            "format": "double"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "limit_pct": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "mkt": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prev": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "sector": {
+            "type": "string"
+          },
+          "shares": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "Kind": {
+        "type": "string",
+        "description": "标的类型（03 §1）",
+        "enum": [
+          "stock",
+          "etf",
+          "cb"
+        ]
+      },
+      "KlineBar": {
+        "type": "object",
+        "description": "日线 bar（新浪系 amount 可缺省；单位：股票/ETF 股/份，转债 张）。",
+        "required": [
+          "date"
+        ],
+        "properties": {
+          "amount": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "close": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "date": {
+            "type": "string"
+          },
+          "high": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "low": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "open": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "volume": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "KlinePayload": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "kind",
+          "kind_routed",
+          "adjusted",
+          "start",
+          "end",
+          "count",
+          "degraded",
+          "kline"
+        ],
+        "properties": {
+          "adjusted": {
+            "type": "string",
+            "description": "qfq | none"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "end": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "kind_routed": {
+            "type": "string",
+            "description": "explicit | inferred（缺省 kind 时 sidecar 内部号段路由的标注）"
+          },
+          "kline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KlineBar"
+            }
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "KlineResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/KlinePayload"
+          },
+          {
+            "type": "object",
+            "required": [
+              "today_synthesized"
+            ],
+            "properties": {
+              "today_synthesized": {
+                "type": "boolean",
+                "description": "本次响应的日线尾部是否合成了当日 bar（with_today 且满足全部合成条件）"
+              }
+            }
+          }
+        ],
+        "description": "kline 响应：sidecar 日线负载 + 服务端当日 bar 合成标注（04 附录 B）。\nflatten 后 wire 形状 = KlinePayload 全部键 + `today_synthesized`。"
+      },
+      "MarketClock": {
+        "type": "object",
+        "required": [
+          "state",
+          "state_text",
+          "dot",
+          "live",
+          "date",
+          "time",
+          "next_event",
+          "calendar_degraded",
+          "calendar_upstream_degraded"
+        ],
+        "properties": {
+          "calendar_degraded": {
+            "type": "boolean",
+            "description": "true = 日历不可用，交易日判定退化为工作日启发式（03 §9 降级条款）"
+          },
+          "calendar_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "日历源名（sina_calendar / baostock_calendar）；不可用时 null"
+          },
+          "calendar_upstream_degraded": {
+            "type": "boolean",
+            "description": "sidecar 日历自身降级（备源顶上）——如实透传"
+          },
+          "date": {
+            "type": "string",
+            "description": "上海当前时刻"
+          },
+          "dot": {
+            "type": "string",
+            "description": "原型圆点语义：live / lunch / closed"
+          },
+          "live": {
+            "type": "boolean",
+            "description": "是否处于「行情会动」的时段（原型 tickPrices 的闸门语义）"
+          },
+          "next_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "下一事件的上海时刻（ISO8601 +08:00）；跨日事件 = 下一交易日 09:15"
+          },
+          "next_event": {
+            "type": "string",
+            "description": "下一事件（机器可读）：auction / open / lunch / pm_open / close"
+          },
+          "next_trade_day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "下一交易日（YYYY-MM-DD）：休市/盘后定价/已收盘必给；日历缺失时给\n启发式猜测值（配 calendar_degraded 判读）"
+          },
+          "state": {
+            "type": "string",
+            "description": "机器可读状态：pre_open / auction / am / lunch / pm / after_hours /\nclosed / non_trading_day"
+          },
+          "state_text": {
+            "type": "string",
+            "description": "中文状态（与原型 marketClock 同款文案，前端展示唯一来源）"
+          },
+          "time": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketStatusResponse": {
+        "type": "object",
+        "required": [
+          "sidecar",
+          "clock",
+          "calendar"
+        ],
+        "properties": {
+          "calendar": {
+            "$ref": "#/components/schemas/CalendarStatus"
+          },
+          "clock": {
+            "$ref": "#/components/schemas/MarketClock",
+            "description": "市场时钟（03 §9 生产口径；API 只给事实，倒计时文案由前端走针）"
+          },
+          "sidecar": {
+            "$ref": "#/components/schemas/SidecarStatus"
+          }
+        }
+      },
+      "NewHoldingMeta": {
+        "type": "object",
+        "description": "新建持仓所需的标的元信息（卖出与已有标的买入不需要）。\n真实流程里这些来自行情搜索/行情源（P4-T4），P4-T1 由请求方携带。",
+        "required": [
+          "name",
+          "mkt",
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "limit_pct": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "mkt": {
+            "type": "string",
+            "description": "'SH' | 'SZ'"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prev": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "昨收与涨跌停比例：缺省 = 无行情，跳过区间拦截（03 §2）"
+          },
+          "sector": {
+            "type": "string"
+          }
+        }
+      },
+      "PerHolding": {
+        "type": "object",
+        "required": [
+          "code",
+          "day_chg",
+          "day_val",
+          "mv",
+          "pnl",
+          "pnl_pct",
+          "weight"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "day_chg": {
+            "type": "number",
+            "format": "double",
+            "description": "(price − prev) / prev × 100"
+          },
+          "day_val": {
+            "type": "number",
+            "format": "double",
+            "description": "(price − prev) × shares"
+          },
+          "mv": {
+            "type": "number",
+            "format": "double"
+          },
+          "pnl": {
+            "type": "number",
+            "format": "double",
+            "description": "(price − cost) × shares"
+          },
+          "pnl_pct": {
+            "type": "number",
+            "format": "double",
+            "description": "(price − cost) / cost × 100"
+          },
+          "weight": {
+            "type": "number",
+            "format": "double",
+            "description": "mv / total_assets × 100（含现金分母，03 §6 口径）"
+          }
+        }
+      },
+      "PortfolioView": {
+        "type": "object",
+        "required": [
+          "account",
+          "holdings",
+          "per",
+          "agg"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountRow"
+          },
+          "agg": {
+            "$ref": "#/components/schemas/Agg"
+          },
+          "holdings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldingRow"
+            }
+          },
+          "per": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PerHolding"
+            },
+            "description": "与 holdings 同序对齐（recalc 输出按输入序）"
+          }
+        }
+      },
+      "QuotePayload": {
+        "type": "object",
+        "required": [
+          "as_of",
+          "count",
+          "degraded",
+          "quotes"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "degraded": {
+            "type": "boolean"
+          },
+          "quotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteRow"
+            }
+          }
+        }
+      },
+      "QuoteRow": {
+        "type": "object",
+        "description": "统一实时行（/quote `quotes[]`；所有通道同键，04 附录 B）。",
+        "required": [
+          "symbol",
+          "code",
+          "mkt",
+          "kind",
+          "status"
+        ],
+        "properties": {
+          "amount": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "chg_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "code": {
+            "type": "string"
+          },
+          "date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "行情时点随行显式（上海本地日期 YYYY-MM-DD）——当日 bar 合成的判据"
+          },
+          "high": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "low": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "mkt": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "open": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "prev": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuoteStatus"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "time": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "volume": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "QuoteStatus": {
+        "type": "string",
+        "description": "实时行状态（P4-T3 四态）。未知值不 panic，归 `Unknown`（前向兼容）。",
+        "enum": [
+          "ok",
+          "halted_or_delisted",
+          "empty_or_delisted",
+          "no_data",
+          "unknown"
+        ]
+      },
+      "RecordReceipt": {
+        "type": "object",
+        "required": [
+          "trade",
+          "removed",
+          "preview"
+        ],
+        "properties": {
+          "holding_after": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HoldingRow",
+                "description": "清仓后为 null（持仓行已移除）"
+              }
+            ]
+          },
+          "preview": {
+            "$ref": "#/components/schemas/SimPreview"
+          },
+          "removed": {
+            "type": "boolean",
+            "description": "本笔卖出是否导致清仓移除持仓行"
+          },
+          "trade": {
+            "$ref": "#/components/schemas/TradeRow"
+          }
+        }
+      },
+      "RefreshResponse": {
+        "type": "object",
+        "required": [
+          "updated",
+          "skipped",
+          "degraded",
+          "attempts",
+          "portfolio"
+        ],
+        "properties": {
+          "as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "行情时点（sidecar as_of 透传）；空持仓未打 sidecar 时为 null"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            },
+            "description": "逐源尝试明细（透传，降级可观测）"
+          },
+          "degraded": {
+            "type": "boolean",
+            "description": "sidecar 兜底链降级标注（透传）"
+          },
+          "portfolio": {
+            "$ref": "#/components/schemas/PortfolioView",
+            "description": "回写后 `recalc()` 全量重算的组合全景（03 §5；数字与 /api/holdings 同源）"
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkippedRow"
+            },
+            "description": "未回写标的明细（保持库存旧值）"
+          },
+          "updated": {
+            "type": "integer",
+            "description": "实际回写的持仓行数",
+            "minimum": 0
+          }
+        }
+      },
+      "SectorAgg": {
+        "type": "object",
+        "required": [
+          "name",
+          "v",
+          "w"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "v": {
+            "type": "number",
+            "format": "double",
+            "description": "行业市值"
+          },
+          "w": {
+            "type": "number",
+            "format": "double",
+            "description": "占 total_mv（不含现金分母）"
+          }
+        }
+      },
+      "Side": {
+        "type": "string",
+        "description": "交易方向",
+        "enum": [
+          "buy",
+          "sell"
+        ]
+      },
+      "SidecarStatus": {
+        "type": "object",
+        "description": "sidecar 在线状态（status 端点的探测结果；`SidecarHealth` 的原始运维字段不透出）",
+        "required": [
+          "url",
+          "online"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "探测失败原因如实透出（运维排查）；online=true 时为 null"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string",
+            "description": "sidecar 基地址（ZIMU_MARKET_URL）"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "sidecar 版本（在线且上报时）"
+          }
+        }
+      },
+      "SimPreview": {
+        "type": "object",
+        "description": "试算预览（抽屉「预估」区的数据源；与原型 `holdings.html` calc() 同构）",
+        "required": [
+          "fee_detail",
+          "outcome",
+          "warnings"
+        ],
+        "properties": {
+          "fee_detail": {
+            "$ref": "#/components/schemas/FeeBreakdown"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/TradeOutcome"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "非拦截性提示：如「单票将超过 25% 上限」（原型只在预览提示，不拦提交）"
+          }
+        }
+      },
+      "SkippedRow": {
+        "type": "object",
+        "description": "未回写标的的明细行（降级不断供：对应持仓保持库存旧值）",
+        "required": [
+          "code",
+          "reason"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "原因：拼不出市场前缀（B7）/ 行情行状态异常（停牌、退市、no_data）/ 响应缺行"
+          }
+        }
+      },
+      "TradeOutcome": {
+        "type": "object",
+        "required": [
+          "amount",
+          "fee",
+          "after_shares",
+          "cash_after",
+          "insufficient_cash",
+          "ta_after",
+          "weight_after",
+          "over_limit"
+        ],
+        "properties": {
+          "after_cost": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "清仓（after_shares = 0）时持仓行移除 → null（03 附录约定 3）"
+          },
+          "after_shares": {
+            "type": "number",
+            "format": "double"
+          },
+          "amount": {
+            "type": "number",
+            "format": "double"
+          },
+          "cash_after": {
+            "type": "number",
+            "format": "double"
+          },
+          "fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "insufficient_cash": {
+            "type": "boolean",
+            "description": "cash_after < 0（原型：数字标绿并在提交判定中拦截，不弹错误框）"
+          },
+          "over_limit": {
+            "type": "boolean",
+            "description": "weight_after > 25%（压线含边界，THRESHOLD_EPS 守卫）"
+          },
+          "realized": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "仅卖出且有成本基准时有值"
+          },
+          "realized_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "realized / (cost × qty) × 100"
+          },
+          "ta_after": {
+            "type": "number",
+            "format": "double",
+            "description": "others_mv + after_shares×price + cash_after（分母随本笔交易变化）"
+          },
+          "weight_after": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "TradeRequest": {
+        "type": "object",
+        "required": [
+          "code",
+          "side",
+          "qty",
+          "price"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "meta": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NewHoldingMeta",
+                "description": "首笔建仓必带；标的已存在于 holdings 时可省略"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side"
+          }
+        }
+      },
+      "TradeRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "ts",
+          "code",
+          "name",
+          "kind",
+          "side",
+          "qty",
+          "price",
+          "amount",
+          "fee",
+          "fee_commission",
+          "fee_stamp",
+          "fee_transfer",
+          "cash_delta",
+          "note"
+        ],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "format": "double"
+          },
+          "cash_delta": {
+            "type": "number",
+            "format": "double"
+          },
+          "code": {
+            "type": "string"
+          },
+          "fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "fee_commission": {
+            "type": "number",
+            "format": "double"
+          },
+          "fee_stamp": {
+            "type": "number",
+            "format": "double"
+          },
+          "fee_transfer": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "realized": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side"
+          },
+          "ts": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "健康检查、契约文档与 Agent SSE 会话"
+    },
+    {
+      "name": "holdings",
+      "description": "持仓与录入（P4-T1，ADR-0006 手工逐笔先行；校验与派生全部走 zimu-domain）"
+    },
+    {
+      "name": "market",
+      "description": "行情（P4-T4，经 zimu-market 适配器——sidecar 唯一消费入口；错误三分类见 04 附录 B）"
+    }
+  ]
+}

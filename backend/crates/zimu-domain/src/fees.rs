@@ -2,6 +2,7 @@
 //! 输出保留原始精度不做分位舍入（03 附录约定 5）；界面必须始终带「实际以券商结算为准」。
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::{Kind, Side};
 
@@ -18,7 +19,7 @@ pub struct FeeInput {
     pub price: f64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 pub struct FeeBreakdown {
     pub amount: f64,
     pub commission: f64,

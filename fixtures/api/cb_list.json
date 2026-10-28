@@ -1,0 +1,42 @@
+{
+  "as_of": "2026-10-28T15:40:01+08:00",
+  "attempts": [],
+  "count": 1,
+  "degraded": false,
+  "items": [
+    {
+      "amount": null,
+      "chg_pct": 1.145,
+      "code": "128136",
+      "convert_price": 56.35,
+      "high": null,
+      "kind": "cb",
+      "last_trade_date": "2026-11-20",
+      "low": null,
+      "maturity_date": "2026-12-01",
+      "mkt": "SZ",
+      "name": "立讯转债",
+      "open": null,
+      "prev": 131.0,
+      "price": 132.5,
+      "redeem_hint": "强赎 15/30",
+      "redeem_price": 100.5,
+      "redeem_source": "jsl_cb_redeem",
+      "redeem_status": "已公告强赎",
+      "scale": 30.0,
+      "scale_left": 2.1,
+      "spot_source": "sina-cb-spot",
+      "status": "ok",
+      "stock_code": "002475",
+      "stock_name": "立讯精密",
+      "stock_price": 70.0,
+      "symbol": "sz128136",
+      "ticktime": "2026-10-28 15:00:00",
+      "trigger_pct": 130.0,
+      "trigger_price": 73.26,
+      "volume": null
+    }
+  ],
+  "redeem_source": "jsl_cb_redeem",
+  "spot_source": "sina_cb_spot"
+}

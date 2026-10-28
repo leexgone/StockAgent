@@ -99,7 +99,7 @@
 5. **代码 → 交易所的推断不要靠首字母**：契约里 `mkt` 是显式字段（`holdings` 与 `watchlist` 都带），直接用它。原 `code[0] === '6' ? 'SH' : 'SZ'` 猜测已于 P1-T5 删除（B7，2026-10-28）——该猜测对 `5` 开头的深市 ETF 会判错。
 6. **建议要可留档**：`advice` 现在只有一个当前快照，而 `analysis.html` 的历史建议表格用的是页面内样本。真实实现里建议必须带生成时间与输入数据版本，否则「回看当时怎么说的」这个卖点无法兑现。原型样本已按此对齐字段（P1-T7：每行带 `generatedAt / dataVersion`，演示期恒为 `demo-sample-v0`，卡片显式标注「演示样本 · 非真实留档」）；真实留档归 P4-T2（`advice_history` 表），届时换数据源并删标注。
 7. **禁止跨页补全局**：共享派生只能放在 `data.js`（A1 的教训：`weight` / `totalMvAll()` 曾定义在 `holdings.html` 页内，被 `analysis.html` 调用时直接抛 `TypeError`；已于 2026-10-24 收进契约层）。页面不得给 `ZM` 赋值，也不得定义供其它页面使用的派生函数。
-8. **不要写死演示用的锚定值**：`walk()` 的末值锚定、`equity` 的 90 日长度、`advice` 文案里被正则覆盖的「当前 X%」（`data.js:259`）都属于样本阶段产物。这种正则打补丁方式很脆——接入真实数据后应当由模板插值，而不是对写死的中文句子做正则替换。
+8. **不要写死演示用的锚定值**：`walk()` 的末值锚定、`equity` 的 90 日长度属于样本阶段产物。建议文案里的仓位派生数字已改**模板插值**（B6 已解，2026-10-28 P4-T5）：`{w}` 仓位% / `{pnl}` 浮动盈亏% / `{price}` 现价 / `{drag}` 正股再跌 10% 对总资产的拖累%，init 时经 `fill()` 统一插值、数字只取 `recalc()` 快照（`data.js`）——旧版「正则改写写死的中文句子」只护住两种句式、护不住的句子随行情陈旧，已删除。生产口径同 ADR-0007：模型写文案，文案中数字必须来自工具返回（P4-T6 接线）。
 
 ## 浏览器本地状态
 
@@ -240,3 +240,32 @@ HTTP 调用。要点：
   `zimu-domain::price_limit::limit_pct`，`st=false`——ST 识别依赖行情字段，
   03 §2；ETF 推断为 None → 保持数据层配置不被覆盖）。回写后组合数字一律
   重新过 `zimu-domain::recalc`（服务端 `recalc()` 等价链，03 §5 口径）。
+
+## 附录 C · REST API 机器可读契约（P4-T5，2026-10-28）
+
+正文的 `window.ZM` 契约是**原型数据层边界**；常驻服务 HTTP API 的对应物是
+`docs/api/openapi.json`（OpenAPI 3.1）——**前后端类型同源**链条：
+
+- **生成**：响应/请求 serde 结构体在定义处 `#[derive(ToSchema)]`
+  （zimu-domain / zimu-store / zimu-market / zimu-server 四 crate），
+  `zimu-server/src/openapi.rs` 的 `ApiDoc` 汇编全部 paths 与 schemas。
+  文档**永不手改**；改结构体/标注后再生成：
+  `cargo test -p zimu-server --lib -- --ignored regenerate_openapi_json`。
+- **守护**（验收「样例响应过 schema 校验」）：`cargo test -p zimu-server --test contract`
+  三连——① 仓库文档与代码生成逐字节一致（up-to-date 断言）；② seeded 测试
+  服务**全端点实时响应**过其声明的响应 schema（jsonschema，draft 2020-12，
+  `$ref` 解析自 components.schemas）；③ `fixtures/api/` 的 15 份**提交样例**
+  过同一校验（样例永不腐烂，前端移植可直接当 mock）。样例再生成：
+  `ZIMU_REGEN_API_SAMPLES=1 cargo test -p zimu-server --test contract`。
+- **消费**：运行时 `GET /api/openapi.json`（与仓库文件同内容，契约测试断言
+  相等）；前端 `npm run gen:api`（openapi-typescript）生成
+  `src/api/schema.d.ts`——P5-T1 的 API client 直接消费该类型面，不再手写。
+- **bin 侧端点**（health / chat，依赖 robit 装配与静态目录状态）：契约在
+  `openapi.rs` 以 doc-stub 声明，请求/响应类型（`Health`/`ChatRequest`/
+  `ConfirmRequest`）定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化
+  键集 == schema 键集（doc-stub 不留漂移盲区）。SSE 事件流的 wire schema
+  归 robit-web（`WebEvent`，v0.1.26），本文档只声明端点与降级语义。
+- **错误契约**：全端点统一 `ApiError`（`error` 机器码 + `message` 中文可直接
+  展示；422 拒绝按需带 `limit_down/limit_up/decimals` 或 `cash_after`）。
+  录入的 400/404/422/500 分层与行情的错误三分类（附录 B）在 schema 里
+  逐状态码声明；sidecar 上游错误码（如 `UPSTREAM_ALL_FAILED`）原样透传。

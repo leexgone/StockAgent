@@ -3,7 +3,7 @@
 //! 端点：
 //! - `GET  /api/market/status`              市场时钟 + sidecar 健康 + 日历可用性（03 §9 生产口径）
 //! - `GET  /api/market/quote?codes=`        实时行情透传（类型化契约）
-//! - `GET  /api/market/kline/{symbol}`      日线透传；`with_today=1` 合成当日 bar（04 附录 B）
+//! - `GET  /api/market/kline/{symbol}`      日线透传；`with_today=true` 合成当日 bar（04 附录 B）
 //! - `GET  /api/market/cb_list`             转债列表（现券 + 强赎）透传
 //! - `GET  /api/market/calendar`            交易日历透传（默认窗口走适配层缓存）
 //! - `POST /api/market/refresh`             行情回写持仓 → `zimu-domain::recalc` 全量重算
@@ -15,6 +15,9 @@
 //!   状态码与错误契约——本层不重定义错误语义。
 //! - 本模块只做接线与过滤，**不定义任何数字口径**：limit_pct 推断走
 //!   `zimu-domain::price_limit`，组合派生走 `zimu-domain::recalc`（经 store.portfolio）。
+//!
+//! 契约（P4-T5）：响应全部是类型化结构体（本文件 + zimu-market 模型），
+//! `#[utoipa::path]` 标注即 OpenAPI 文档来源；错误响应统一 `ApiError`。
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,17 +27,19 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use utoipa::{IntoParams, ToSchema};
 use zimu_market::calendar::CalendarCache;
-use zimu_market::clock::{market_clock, now_shanghai};
+use zimu_market::clock::{market_clock, now_shanghai, MarketClock};
 use zimu_market::error::MarketError;
-use zimu_market::models::QuoteStatus;
+use zimu_market::models::{Attempt, CalendarPayload, CbListPayload, KlinePayload, QuotePayload, QuoteStatus};
 use zimu_market::symbols::symbol_of;
 use zimu_market::{synth, MarketApi};
-use zimu_store::{QuoteUpdate, Store};
+use zimu_store::{PortfolioView, QuoteUpdate, Store};
 
 use crate::holdings_api::SharedStore;
+use crate::openapi::ApiError;
 
 pub struct MarketState {
     /// sidecar 唯一消费入口（zimu-market，04 附录 B）
@@ -76,10 +81,10 @@ fn err_response(e: MarketError) -> Response {
     match e {
         MarketError::Unavailable(m) => (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "error": "market_unavailable",
-                "message": format!("行情 sidecar 不可达，行情服务降级中：{m}"),
-            })),
+            Json(ApiError::new(
+                "market_unavailable",
+                format!("行情 sidecar 不可达，行情服务降级中：{m}"),
+            )),
         )
             .into_response(),
         MarketError::Upstream {
@@ -88,14 +93,14 @@ fn err_response(e: MarketError) -> Response {
             message,
         } => (
             StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
-            Json(json!({ "error": code, "message": message })),
+            Json(ApiError::new(code, message)),
         )
             .into_response(),
         MarketError::Contract(m) => {
             tracing::error!("行情契约不符（sidecar 与本程序版本漂移，要修代码）：{m}");
             (
                 StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": "market_contract", "message": m })),
+                Json(ApiError::new("market_contract", m)),
             )
                 .into_response()
         }
@@ -106,7 +111,7 @@ fn store_error(e: impl std::fmt::Display) -> Response {
     tracing::error!("存储层错误：{e}");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": "store_error", "message": "存储层内部错误，已记录日志" })),
+        Json(ApiError::new("store_error", "存储层内部错误，已记录日志")),
     )
         .into_response()
 }
@@ -120,9 +125,51 @@ fn store_error(e: impl std::fmt::Display) -> Response {
 /// 探测必须有界（探测失败按不可达降级，与拒连同语义）。
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// sidecar 在线状态（status 端点的探测结果；`SidecarHealth` 的原始运维字段不透出）
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SidecarStatus {
+    /// sidecar 基地址（ZIMU_MARKET_URL）
+    pub url: String,
+    pub online: bool,
+    /// sidecar 版本（在线且上报时）
+    pub version: Option<String>,
+    /// 探测失败原因如实透出（运维排查）；online=true 时为 null
+    pub error: Option<String>,
+}
+
+/// 交易日历可用性（时钟的判据来源）
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CalendarStatus {
+    /// false = 日历不可用，时钟退工作日启发式（配 clock.calendar_degraded 判读）
+    pub available: bool,
+    /// 日历源名（sina_calendar / baostock_calendar）；不可用时 null
+    pub source: Option<String>,
+    /// sidecar 日历自身降级（备源顶上）——如实透传
+    pub upstream_degraded: bool,
+    /// 窗口内交易日数量；不可用时 null
+    pub count: Option<usize>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MarketStatusResponse {
+    pub sidecar: SidecarStatus,
+    /// 市场时钟（03 §9 生产口径；API 只给事实，倒计时文案由前端走针）
+    pub clock: MarketClock,
+    pub calendar: CalendarStatus,
+}
+
 /// 市场时钟 + sidecar 健康 + 日历可用性。永不失败：sidecar 全挂也返回 200，
 /// 时钟退工作日启发式（`calendar_degraded: true`，03 §9 降级条款）。
-async fn status(State(m): State<SharedMarket>) -> Json<Value> {
+#[utoipa::path(
+    get,
+    path = "/api/market/status",
+    operation_id = "market_status",
+    tag = "market",
+    responses(
+        (status = 200, description = "市场时钟 + sidecar 在线状态 + 日历可用性。永不失败：sidecar 全挂也 200，时钟退工作日启发式并标注 calendar_degraded（前端秒级轮询端点，探测有界 2s）", body = MarketStatusResponse),
+    )
+)]
+pub(crate) async fn status(State(m): State<SharedMarket>) -> Json<MarketStatusResponse> {
     let health = tokio::time::timeout(PROBE_TIMEOUT, m.api.health())
         .await
         .unwrap_or_else(|_| {
@@ -153,36 +200,52 @@ async fn status(State(m): State<SharedMarket>) -> Json<Value> {
             }
         });
     let clock = market_clock(now_shanghai(), &view);
-    Json(json!({
-        "sidecar": {
-            "url": m.api.base_url(),
-            "online": online,
-            "version": version,
-            // 探测失败原因如实透出（运维排查）；online=true 时为 null
-            "error": health.err().map(|e| e.to_string()),
+    Json(MarketStatusResponse {
+        sidecar: SidecarStatus {
+            url: m.api.base_url().to_string(),
+            online,
+            version,
+            error: health.err().map(|e| e.to_string()),
         },
-        "clock": clock,
-        "calendar": {
-            "available": view.trade_dates.is_some(),
-            "source": view.source,
-            "upstream_degraded": view.upstream_degraded,
-            "count": view.trade_dates.as_ref().map(|d| d.len()),
+        clock,
+        calendar: CalendarStatus {
+            available: view.trade_dates.is_some(),
+            source: view.source,
+            upstream_degraded: view.upstream_degraded,
+            count: view.trade_dates.as_ref().map(|d| d.len()),
         },
-    }))
+    })
 }
 
 // ============================================================================
 // GET /api/market/quote · /kline/{symbol} · /cb_list · /calendar —— 契约透传
 // ============================================================================
 
-#[derive(Deserialize)]
-struct QuoteQuery {
-    codes: String,
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct QuoteQuery {
+    /// 逗号分隔的标的列表（带 sh/sz 前缀，如 sh600519,sz128136）。业务必填：
+    /// 缺失或全空 → 400 bad_params（本地拒绝，不打 sidecar）
+    codes: Option<String>,
 }
 
-async fn quote(State(m): State<SharedMarket>, Query(q): Query<QuoteQuery>) -> Response {
+#[utoipa::path(
+    get,
+    path = "/api/market/quote",
+    operation_id = "market_quote",
+    tag = "market",
+    params(QuoteQuery),
+    responses(
+        (status = 200, description = "实时行情透传（类型化契约）：degraded/attempts 降级可观测，行级 status 四态（ok/halted_or_delisted/empty_or_delisted/no_data）", body = QuotePayload),
+        (status = 400, description = "codes 缺失或为空（bad_params，本地拒绝）", body = ApiError),
+        (status = 502, description = "sidecar 上游错误契约透传，或响应反序列化失败（market_contract，版本漂移要修代码）", body = ApiError),
+        (status = 503, description = "sidecar 不可达（market_unavailable，降级信号）", body = ApiError),
+    )
+)]
+pub(crate) async fn quote(State(m): State<SharedMarket>, Query(q): Query<QuoteQuery>) -> Response {
     let symbols: Vec<String> = q
         .codes
+        .unwrap_or_default()
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -190,7 +253,7 @@ async fn quote(State(m): State<SharedMarket>, Query(q): Query<QuoteQuery>) -> Re
     if symbols.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "bad_params", "message": "codes 不能为空" })),
+            Json(ApiError::new("bad_params", "codes 不能为空")),
         )
             .into_response();
     }
@@ -200,16 +263,45 @@ async fn quote(State(m): State<SharedMarket>, Query(q): Query<QuoteQuery>) -> Re
     }
 }
 
-#[derive(Deserialize)]
-struct KlineQuery {
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct KlineQuery {
+    /// bar 类型（当前仅日线；缺省由 sidecar 内部路由并标注 kind_routed）
     kind: Option<String>,
+    /// 起始日期 YYYY-MM-DD（缺省用 sidecar 默认窗口）
     start: Option<String>,
+    /// 结束日期 YYYY-MM-DD
     end: Option<String>,
-    /// 1/true = 用实时行情合成当日 bar（04 附录 B；盘中该 bar 随行就市，非定稿）
+    /// true = 用实时行情合成当日 bar（04 附录 B；盘中该 bar 随行就市，非定稿）
     with_today: Option<bool>,
 }
 
-async fn kline(
+/// kline 响应：sidecar 日线负载 + 服务端当日 bar 合成标注（04 附录 B）。
+/// flatten 后 wire 形状 = KlinePayload 全部键 + `today_synthesized`。
+#[derive(Debug, Serialize, ToSchema)]
+pub struct KlineResponse {
+    #[serde(flatten)]
+    pub payload: KlinePayload,
+    /// 本次响应的日线尾部是否合成了当日 bar（with_today 且满足全部合成条件）
+    pub today_synthesized: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/market/kline/{symbol}",
+    operation_id = "market_kline",
+    tag = "market",
+    params(
+        ("symbol" = String, Path, description = "标的 symbol（带 sh/sz 前缀，如 sh600519；B7：前缀由显式 mkt 字段拼装，不做号段猜测）"),
+        KlineQuery,
+    ),
+    responses(
+        (status = 200, description = "日线透传；with_today=true 且满足合成条件（实时行 date==今天、status=ok、price>0、日线尾部<今天）时追加当日 bar 并置 today_synthesized=true。实时拉取失败不影响日线供给（today_synthesized=false）", body = KlineResponse),
+        (status = 502, description = "sidecar 上游错误契约透传，或契约漂移", body = ApiError),
+        (status = 503, description = "sidecar 不可达（降级信号）", body = ApiError),
+    )
+)]
+pub(crate) async fn kline(
     State(m): State<SharedMarket>,
     Path(symbol): Path<String>,
     Query(q): Query<KlineQuery>,
@@ -239,32 +331,53 @@ async fn kline(
         }
     }
 
-    match serde_json::to_value(&payload) {
-        Ok(mut body) => {
-            if let Some(obj) = body.as_object_mut() {
-                obj.insert("today_synthesized".into(), json!(synthesized));
-            }
-            Json(body).into_response()
-        }
-        Err(e) => err_response(MarketError::Contract(format!("kline 序列化失败：{e}"))),
-    }
+    Json(KlineResponse {
+        payload,
+        today_synthesized: synthesized,
+    })
+    .into_response()
 }
 
-async fn cb_list(State(m): State<SharedMarket>) -> Response {
+#[utoipa::path(
+    get,
+    path = "/api/market/cb_list",
+    operation_id = "market_cb_list",
+    tag = "market",
+    responses(
+        (status = 200, description = "转债列表（现券 + 集思录强赎字段）透传；强赎源整体降级时 redeem 键全 null、redeem_source=null（降级不断供）", body = CbListPayload),
+        (status = 502, description = "sidecar 上游错误契约透传，或契约漂移", body = ApiError),
+        (status = 503, description = "sidecar 不可达（降级信号）", body = ApiError),
+    )
+)]
+pub(crate) async fn cb_list(State(m): State<SharedMarket>) -> Response {
     match m.api.cb_list().await {
         Ok(p) => Json(p).into_response(),
         Err(e) => err_response(e),
     }
 }
 
-#[derive(Deserialize)]
-struct CalendarQuery {
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct CalendarQuery {
+    /// 起始日期 YYYY-MM-DD（缺省 = 默认窗口今天 ±180 天，走适配层 1h 缓存）
     start: Option<String>,
+    /// 结束日期 YYYY-MM-DD
     end: Option<String>,
 }
 
-async fn calendar(State(m): State<SharedMarket>, Query(q): Query<CalendarQuery>) -> Response {
-    // 默认窗口（今天 ±180）走适配层缓存；显式区间直连 sidecar
+#[utoipa::path(
+    get,
+    path = "/api/market/calendar",
+    operation_id = "market_calendar",
+    tag = "market",
+    params(CalendarQuery),
+    responses(
+        (status = 200, description = "交易日历透传（升序 ISO 日期，含未来交易日）。默认窗口走适配层缓存（1h）；显式区间直连 sidecar", body = CalendarPayload),
+        (status = 502, description = "sidecar 上游错误契约透传，或契约漂移", body = ApiError),
+        (status = 503, description = "sidecar 不可达（降级信号）", body = ApiError),
+    )
+)]
+pub(crate) async fn calendar(State(m): State<SharedMarket>, Query(q): Query<CalendarQuery>) -> Response {
     match m
         .calendar
         .get(&*m.api, q.start.as_deref(), q.end.as_deref())
@@ -279,11 +392,47 @@ async fn calendar(State(m): State<SharedMarket>, Query(q): Query<CalendarQuery>)
 // POST /api/market/refresh —— 行情回写 + 服务端 recalc() 链
 // ============================================================================
 
+/// 未回写标的的明细行（降级不断供：对应持仓保持库存旧值）
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SkippedRow {
+    pub code: String,
+    /// 原因：拼不出市场前缀（B7）/ 行情行状态异常（停牌、退市、no_data）/ 响应缺行
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RefreshResponse {
+    /// 行情时点（sidecar as_of 透传）；空持仓未打 sidecar 时为 null
+    pub as_of: Option<String>,
+    /// 实际回写的持仓行数
+    pub updated: usize,
+    /// 未回写标的明细（保持库存旧值）
+    pub skipped: Vec<SkippedRow>,
+    /// sidecar 兜底链降级标注（透传）
+    pub degraded: bool,
+    /// 逐源尝试明细（透传，降级可观测）
+    pub attempts: Vec<Attempt>,
+    /// 回写后 `recalc()` 全量重算的组合全景（03 §5；数字与 /api/holdings 同源）
+    pub portfolio: PortfolioView,
+}
+
 /// 拉全部持仓实时行情 → 回写 `holdings.price/prev/name/limit_pct` →
 /// `store.portfolio()` 全量重算（派生与汇总只出自 `zimu-domain::recalc`，03 §5）。
 /// sidecar 不可达 → 503（不写库、不动旧数字）；个别标的无行情 → skipped 留原因，
 /// 该行保持库存陈旧值（降级不断供）。
-async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Response {
+#[utoipa::path(
+    post,
+    path = "/api/market/refresh",
+    operation_id = "market_refresh",
+    tag = "market",
+    responses(
+        (status = 200, description = "行情回写 + recalc() 全量重算。仅 status=ok 且 price>0 的行回写；limit_pct 仅在数据层未配置时推断（ETF 不推断，不覆盖已配置值）；无行情标的进 skipped 保持旧值", body = RefreshResponse),
+        (status = 502, description = "sidecar 上游错误契约透传，或契约漂移", body = ApiError),
+        (status = 503, description = "sidecar 不可达：拒绝刷新、不写库（market_unavailable）", body = ApiError),
+        (status = 500, description = "存储层内部错误", body = ApiError),
+    )
+)]
+pub(crate) async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Response {
     let holdings = match lock(&store).holdings() {
         Ok(h) => h,
         Err(e) => return store_error(e),
@@ -291,7 +440,7 @@ async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Respo
 
     // symbol 拼装（B7：显式 mkt 字段，拼不出前缀即拒绝，不发出去挨 400）
     let mut symbols: Vec<String> = Vec::new();
-    let mut skipped: Vec<Value> = Vec::new();
+    let mut skipped: Vec<SkippedRow> = Vec::new();
     let mut pairs: Vec<(String, usize)> = Vec::new();
     for (i, h) in holdings.iter().enumerate() {
         match symbol_of(&h.mkt, &h.code) {
@@ -301,10 +450,10 @@ async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Respo
                 }
                 pairs.push((s, i));
             }
-            None => skipped.push(json!({
-                "code": h.code,
-                "reason": format!("mkt={} 拼不出市场前缀（B7：仅 SH/SZ）", h.mkt),
-            })),
+            None => skipped.push(SkippedRow {
+                code: h.code.clone(),
+                reason: format!("mkt={} 拼不出市场前缀（B7：仅 SH/SZ）", h.mkt),
+            }),
         }
     }
 
@@ -314,10 +463,14 @@ async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Respo
             Ok(v) => v,
             Err(e) => return store_error(e),
         };
-        return Json(json!({
-            "as_of": null, "updated": 0, "skipped": skipped,
-            "degraded": false, "attempts": [], "portfolio": view,
-        }))
+        return Json(RefreshResponse {
+            as_of: None,
+            updated: 0,
+            skipped,
+            degraded: false,
+            attempts: Vec::new(),
+            portfolio: view,
+        })
         .into_response();
     }
 
@@ -353,15 +506,15 @@ async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Respo
             Some(q) => {
                 let status = serde_json::to_value(q.status)
                     .unwrap_or_else(|_| json!(format!("{:?}", q.status)));
-                skipped.push(json!({
-                    "code": h.code,
-                    "reason": format!("行情行状态 {status}，保持库存旧值"),
-                }));
+                skipped.push(SkippedRow {
+                    code: h.code.clone(),
+                    reason: format!("行情行状态 {status}，保持库存旧值"),
+                });
             }
-            None => skipped.push(json!({
-                "code": h.code,
-                "reason": "行情响应缺该标的行",
-            })),
+            None => skipped.push(SkippedRow {
+                code: h.code.clone(),
+                reason: "行情响应缺该标的行".into(),
+            }),
         }
     }
 
@@ -374,13 +527,13 @@ async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Respo
         Err(e) => return store_error(e),
     };
 
-    Json(json!({
-        "as_of": payload.as_of,
-        "updated": updated,
-        "skipped": skipped,
-        "degraded": payload.degraded,
-        "attempts": payload.attempts,
-        "portfolio": view,
-    }))
+    Json(RefreshResponse {
+        as_of: Some(payload.as_of),
+        updated,
+        skipped,
+        degraded: payload.degraded,
+        attempts: payload.attempts,
+        portfolio: view,
+    })
     .into_response()
 }

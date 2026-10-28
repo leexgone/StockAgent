@@ -6,6 +6,8 @@ edition.workspace = true
 
 [dependencies]
 serde.workspace = true
+# API 契约类型（PerHolding/Agg/FeeBreakdown/TradeOutcome…）在定义处 derive ToSchema（P4-T5）
+utoipa.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

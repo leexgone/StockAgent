@@ -1,0 +1,7 @@
+{
+  "decimals": 2,
+  "error": "out_of_limit_range",
+  "limit_down": 1278.9,
+  "limit_up": 1563.1,
+  "message": "委托价 1600 超出当日涨跌停区间 [1278.9, 1563.1]"
+}

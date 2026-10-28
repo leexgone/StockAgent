@@ -1,0 +1,28 @@
+{
+  "calendar": {
+    "available": true,
+    "count": 1,
+    "source": "sina_calendar",
+    "upstream_degraded": false
+  },
+  "clock": {
+    "calendar_degraded": false,
+    "calendar_source": "sina_calendar",
+    "calendar_upstream_degraded": false,
+    "date": "2026-10-28",
+    "dot": "closed",
+    "live": false,
+    "next_at": "2026-10-29T09:15:00+08:00",
+    "next_event": "auction",
+    "next_trade_day": "2026-10-29",
+    "state": "closed",
+    "state_text": "已收盘",
+    "time": "19:42:35"
+  },
+  "sidecar": {
+    "error": null,
+    "online": true,
+    "url": "fake://sidecar",
+    "version": "0.1.0"
+  }
+}
