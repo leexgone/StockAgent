@@ -4,7 +4,7 @@
 
 use zimu_domain::Kind;
 use zimu_domain::Side;
-use zimu_store::{AccountRow, NewHoldingMeta, RecordError, Store, TradeRequest};
+use zimu_store::{AccountRow, NewAdvice, NewHoldingMeta, RecordError, Store, TradeRequest};
 
 fn meta(code_name: (&str, &str), kind: Kind, prev: Option<f64>, pct: Option<i64>) -> NewHoldingMeta {
     NewHoldingMeta {
@@ -407,4 +407,83 @@ fn apply_quotes_unknown_code_skipped_silently() {
         .unwrap();
     assert_eq!(n, 1);
     assert_eq!(s.holdings().unwrap().len(), 1);
+}
+
+// ============================================================================
+// 建议留档（P4-T6：B9 正式解的写入侧，ADR-0007 数字归规则/文字归模型）
+// ============================================================================
+
+fn new_advice(code: &str, generated_at: &str) -> NewAdvice {
+    NewAdvice {
+        code: code.into(),
+        action: "持有".into(),
+        score: 56.0,
+        conf: 0.5,
+        target_lo: None,
+        target_hi: None,
+        stop: None,
+        position: "当前 10.0% → 维持".into(),
+        dims: serde_json::json!([
+            { "k": "技术面", "s": 50.0, "t": "量能平稳" },
+            { "k": "基本面", "s": 60.0, "t": "未接入基本面数据源，按中性处理" },
+            { "k": "资金面", "s": 60.0, "t": "量能平稳" },
+            { "k": "消息面", "s": 60.0, "t": "未接入消息面数据源，按中性处理" }
+        ]),
+        data_version: "adv-v1|k=none|q=none".into(),
+        generated_at: generated_at.into(),
+    }
+}
+
+#[test]
+fn advice_roundtrip_numbers_then_text() {
+    let s = seed_store(300_000.0);
+    let mut a = new_advice("600519", "2026-10-28 15:05");
+    a.action = "加仓".into();
+    a.score = 73.0;
+    a.conf = 0.9;
+    a.target_lo = Some(120.96);
+    a.target_hi = Some(128.8);
+    a.stop = Some(103.04);
+    a.position = "当前 12.0% → 建议 15%".into();
+    a.data_version = "adv-v1|k=2026-10-28|q=2026-10-28T15:00:03+08:00".into();
+    let id = s.insert_advice(&a).unwrap();
+
+    // 数字先留档：reason 空、risks 空（等模型文案回填）
+    let row = s.advice(id).unwrap().unwrap();
+    assert_eq!(row.reason, "");
+    assert!(row.risks.is_empty());
+    assert_eq!(row.score, 73.0);
+    assert_eq!(row.dims[0]["k"], "技术面");
+    assert_eq!(row.dims.as_array().unwrap().len(), 4);
+
+    // 文案回填只动 reason/risks——数字列不可改写（ADR-0007 的结构性保证）
+    assert!(s
+        .finalize_advice(id, "回踩不破 MA20，量能配合。", &["动量转弱则结论失效".to_string()])
+        .unwrap());
+    let row = s.advice(id).unwrap().unwrap();
+    assert_eq!(row.reason, "回踩不破 MA20，量能配合。");
+    assert_eq!(row.risks, vec!["动量转弱则结论失效".to_string()]);
+    assert_eq!(row.score, 73.0);
+    assert_eq!(row.stop, Some(103.04));
+    assert_eq!(row.generated_at, "2026-10-28 15:05");
+}
+
+#[test]
+fn advice_finalize_missing_id_is_false() {
+    let s = seed_store(1.0);
+    assert!(!s.finalize_advice(999, "x", &["y".to_string()]).unwrap());
+    assert!(s.advice(999).unwrap().is_none());
+}
+
+#[test]
+fn advice_list_orders_new_first_and_filters_code() {
+    let s = seed_store(1.0);
+    let a = s.insert_advice(&new_advice("600519", "2026-10-27 15:05")).unwrap();
+    let b = s.insert_advice(&new_advice("600519", "2026-10-28 15:05")).unwrap();
+    let c = s.insert_advice(&new_advice("510300", "2026-10-28 15:06")).unwrap();
+    let all = s.list_advice(None, 50).unwrap();
+    assert_eq!(all.iter().map(|r| r.id).collect::<Vec<_>>(), vec![c, b, a]);
+    let only = s.list_advice(Some("600519"), 50).unwrap();
+    assert_eq!(only.iter().map(|r| r.id).collect::<Vec<_>>(), vec![b, a]);
+    assert_eq!(s.list_advice(None, 2).unwrap().len(), 2);
 }

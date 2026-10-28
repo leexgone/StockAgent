@@ -12,7 +12,7 @@
 | P1 | 原型定稿（修完 backlog 前两级） | 无，可与 P2/P3 并行 | 🔨 | 3–4 天 |
 | P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | ✅ 2026-10-27 | 2–3 天 |
 | P3 | 口径可执行化（黄金测试向量） | P2 | ✅ 2026-10-28（`price_limit` 尾巴随 P1-T2 消除，8 组 76 用例两边全绿） | 2–3 天 |
-| P4 | 数据管道与存储 | P3 ✅；C5/C8 拍板 ✅（2026-10-28，ADR-0006/0007） | 🔨（T1 后端半边/T2/T3/T4/T5 ✅，余 T1 前端接线随 P5-T2、T6、T7） | 1–1.5 周 |
+| P4 | 数据管道与存储 | P3 ✅；C5/C8 拍板 ✅（2026-10-28，ADR-0006/0007） | 🔨（T1 后端半边/T2/T3/T4/T5/T6 ✅，余 T1 前端接线随 P5-T2、T7 调度预警） | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | ⬜ | 1–1.5 周 |
 | P6 | MVP 垂直切片（连续 5 个交易日真实跑通） | P4+P5；C4 渠道落地 | ⬜ | ≥5 个交易日 |
 
@@ -25,7 +25,7 @@
 | C5 首笔持仓录入方式 | ✅ 已拍板（2026-10-28，ADR-0006：手工逐笔先行） | SQLite schema、导入端点、P1-T1 空态入口 |
 | C8 打分生成方式（规则/模型/混合） | ✅ 已拍板（2026-10-28，ADR-0007：混合——规则打分 + 模型写文案） | Skill 模板与 `score/conf/dims` 的可解释性设计 |
 | C4 微信渠道 | P5 移植 wechat 屏前 | PushProvider 配置界面；渠道适配器本身可延到 P6 |
-| B6 正则改模板插值 | ✅ 已解（2026-10-28，P4-T5：原型改模板插值；生产侧按 ADR-0007 随 P4-T6 接线） | — |
+| B6 正则改模板插值 | ✅ 已解（原型 2026-10-28 P4-T5 模板插值；生产侧 2026-10-29 P4-T6 接线——calc_advice 数字先落库、finalize_advice 只回填文案、Skill 硬规则约束数字来源） | — |
 
 ## P0 · 工程与文档基线 ✅（2026-10-24）
 
@@ -81,7 +81,7 @@
 | P4-T3 | `datafetch` 正式化：`/quote` `/kline` `/cb_list` `/calendar`，akshare→baostock 兜底、限频与缓存、错误契约 | 主源故障时降级不崩 | 1–2d | ✅ 2026-10-28：`zimu_datafetch` 包（源链编排+熔断+限频闸+TTL 缓存+`DfError` 契约）。兜底链按 spike 实测重排（新浪系→baostock→东财直连/akshare 东财），**baostock 复测登录恢复**（spike 的 10002007 为暂时故障）进股票/指数日线与日历链；`ZIMU_DF_DISABLE` 故障注入实现验收——主源挂→备份顶上（`degraded`+`attempts` 如实上报）、全挂→502 JSON 契约且服务无恙。B7 落地：symbol 必须显式 `sh/sz/bj` 前缀，裸代码 400。36 项离线单测 + 18 项联网冒烟全绿（退市样本 110074/127022 三态、活券布局补测、东财 fltt=2 缩放与新浪逐位一致）；见 `datafetch/README.md` 与 `04` 附录「正式契约」 |
 | P4-T4 | Rust 行情适配器（唯一消费入口，sidecar 挂了主程序降级）+ 服务端 `recalc()` 等价实现 + 交易日历/时区口径 | API 数字与 `03` 口径一致 | 1–2d | ✅ 2026-10-28：`zimu-market` crate（类型化契约 + `MarketApi` trait 注入点 + 错误三分类 Unavailable/Upstream/Contract + 市场时钟纯函数 + 日历缓存 + 当日 bar 合成 + B7 前缀拼装）；`/api/market/*` 六端点进 zimu-server（lib target 拆出 `api_router` 供集成测试）；`POST /api/market/refresh` = 行情回写（`apply_quotes` COALESCE，limit_pct 仅未配置时推断）→ `zimu-domain::recalc` 全量重算。口径落档：`03` §9 生产口径定稿（恒 Asia/Shanghai、日历取代工作日启发式、降级如实标注）+ §5 无行情降级定稿（prev 缺失视为 price，**修掉 P4-T1 遗留的 prev=0 伪造当日盈亏 bug**）+ `04` 附录 B 当日 bar 合成与适配器边界。验收：29（market）+ 8（server 集成，API 数字与 domain 逐位等价 + 手算断言）+ 20（store）全绿离线；联网 e2e——真实行情刷新（600519 现价回写、limit_pct→10、per/agg 手算逐位吻合）、ETF 当日 bar 实盘合成（尾部 10-27→合成 10-28）、停 sidecar 后 refresh/quote 503 契约、holdings 200 旧值照常、时钟靠日历缓存不降级 |
 | P4-T5 | `04` 契约 → OpenAPI + serde 结构体（前后端类型同源），顺带解决 B6（模板插值替代正则） | 契约测试：样例响应过 schema 校验 | 1d | ✅ 2026-10-28：类型同源全链落地——契约 serde 结构体在定义处 `#[derive(ToSchema)]`（utoipa 5，domain/store/market/server 四 crate 36 schema），`zimu-server/src/openapi.rs` 汇编 OpenAPI 3.1 → `docs/api/openapi.json`（永不手改：up-to-date 逐字节断言 + `--ignored` 再生成入口）；status/kline/refresh/错误体从 `json!` 拼装改类型化结构体（`MarketStatusResponse`/`KlineResponse` flatten/`RefreshResponse`/`ApiError`）；契约测试 `tests/contract.rs`（jsonschema draft 2020-12）——seeded 服务 16 端点**实时响应**过 schema + `fixtures/api/` 15 份**提交样例**过同一校验（`ZIMU_REGEN_API_SAMPLES=1` 再生成）+ 运行时 `/api/openapi.json` 与仓库文件相等；前端 `npm run gen:api`（openapi-typescript 7）生成 `src/api/schema.d.ts`（build/vitest 全绿），P5-T1 client 直接消费；health/chat 在 bin 以 doc-stub 进契约 + 键集一致单测。B6 原型正式解：建议文案 `{w}/{pnl}/{price}/{drag}` 模板插值（数字只取 recalc 快照），正则改写块删除，沙箱 22 项断言（见 `04` 附录 C、`07` 存档） |
-| P4-T6 | **C8 拍板** + agent 领域工具（get_quote / get_holdings / calc_discipline / simulate_trade）+ Skill 模板（盘后复盘 / 盘前关注 / 建议生成，内嵌 `03` 口径与免责边界）；打分按 ADR-0007 混合方式——规则函数出数、模型写文案 | 复盘输出的每个数字可回溯到 P3 公式 | 2–3d | ⬜ 待开工（C8 已决） |
+| P4-T6 | **C8 拍板** + agent 领域工具（get_quote / get_holdings / calc_discipline / simulate_trade）+ Skill 模板（盘后复盘 / 盘前关注 / 建议生成，内嵌 `03` 口径与免责边界）；打分按 ADR-0007 混合方式——规则函数出数、模型写文案 | 复盘输出的每个数字可回溯到 P3 公式 | 2–3d | ✅ 2026-10-29：`zimu-agent` 公共 crate（P2 期 echo 两处重复收敛）——8 领域工具（market_status / get_quote 含 §2 涨跌停拼装 / get_holdings / calc_discipline 含 §6 sell_to 降仓提示 / simulate_trade 只试算不落库 / refresh_quotes 与 HTTP refresh 同链（`service::refresh_portfolio` 抽取，契约 wire 零变化）/ calc_advice / finalize_advice；**无下单类工具**——只给建议不代下单）+ Skill 模板 ×3（仓库根 `skills/`，robit SKILL.md 约定，/review /复盘 /watch /盘前 /advice /建议 触发，内嵌 03 口径引用、免责与「数字必须原样取自工具返回」硬规则）。打分规则函数 `zimu-domain::advice::score_advice`（03 §10 生产口径定稿：信号票制 + 中性维 60 + 70/55/45 三带 + 纪律拦截优先；TS 共享层镜像），黄金向量 `advice.json` 10 例两边全绿（现 9 组 86 例）。留档：calc_advice 数字列直接写 `advice_history` 返回 advice_id，finalize_advice 只回填 reason/risks——数字不经模型转写（ADR-0007 结构性保证）；data_version=`adv-v1\|k=…\|q=…`（B9 写入侧）。验收：黄金向量 av-bull-add 同款输入端到端过工具链（日线 24 根 + 当日 bar 实时合成 → 打分 → 留档逐位一致），集成测试 10 项全离线绿 |
 | P4-T7 | 调度与预警引擎：盘中分钟级轮询（价格/放量/止盈止损/期限）+ 15:05 复盘触发 | 模拟盘中可触发 | 1d | ⬜ |
 
 **完成标准**：重启后端不丢持仓与留档；行情更新后 API 数字与 `03` 口径一致；换数据源实现不动 API 面。

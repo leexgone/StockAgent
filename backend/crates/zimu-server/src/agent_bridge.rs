@@ -1,4 +1,4 @@
-//! 子木 · robit Agent 装配（P2-T3 起；P2-T5 共同演进演练后桥体已下沉 robit-web）。
+//! 子木 · robit Agent 装配（P2-T3 起；P2-T5 桥体下沉 robit-web；P4-T6 工具面成形）。
 //!
 //! Agent 装配方式与 `zimu-agent-cli` 完全相同（LlmClient / ToolRegistry /
 //! SkillRegistry / Agent::new），差异只在 `Frontend` 实现——CliFrontend 换成
@@ -10,66 +10,28 @@
 //! * 工具确认：`confirm_request` 事件推给前端，`POST /api/chat/confirm` 经
 //!   `WebBridge::resolve_confirm` 回填；responder 被 drop 一律按拒绝处理。
 //!
-//! 原先宿主侧手写的 SseEvent 投影 / SseFrontend / 确认槽位已删除——那正是
-//! docs/07-backlog.md R1 记录的重复劳动，P2-T5 把它通用化进了 robit-web
-//! （改 robit → tag v0.1.26 → 子木 pin 升级，回路首次走通）。
+//! P4-T6 起：领域工具（get_quote / get_holdings / calc_discipline / simulate_trade /
+//! calc_advice / finalize_advice / refresh_quotes / market_status + echo 链路验证）
+//! 与 Skill 模板（仓库根 `skills/`：盘后复盘 / 盘前关注 / 建议生成）都在
+//! `zimu-agent` crate——P2 期「echo 两处重复」的债随公共 crate 兑现清偿。
+//! 工具与 HTTP API 共用同一 store/market 句柄：`refresh_quotes` 工具与
+//! `POST /api/market/refresh` 是同一条链（`zimu_agent::service`）。
 //!
-//! spike 边界：进程级单会话（单 Agent、单确认槽位）；多会话与持久化留给 P4+。
-//! echo 工具与 CLI 里那份重复——spike 期容忍，P4-T6 领域工具成形时抽公共 crate。
+//! 边界：进程级单会话（单 Agent、单确认槽位）；多会话与持久化留给后续。
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use async_trait::async_trait;
-use robit_agent::{
-    resolve_memory_settings, Agent, SkillRegistry, Tool, ToolContext, ToolRegistry, ToolResult,
-};
+use robit_agent::{resolve_memory_settings, Agent, SkillRegistry};
 use robit_ai::{LlmClient, RobitConfig};
 use robit_web::WebBridge;
-use serde_json::{json, Value};
 use tokio::task::JoinHandle;
-
-// ============================================================================
-// echo —— 与 zimu-agent-cli 相同的最小领域工具（P2-T2 验收项，P4-T6 换新）
-// ============================================================================
-
-struct EchoTool;
-
-#[async_trait]
-impl Tool for EchoTool {
-    fn name(&self) -> &str {
-        "echo"
-    }
-
-    fn description(&self) -> &str {
-        "原样回显一段文本。这是子木助理的链路验证工具：当用户要求回显、复读某段文字时，必须调用本工具，不要直接回答。"
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "text": { "type": "string", "description": "要回显的文本" }
-            },
-            "required": ["text"]
-        })
-    }
-
-    fn requires_confirmation(&self) -> bool {
-        false
-    }
-
-    async fn execute(
-        &self,
-        args: Value,
-        _ctx: &ToolContext,
-    ) -> robit_agent::error::Result<ToolResult> {
-        let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-        Ok(ToolResult::success(format!("[子木 echo] {text}")))
-    }
-}
+use zimu_agent::skills::load_zimu_skills;
+use zimu_agent::tools::build_registry;
+use zimu_agent::{AgentDeps, SharedStore};
+use zimu_market::MarketApi;
 
 // ============================================================================
 // AgentBridge —— main 持有的接线端子（通用桥体在 robit_web::WebBridge）
@@ -82,13 +44,21 @@ pub struct AgentBridge {
     pub profile: String,
     pub model: String,
     pub tools: Vec<String>,
+    /// 已加载的 Skill 名（启动日志/诊断）
+    pub skills: Vec<String>,
     _handle: JoinHandle<()>,
 }
 
 /// 装配并启动 Agent（与 zimu-agent-cli 同一套顺序）。
 /// `config` 被消耗：`Agent::new` 持有 `config.app.context` 的引用，
 /// 必须在任务内构造后一起 move 进去。
-pub fn spawn_agent(working_dir: PathBuf, config: RobitConfig) -> anyhow::Result<AgentBridge> {
+/// store/market 与 HTTP API 是同一份句柄（工具数字与端点数字同源）。
+pub fn spawn_agent(
+    working_dir: PathBuf,
+    config: RobitConfig,
+    store: SharedStore,
+    market: Arc<dyn MarketApi>,
+) -> anyhow::Result<AgentBridge> {
     let client = Arc::new(
         LlmClient::from_config(&config, None)
             .context("创建 LLM 客户端失败：检查 providers / default_model 配置")?,
@@ -109,11 +79,29 @@ pub fn spawn_agent(working_dir: PathBuf, config: RobitConfig) -> anyhow::Result<
         .and_then(|a| a.auto_approve)
         .unwrap_or(false);
 
-    // 最小工具集：只注册 echo，不走 bootstrap()（spike 边界，同 CLI）
-    let mut tools = ToolRegistry::new();
-    tools.register(EchoTool);
-    let tools = Arc::new(tools);
-    let skills = Arc::new(SkillRegistry::new(Vec::new(), &["echo"]));
+    // 领域工具面（zimu-agent 公共 crate；不走 robit bootstrap()——通用工具
+    // read/bash 等一律不注册，子木的工具面就是领域面）
+    let deps = AgentDeps::new(store, market);
+    let registry = build_registry(deps);
+    let mut tool_names: Vec<String> = registry.tool_names().iter().map(|s| s.to_string()).collect();
+    tool_names.sort(); // connected 首帧的 tools 列表顺序稳定（HashMap 遍历序不定）
+    let tools = Arc::new(registry);
+
+    // Skill 模板（仓库根 skills/，ZIMU_SKILLS_DIR 可覆盖）：坏文件逐条上报不致命
+    let (loaded, errors) = load_zimu_skills();
+    for e in &errors {
+        tracing::warn!("Skill 加载失败（跳过该文件）：{e}");
+    }
+    let skill_names: Vec<String> = loaded.iter().map(|s| s.frontmatter.name.clone()).collect();
+    tracing::info!(
+        "领域工具 {} 个：{}；Skill {} 个：{}",
+        tool_names.len(),
+        tool_names.join(", "),
+        skill_names.len(),
+        if skill_names.is_empty() { "（无）".into() } else { skill_names.join(", ") }
+    );
+    let name_refs: Vec<&str> = tool_names.iter().map(|s| s.as_str()).collect();
+    let skills = Arc::new(SkillRegistry::new(loaded, &name_refs));
 
     let memory = resolve_memory_settings(&config, &working_dir)?;
 
@@ -144,7 +132,8 @@ pub fn spawn_agent(working_dir: PathBuf, config: RobitConfig) -> anyhow::Result<
         web,
         profile,
         model,
-        tools: vec!["echo".to_string()],
+        tools: tool_names,
+        skills: skill_names,
         _handle: handle,
     })
 }

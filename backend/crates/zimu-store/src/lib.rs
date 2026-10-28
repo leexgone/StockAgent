@@ -498,14 +498,15 @@ impl Store {
         Ok(rows)
     }
 
-    /// 组合全景：存储行 + `zimu-domain::recalc` 的逐笔派生与汇总（03 §5 口径）。
-    /// price/prev 缺失时按「无行情降级」（03 §5，P4-T4 定稿）：price 以成本顶替，
-    /// prev 视为等于 price → dayChg/dayVal 取 0，**不伪造盈亏**（prev 置 0 会把
-    /// dayVal 算成整笔市值——禁止）。
-    pub fn portfolio(&self) -> Result<PortfolioView> {
+    /// 领域输入组装（唯一来源）：price/prev 缺失时按「无行情降级」（03 §5，
+    /// P4-T4 定稿）——price 以成本顶替，prev 视为等于 price → dayChg/dayVal 取 0，
+    /// **不伪造盈亏**（prev 置 0 会把 dayVal 算成整笔市值——禁止）。
+    /// `recalc` 与 `discipline::check` 等一切领域计算的输入都从这里出（P4-T6 起
+    /// agent 工具直接消费，杜绝第二份降级语义拼装）。
+    pub fn portfolio_input(&self) -> Result<PortfolioInput> {
         let holdings = self.holdings()?;
         let account = self.account()?;
-        let inp = PortfolioInput {
+        Ok(PortfolioInput {
             cash: account.cash,
             holdings: holdings
                 .iter()
@@ -522,7 +523,14 @@ impl Store {
                     }
                 })
                 .collect(),
-        };
+        })
+    }
+
+    /// 组合全景：存储行 + `zimu-domain::recalc` 的逐笔派生与汇总（03 §5 口径）。
+    pub fn portfolio(&self) -> Result<PortfolioView> {
+        let holdings = self.holdings()?;
+        let account = self.account()?;
+        let inp = self.portfolio_input()?;
         let out = recalc(&inp);
         Ok(PortfolioView {
             account,
@@ -913,5 +921,141 @@ impl Store {
                 Err(e)
             }
         }
+    }
+}
+
+// ============================================================================
+// 建议留档（advice_history，P4-T6 起写入——B9 正式解的写入侧）
+// ============================================================================
+
+/// 分析结论留档行。**数字归规则**（`zimu-domain::advice` 产出 → `insert_advice`
+/// 落数字列），**文字归模型**（`finalize_advice` 回填 reason/risks，ADR-0007）——
+/// 数字列一经写入不经过模型转写，留档即可回溯「当时依据什么说的」。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AdviceRow {
+    pub id: i64,
+    pub code: String,
+    /// 结论标签（中文展示态：加仓/买入/持有/减仓/卖出/定投，由工具自 domain 枚举映射）
+    pub action: String,
+    pub score: f64,
+    /// 样本内信号一致性，不是胜率（CLAUDE.md 安全边界）
+    pub conf: f64,
+    pub target_lo: Option<f64>,
+    pub target_hi: Option<f64>,
+    pub stop: Option<f64>,
+    /// 「当前 x% → 建议 y%」（工具侧拼装，03 §10 position 文案）
+    pub position: String,
+    /// 模型结论文案；空串 = 数字已留档、文案未回填
+    pub reason: String,
+    /// 四维拆解 `[{k,s,t}]`（03 §10 固定四维；domain `AdviceDim` 序列化，坏 JSON 读回 `[]`）
+    pub dims: serde_json::Value,
+    /// 风险自陈（03 §10：至少一条——非空校验在工具层，存储层如实存）
+    pub risks: Vec<String>,
+    /// 输入数据版本 `adv-v1|k={日线末bar|none}|q={行情as_of|none}`（B9）
+    pub data_version: String,
+    /// 生成时刻（上海，YYYY-MM-DD HH:MM）
+    pub generated_at: String,
+}
+
+/// 建议留档的数字列（reason/risks 留空，等 `finalize_advice` 回填文案）。
+pub struct NewAdvice {
+    pub code: String,
+    pub action: String,
+    pub score: f64,
+    pub conf: f64,
+    pub target_lo: Option<f64>,
+    pub target_hi: Option<f64>,
+    pub stop: Option<f64>,
+    pub position: String,
+    pub dims: serde_json::Value,
+    pub data_version: String,
+    pub generated_at: String,
+}
+
+fn map_advice_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AdviceRow> {
+    let dims_text: String = r.get(10)?;
+    let risks_text: String = r.get(11)?;
+    Ok(AdviceRow {
+        id: r.get(0)?,
+        code: r.get(1)?,
+        action: r.get(2)?,
+        score: r.get(3)?,
+        conf: r.get(4)?,
+        target_lo: r.get(5)?,
+        target_hi: r.get(6)?,
+        stop: r.get(7)?,
+        position: r.get(8)?,
+        reason: r.get(9)?,
+        dims: serde_json::from_str(&dims_text).unwrap_or_else(|_| serde_json::json!([])),
+        risks: serde_json::from_str(&risks_text).unwrap_or_default(),
+        data_version: r.get(12)?,
+        generated_at: r.get(13)?,
+    })
+}
+
+const ADVICE_COLS: &str = "id, code, action, score, conf, target_lo, target_hi, stop,
+     position, reason, dims, risks, data_version, generated_at";
+
+impl Store {
+    /// 建议数字列入档，返回行 id（B9：每条建议带生成时间与数据版本）。
+    pub fn insert_advice(&self, a: &NewAdvice) -> Result<i64> {
+        let dims_text = serde_json::to_string(&a.dims).context("dims 序列化失败")?;
+        self.conn.execute(
+            "INSERT INTO advice_history
+               (code, action, score, conf, target_lo, target_hi, stop,
+                position, reason, dims, risks, data_version, generated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'',?9,'[]',?10,?11)",
+            params![
+                a.code,
+                a.action,
+                a.score,
+                a.conf,
+                a.target_lo,
+                a.target_hi,
+                a.stop,
+                a.position,
+                dims_text,
+                a.data_version,
+                a.generated_at
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// 模型文案回填（文字归模型：只动 reason/risks，数字列不可改写——ADR-0007
+    /// 的结构性保证）。返回 `false` = id 不存在。允许重复回填（末次为准）。
+    pub fn finalize_advice(&self, id: i64, reason: &str, risks: &[String]) -> Result<bool> {
+        let risks_text = serde_json::to_string(risks).context("risks 序列化失败")?;
+        let n = self.conn.execute(
+            "UPDATE advice_history SET reason=?1, risks=?2 WHERE id=?3",
+            params![reason, risks_text, id],
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn advice(&self, id: i64) -> Result<Option<AdviceRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {ADVICE_COLS} FROM advice_history WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query_map(params![id], map_advice_row)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    /// 按生成时间倒序（新在前）列出留档；`code` 为 None 时全量。
+    pub fn list_advice(&self, code: Option<&str>, limit: i64) -> Result<Vec<AdviceRow>> {
+        let sql = if code.is_some() {
+            format!("SELECT {ADVICE_COLS} FROM advice_history WHERE code = ?1 ORDER BY generated_at DESC, id DESC LIMIT ?2")
+        } else {
+            format!("SELECT {ADVICE_COLS} FROM advice_history ORDER BY generated_at DESC, id DESC LIMIT ?1")
+        };
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = match code {
+            Some(c) => stmt.query_map(params![c, limit], map_advice_row)?,
+            None => stmt.query_map(params![limit], map_advice_row)?,
+        };
+        rows.collect::<Result<Vec<_>, _>>().context("读取建议留档失败")
     }
 }

@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
-use zimu_domain::{dilution, discipline, fees, lot, perf, price_limit, recalc, vol_synth};
+use zimu_domain::{advice, dilution, discipline, fees, lot, perf, price_limit, recalc, vol_synth};
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -69,6 +69,9 @@ fn compute(group: &str, case: &Value) -> Value {
         }),
         ("price_limit", "validate_price") => call(input, |i: price_limit::ValidatePriceInput| {
             price_limit::validate_price(i.price, i.limit_up, i.limit_down)
+        }),
+        ("advice", "score_advice") => call(input, |i: advice::AdviceInput| {
+            advice::score_advice(&i)
         }),
         (g, f) => panic!("未知 组/函数：{g}/{f}"),
     }

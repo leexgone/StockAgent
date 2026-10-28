@@ -1,76 +1,38 @@
-//! 子木 · zimu-agent-cli —— P2-T2 robit 集成 spike（见 docs/06-roadmap.md）。
+//! 子木 · zimu-agent-cli —— Agent 调试 REPL（P2-T2 spike 起；P4-T6 换装真实领域工具面）。
 //!
-//! 验证三件事：
-//! 1. crates.io 发布的 robit 核心组件（`robit-ai` / `robit-agent` 0.1.25）可被子木直接消费，
-//!    无需 path override；
-//! 2. 最小 Agent 会话经阿里云网关（DashScope compatible-mode）接通 qwen 模型，可流式对话；
-//! 3. 自定义领域工具（`echo`）能注册进 robit 的 `ToolRegistry` 并被模型正确调用。
+//! 与 zimu-server 的 Agent 完全同装配（`zimu-agent` 公共 crate）：
+//! - 领域工具：market_status / get_quote / get_holdings / calc_discipline /
+//!   simulate_trade / refresh_quotes / calc_advice / finalize_advice + echo（链路验证）；
+//! - Skill 模板：仓库根 `skills/`（盘后复盘 /review /复盘、盘前关注 /watch /盘前、
+//!   建议生成 /advice /建议 <代码>），`ZIMU_SKILLS_DIR` 可覆盖。
 //!
 //! 用法（在 `backend/` 下）：`cargo run -p zimu-agent-cli`
 //!
 //! 配置读取顺序：`<cwd>/.robit/config.toml` → `~/.robit/config.toml`
 //!（api_key 支持 `${ENV_VAR}` 替换，`.env` 自 `~/.robit/.env` 与 `<cwd>/.robit/.env` 加载）。
 //! 会话库与记忆文件写在 `<cwd>/.robit/memory/`，已被仓库 `.gitignore` 覆盖。
-//!
-//! P2-T3 把会话搬进 zimu-server 时，替换的只是 `CliFrontend`（换成 SSE 桥），
-//! Agent / ToolRegistry / LlmClient 的装配方式原样复用；本 REPL 保留为调试入口。
+//! 持仓库与行情 sidecar 与 zimu-server 同款环境变量：`ZIMU_DB_PATH`（默认 <cwd>/zimu.db）、
+//! `ZIMU_MARKET_URL` / `ZIMU_MARKET_TIMEOUT_MS`（sidecar 不在也能起，行情工具如实报错）。
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use async_trait::async_trait;
 use robit_agent::{
-    resolve_memory_settings, Agent, AgentEvent, Frontend, FrontendMessage, SkillRegistry, Tool,
-    ToolCallInfo, ToolContext, ToolRegistry, ToolResult,
+    resolve_memory_settings, Agent, AgentEvent, Frontend, FrontendMessage, SkillRegistry,
+    ToolCallInfo,
 };
 use robit_ai::{init_logging, load_config, LlmClient};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
-
-// ============================================================================
-// echo —— 最小领域工具（P2-T2 验收项）
-// ============================================================================
-
-/// 回显工具：领域工具集的最小样例，验证「子木实现 robit `Tool` trait → 注册 →
-/// 模型 function-calling 调用」这条链路。P4-T6 起换成 get_quote / calc_discipline 等。
-struct EchoTool;
-
-#[async_trait]
-impl Tool for EchoTool {
-    fn name(&self) -> &str {
-        "echo"
-    }
-
-    fn description(&self) -> &str {
-        "原样回显一段文本。这是子木助理的链路验证工具：当用户要求回显、复读某段文字时，必须调用本工具，不要直接回答。"
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "text": { "type": "string", "description": "要回显的文本" }
-            },
-            "required": ["text"]
-        })
-    }
-
-    fn requires_confirmation(&self) -> bool {
-        false
-    }
-
-    async fn execute(
-        &self,
-        args: Value,
-        _ctx: &ToolContext,
-    ) -> robit_agent::error::Result<ToolResult> {
-        let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-        Ok(ToolResult::success(format!("[子木 echo] {text}")))
-    }
-}
+use zimu_agent::skills::load_zimu_skills;
+use zimu_agent::tools::build_registry;
+use zimu_agent::AgentDeps;
+use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
+use zimu_market::MarketApi as _; // base_url() 是 trait 方法
 
 // ============================================================================
 // main —— 装配 Agent 并跑 REPL
@@ -95,28 +57,63 @@ fn main() -> anyhow::Result<()> {
             .context("创建 LLM 客户端失败：检查 providers / default_model 配置")?,
     );
     println!(
-        "子木 Agent（P2-T2 spike）| profile: {} | model: {}",
+        "子木 Agent（调试 REPL）| profile: {} | model: {}",
         client.profile(),
         client.model()
     );
     // 脱敏诊断：确认 ${ENV_VAR} 替换是否生效（401 时区分「替换失败」与「key 失效」）
     println!("api_key: {}", mask_secret(&client.resolved().api_key));
-    println!("已注册工具：echo | 输入消息开始对话，exit 或 /exit 退出\n");
+
+    // 持仓库与行情适配器：与 zimu-server 同款环境变量，工具数字与 HTTP API 同源
+    let db_path = std::env::var("ZIMU_DB_PATH").unwrap_or_else(|_| "zimu.db".into());
+    let store = Arc::new(Mutex::new(
+        zimu_store::Store::open(&db_path).with_context(|| format!("打开持仓数据库失败：{db_path}"))?,
+    ));
+    let market_client = Arc::new(HttpMarketClient::from_env().unwrap_or_else(|e| {
+        println!("[warn] 按环境装配行情适配器失败（{e}），回落默认配置");
+        HttpMarketClient::new(DEFAULT_BASE_URL, DEFAULT_TIMEOUT)
+            .expect("默认配置的行情客户端构建不应失败")
+    }));
+    println!(
+        "持仓库：{db_path} | 行情 sidecar：{}（不在线时行情工具如实报错）",
+        market_client.base_url()
+    );
+
+    // 领域工具面 + Skill 模板（zimu-agent 公共 crate，与 server 同一份装配代码）
+    let deps = AgentDeps::new(store, market_client);
+    let registry = build_registry(deps);
+    let mut tool_names: Vec<String> = registry.tool_names().iter().map(|s| s.to_string()).collect();
+    tool_names.sort();
+    let tools = Arc::new(registry);
+
+    let (loaded_skills, skill_errors) = load_zimu_skills();
+    for e in &skill_errors {
+        println!("[warn] Skill 加载失败（跳过）：{e}");
+    }
+    let skill_names: Vec<String> = loaded_skills
+        .iter()
+        .map(|s| s.frontmatter.name.clone())
+        .collect();
+    let name_refs: Vec<&str> = tool_names.iter().map(|s| s.as_str()).collect();
+    let skills = Arc::new(SkillRegistry::new(loaded_skills, &name_refs));
+
+    println!("已注册工具：{}", tool_names.join(", "));
+    println!(
+        "已加载 Skill：{}\n输入消息开始对话；/复盘 /盘前 /建议 <代码> 触发模板；exit 或 /exit 退出\n",
+        if skill_names.is_empty() {
+            "（无——检查仓库根 skills/ 目录）".to_string()
+        } else {
+            skill_names.join(", ")
+        }
+    );
 
     let context_config = config.app.as_ref().and_then(|a| a.context.as_ref());
     let context_window = client.resolved().context_window;
 
-    // 最小工具集：只注册 echo，不走 bootstrap()（那会装配 read/bash 等通用工具）。
-    // spike 只验证集成链路；领域工具面在 P4-T6 按 Skill 模板扩。
-    let mut tools = ToolRegistry::new();
-    tools.register(EchoTool);
-    let tools = Arc::new(tools);
-    let skills = Arc::new(SkillRegistry::new(Vec::new(), &["echo"]));
-
     // 通道约定（与 robit examples/robit-agent 相同）：
     //   event   Agent → 主任务（stdout 只由主任务写，避免并发打印交错）
     //   message 主任务 → Agent（用户输入）
-    //   confirm Agent → 主任务（工具确认；echo 不需要，但 trait 要求实现）
+    //   confirm Agent → 主任务（工具确认；当前工具面全部免确认，trait 要求实现）
     let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(64);
     let (message_tx, message_rx) = mpsc::channel::<FrontendMessage>(16);
     let (confirm_tx, mut confirm_rx) = mpsc::channel::<(String, oneshot::Sender<bool>)>(4);

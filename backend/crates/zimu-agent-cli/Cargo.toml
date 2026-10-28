@@ -1,14 +1,18 @@
 [package]
 name = "zimu-agent-cli"
-description = "子木 · robit 集成 spike（P2-T2）：最小 Agent REPL，注册 echo 领域工具"
+description = "子木 · Agent 调试 REPL（P2-T2 spike 起；P4-T6 起注册与 zimu-server 相同的领域工具面与 Skill 模板）"
 version.workspace = true
 edition.workspace = true
 publish = false
 
 [dependencies]
+zimu-agent = { path = "../zimu-agent" }
+zimu-store = { path = "../zimu-store" }
+zimu-market = { path = "../zimu-market" }
 robit-ai.workspace = true
 robit-agent.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+tracing.workspace = true

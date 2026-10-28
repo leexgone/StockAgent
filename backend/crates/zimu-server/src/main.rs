@@ -91,12 +91,14 @@ async fn chat_stream(State(state): State<AppState>) -> Result<Response, StatusCo
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     };
     // connected 首帧是宿主元数据（robit-web 不知道子木的 profile/tools 面），
-    // wire 形状沿用 P2-T3 起前端 ChatPanel 消费的约定
+    // wire 形状沿用 P2-T3 起前端 ChatPanel 消费的约定；skills 键为 P4-T6 追加
+    //（前端未消费时忽略，additive 不破坏）
     let hello = json!({
         "type": "connected",
         "profile": agent.profile,
         "model": agent.model,
         "tools": agent.tools,
+        "skills": agent.skills,
     });
     let rx = agent.web.subscribe();
     let stream = tokio_stream::iter(vec![sse_json(&hello)]).chain(BroadcastStream::new(rx).map(
@@ -201,33 +203,23 @@ async fn main() -> anyhow::Result<()> {
     // 日志二选一：robit 的 init_logging 会独占全局 subscriber（宿主无法叠加自己的
     // fmt 层——R 系列痛点，见 docs/07-backlog.md）。有 robit 配置就交给它
     //（附带 <cwd>/.robit/logs 文件日志），没有则回落服务自己的 tracing_subscriber。
-    let agent = match robit_ai::load_config(None) {
-        Ok(config) => {
-            robit_ai::init_logging(
-                config.app.as_ref(),
-                "zimu_server",
-                &working_dir,
-                &["tower_http=debug"],
-            );
-            match spawn_agent(working_dir.clone(), config) {
-                Ok(bridge) => Some(Arc::new(bridge)),
-                Err(e) => {
-                    tracing::error!("Agent 启动失败，/api/chat* 将返回 503：{e:#}");
-                    None
-                }
-            }
-        }
-        Err(e) => {
-            tracing_subscriber::fmt()
-                .with_env_filter(
-                    EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| "info,tower_http=debug".into()),
-                )
-                .init();
-            tracing::warn!("未找到 robit 配置（{e}）：/api/chat* 返回 503，静态托管照常");
-            None
-        }
-    };
+    // 配置加载与 Agent 启动拆开（P4-T6）：store/market 先于 Agent 装配——
+    // 领域工具与 HTTP API 共用同一份句柄，spawn_agent 需要它们。
+    let robit_config = robit_ai::load_config(None);
+    match &robit_config {
+        Ok(config) => robit_ai::init_logging(
+            config.app.as_ref(),
+            "zimu_server",
+            &working_dir,
+            &["tower_http=debug"],
+        ),
+        Err(_) => tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info,tower_http=debug".into()),
+            )
+            .init(),
+    }
 
     let static_dir = resolve_static_dir();
     if !static_dir.join("index.html").exists() {
@@ -251,14 +243,33 @@ async fn main() -> anyhow::Result<()> {
 
     // 行情适配器（P4-T4）：sidecar 唯一消费入口。sidecar 不在也能起服务——
     // 行情端点届时 503 降级（market_unavailable），持仓/会话/静态托管照常。
-    let market_client = HttpMarketClient::from_env().unwrap_or_else(|e| {
+    let market_client = Arc::new(HttpMarketClient::from_env().unwrap_or_else(|e| {
         tracing::warn!("按环境装配行情适配器失败（{e}），回落默认配置");
         HttpMarketClient::new(DEFAULT_BASE_URL, DEFAULT_TIMEOUT)
             .expect("默认配置的行情客户端构建不应失败")
-    });
+    }));
     let market_url = market_client.base_url().to_string();
     tracing::info!("行情适配器就绪：{market_url}（sidecar 不在线时 /api/market/* 降级 503）");
-    let market = market_api::new_market(Arc::new(market_client));
+    let market = market_api::new_market(market_client.clone());
+
+    // Agent（P4-T6：领域工具 + Skill 模板在 zimu-agent crate，装配见 agent_bridge）。
+    // 工具与 HTTP API 拿同一份 store/market 句柄——refresh_quotes 工具与
+    // POST /api/market/refresh 是同一条链，agent 出的数字与端点同源。
+    let agent = match robit_config {
+        Ok(config) => {
+            match spawn_agent(working_dir.clone(), config, store.clone(), market_client) {
+                Ok(bridge) => Some(Arc::new(bridge)),
+                Err(e) => {
+                    tracing::error!("Agent 启动失败，/api/chat* 将返回 503：{e:#}");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("未找到 robit 配置（{e}）：/api/chat* 返回 503，静态托管照常");
+            None
+        }
+    };
 
     let app = Router::new()
         .route("/api/health", get(health))

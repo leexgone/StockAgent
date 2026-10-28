@@ -215,6 +215,79 @@ sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price
 | `dims[4]` | 技术面 / 基本面 / 资金面 / 消息面各自分数与观察 | 固定四维，顺序不变 |
 | `risks[]` | 这个结论可能错在哪 | **至少一条，不可为空** |
 
+### 生产口径（P4-T6 定稿，2026-10-29）
+
+上表是字段语义；生产端**数字全部由规则函数产出**（ADR-0007：数字归规则，文字归模型），
+唯一实现 `zimu-domain::advice::score_advice`（TS 共享层镜像 `src/domain/advice.ts`），
+黄金向量组 `advice.json`。模型只写 `reason` / `risks` 与结论组织文案，**文案中出现的
+每个数字必须来自工具返回**（B6 生产侧口径）；`dims[].t` 观察文字由规则函数按事实模板
+生成（展示层职责，不进 fixture，两边单测只断言关键事实存在）。
+
+**输入**（全部可回溯：`closes/volumes` 来自 sidecar 日线（含当日合成 bar，`04` 附录 B）、
+`price` 来自实时行情、`weight/held` 与现金纪律来自 `recalc`+纪律四条）：
+
+```
+kind, closes[]（升序日收盘）, volumes[]（同长，可 null）,
+price（现价）, held, weight（占总资产 %）, cash_reserve_pass（现金 ≥10% 纪律）
+```
+
+**信号票**（每票 +1/0/−1；数据不足则该票**不参与**并如实记降级，不伪造）：
+
+| 票 | 判据 | 最少样本 |
+|---|---|---|
+| v1 均线 | MA5 > MA20 → +1，< → −1，= → 0 | 20 根 |
+| v2 价位 | 收盘 > MA20 → +1，< → −1 | 20 根 |
+| v3 动量 | mom20 = close/close[−21] − 1：> +5% → +1，< −5% → −1，其余 0 | 21 根 |
+| v4 区间位置 | pos30 = (close − low30)/(high30 − low30)（窗口 = 近 min(n,30) 收盘；high==low → 0.5）：> 0.9 → **−1（追高保护）**，< 0.2 → +1，其余 0 | 5 根 |
+| vv 量能 | vol_ratio = 近5日均量/近 min(n,30) 日均量 ≥ 1.2 且 mom5 > 0 → +1；≥ 1.2 且 mom5 < 0 → −1；其余 0（两个均量窗口内任一 bar 缺量 → 不参与） | 量 ≥5 根 + 价 ≥6 根 |
+
+**维度分与总分**：
+
+```
+技术面 t = clamp(50 + 12.5 × Σ(v1..v4), 0, 100)
+资金面 m = vv 参与且 +1 → 70；−1 → 30；其余（含量能缺失/平量/缩量）→ 60
+基本面 f = 60   消息面 n = 60        # 无数据源 → 中性值（中性带 55–69 的中值），接入后另改本节
+score = (2t + m + f + n) / 5         # 权重 = 技术 0.4 / 资金 0.2 / 基本 0.2 / 消息 0.2
+conf = 0.5 + |Σ全部可用票| / (2 × 可用票数)；可用票 < 3 → conf = 0.5（信号样本不足）
+```
+
+全中性（票数全 0）→ score = 56，落在「持有」带；§10 的 70/55 阈值与 gauge 配色**不动**。
+
+**action 决策表**（纪律拦截优先于得分；`held=false` 时 weight = 0）：
+
+| score 带 | 已持仓 | 未持仓 |
+|---|---|---|
+| ≥ 70 偏多 | weight > 25+ε → `持有`（建议降至 25%，单票纪律）；现金纪律未过 → `持有`（维持）；weight < 15−ε → `加仓`（建议 15%）；否则 → `持有`（仓位已达目标） | 现金纪律过 → `买入`（建议 15%）；否则 → `持有`（观望） |
+| 55–70 中性 | ETF → `定投`；其余 → `持有`（维持） | ETF → `定投`；其余 → `持有`（观望） |
+| 45–55 偏空 | `减仓`（建议 = weight/2，四舍五入 1 位） | `持有`（观望，不建仓） |
+| < 45 偏空 | `卖出`（建议清仓） | `持有`（观望，不建仓） |
+
+**horizon**：加仓/买入 → `中线 1–3 月`；定投 → `长线 6 月+`；持有 → `中线 1–3 月`（ETF `长线 6 月+`）；减仓 → `短中线 2–6 周`；卖出 → `短线`。
+
+**target / stop**（锚 = 现价，按 §1 小数位 half-up：`floor(v × 10^d + 0.5) / 10^d`）：
+
+| 情形 | target `[lo, hi]` | stop |
+|---|---|---|
+| 加仓 / 买入（股票、ETF） | `[price×1.08, price×1.15]` | `price×0.92` |
+| 转债（任何持仓动作） | null（区间目标不适用） | `price×0.95` |
+| 定投 | null | null（分批摊成本，无单点止损） |
+| 持有 / 减仓 / 卖出（已持仓） | null | 股票/ETF `price×0.92`，转债 `price×0.95`（未执行时的防线） |
+| 未持仓观望 / price 缺失 | null | null |
+
+**position 输出**：`{current, suggested, mode}`——mode ∈ `target`（建议到目标仓位）/
+`maintain`（维持）/ `dca`（定投）/ `exit`（清仓）/ `flat`（未持仓观望）；文案拼装是展示层
+（工具侧格式化为「当前 x% → 建议 y%」写入 `advice_history.position`）。降到 25% 的
+**卖出数量**用 §6 `sell_to`（调用方拿 `suggested` 当 target 调，逐位可回溯）。
+
+**留档**：`calc_advice` 工具算完即写 `advice_history` 数字列（score/conf/target/stop/
+position/dims + `generated_at` + `data_version`），返回 `advice_id`；模型文案经
+`finalize_advice` 回填 reason/risks——**数字永不经过模型转写**（ADR-0007 的结构性保证）。
+`data_version` 约定：`adv-v1|k={日线末bar日期|none}|q={行情as_of|none}`。
+
+**降级**：日线获取失败 → 工具拒绝出建议（报错，不出全中性噪声结论）；实时行情失败但
+日线可用 → price 取末根收盘并记降级；K 线不足 5 根 → 技术票全不参与（t = 50，观察
+如实标注），conf 因可用票 < 3 归 0.5。**空持仓**：`held=false` 全部走「未持仓」列。
+
 ## 11. 数字展示规则
 
 - 金额：`money(v)` → `¥1,234.56`（zh-CN 千分位）；大额用 `wan(v)` → `12.34 万`。
@@ -266,6 +339,7 @@ sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price
 | `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate` |
 | `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
 | `price_limit.json` | `limit_pct` / `limit_prices` / `validate_price` | §2 | `kind,code,st` → 涨跌幅比例（ETF/北交所 null）/ `kind,prev,pct` → 涨停与跌停价（整数单元 half-up）/ `price,limit_up,limit_down` → `{valid,reason}` |
+| `advice.json` | `score_advice` | §10 生产口径 | `kind,closes[],volumes[],price,held,weight,cash_reserve_pass` → `action,horizon,score,conf,dims[4]{k,s},target_lo/hi,stop,position{current,suggested,mode},stats`（观察文字 `dims[].t` 是展示层，fixture 不校验） |
 
 ### 本附录固定的口径（新增约定，与正文同级）
 

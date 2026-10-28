@@ -210,6 +210,8 @@ export interface paths {
          *     `store.portfolio()` 全量重算（派生与汇总只出自 `zimu-domain::recalc`，03 §5）。
          *     sidecar 不可达 → 503（不写库、不动旧数字）；个别标的无行情 → skipped 留原因，
          *     该行保持库存陈旧值（降级不断供）。
+         * @description P4-T6 起链体在 `zimu-agent::service::refresh_portfolio`——agent 工具
+         *     `refresh_quotes` 与本端点走同一条链，口径不分叉；这里只剩 HTTP 语义映射。
          */
         post: operations["market_refresh"];
         delete?: never;

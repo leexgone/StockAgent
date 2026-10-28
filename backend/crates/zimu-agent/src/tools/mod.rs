@@ -1,0 +1,99 @@
+//! 领域工具集（P4-T6）：agent 的全部取数与出数入口。
+//!
+//! 工具面（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新两件 + echo 链路验证）：
+//!
+//! | 工具 | 性质 | 口径来源 |
+//! |---|---|---|
+//! | `market_status` | 只读 | `zimu-market::clock`（03 §9 生产口径） |
+//! | `get_quote` | 只读 | sidecar 实时行 + `zimu-domain::price_limit`（03 §2） |
+//! | `get_holdings` | 只读 | `store.portfolio()` → `zimu-domain::recalc`（03 §5） |
+//! | `calc_discipline` | 只读 | `zimu-domain::discipline`（03 §6） |
+//! | `simulate_trade` | 只读（试算不落库） | `store.simulate_trade` → fees/dilution/lot（03 §1/§3/§4） |
+//! | `refresh_quotes` | 写行情字段 | `service::refresh_portfolio`（与 HTTP API 同一条链） |
+//! | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice`（03 §10 生产口径，ADR-0007） |
+//! | `finalize_advice` | 写 advice_history 文案列 | risks 非空校验（03 §10） |
+//! | `echo` | 只读 | 链路验证（P2-T2） |
+//!
+//! **没有** record_trade/下单类工具：程序只给建议不代下单（CLAUDE.md 安全边界），
+//! 录入走界面/API 由用户确认。
+//!
+//! 全部工具返回 JSON 文本（`ToolResult::success`），失败返回 `ToolResult::error`
+//! 并把降级原因如实写给模型（sidecar 不可达/数据缺失），由模型转述给用户——
+//! 错误文案面向对话，与 HTTP 契约（`ApiError`）各自表达同一事实。
+
+mod advice;
+mod market;
+mod portfolio;
+
+use std::sync::Arc;
+
+use robit_agent::{ToolRegistry, ToolResult};
+use serde::Serialize;
+use zimu_market::error::MarketError;
+
+use crate::echo::EchoTool;
+use crate::AgentDeps;
+
+pub use advice::{CalcAdviceTool, FinalizeAdviceTool};
+pub use market::{GetQuoteTool, MarketStatusTool, RefreshQuotesTool};
+pub use portfolio::{CalcDisciplineTool, GetHoldingsTool, SimulateTradeTool};
+
+/// 存储调用早退助手：anyhow 错误 → `ToolResult::error`（execute 里不能直接 `?`——
+/// `AgentError` 是 robit 的类型，本 crate 不该为它实现 From，孤儿规则也不允许）
+macro_rules! store_try {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(err) => return Ok($crate::tools::store_err(err)),
+        }
+    };
+}
+pub(crate) use store_try;
+
+/// 装配全部领域工具（zimu-server 与 zimu-agent-cli 共用；不走 robit bootstrap()，
+/// 通用工具 read/bash 等一律不注册——子木的工具面就是领域面）。
+pub fn build_registry(deps: Arc<AgentDeps>) -> ToolRegistry {
+    let mut reg = ToolRegistry::new();
+    reg.register(MarketStatusTool { deps: deps.clone() });
+    reg.register(GetQuoteTool { deps: deps.clone() });
+    reg.register(GetHoldingsTool { deps: deps.clone() });
+    reg.register(CalcDisciplineTool { deps: deps.clone() });
+    reg.register(SimulateTradeTool { deps: deps.clone() });
+    reg.register(RefreshQuotesTool { deps: deps.clone() });
+    reg.register(CalcAdviceTool { deps: deps.clone() });
+    reg.register(FinalizeAdviceTool { deps });
+    reg.register(EchoTool);
+    reg
+}
+
+/// 成功返回：JSON pretty 文本（模型可读，键序稳定便于人工核对留档）
+pub(crate) fn ok_json(v: &impl Serialize) -> ToolResult {
+    match serde_json::to_string_pretty(v) {
+        Ok(s) => ToolResult::success(s),
+        Err(e) => ToolResult::error(format!("工具输出序列化失败（内部错误）：{e}")),
+    }
+}
+
+/// 行情三分类 → 面向对话的错误文本（语义与 HTTP `err_response` 一致：
+/// Unavailable = sidecar 挂了降级、Upstream = 上游源错误透传、Contract = 版本漂移）
+pub(crate) fn market_err(e: MarketError) -> ToolResult {
+    match e {
+        MarketError::Unavailable(m) => ToolResult::error(format!(
+            "行情 sidecar 不可达，行情类数字暂不可用：{m}。持仓/纪律/留档查询不受影响；请稍后重试或让用户检查 datafetch 服务。"
+        )),
+        MarketError::Upstream {
+            status,
+            code,
+            message,
+        } => ToolResult::error(format!("行情上游错误（HTTP {status}，{code}）：{message}")),
+        MarketError::Contract(m) => ToolResult::error(format!(
+            "行情契约不符（sidecar 与本程序版本漂移，内部错误已记录）：{m}"
+        )),
+    }
+}
+
+/// 存储层错误统一话术（细节进日志，不把 SQL 原文喂给模型）
+pub(crate) fn store_err(e: impl std::fmt::Display) -> ToolResult {
+    tracing::error!("存储层错误：{e}");
+    ToolResult::error("存储层内部错误（已记录日志），本次操作未完成".to_string())
+}

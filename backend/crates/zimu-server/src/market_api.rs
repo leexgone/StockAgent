@@ -19,7 +19,6 @@
 //! 契约（P4-T5）：响应全部是类型化结构体（本文件 + zimu-market 模型），
 //! `#[utoipa::path]` 标注即 OpenAPI 文档来源；错误响应统一 `ApiError`。
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -28,18 +27,20 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 use zimu_market::calendar::CalendarCache;
 use zimu_market::clock::{market_clock, now_shanghai, MarketClock};
 use zimu_market::error::MarketError;
-use zimu_market::models::{Attempt, CalendarPayload, CbListPayload, KlinePayload, QuotePayload, QuoteStatus};
-use zimu_market::symbols::symbol_of;
+use zimu_market::models::{CalendarPayload, CbListPayload, KlinePayload, QuotePayload};
 use zimu_market::{synth, MarketApi};
-use zimu_store::{PortfolioView, QuoteUpdate, Store};
 
 use crate::holdings_api::SharedStore;
 use crate::openapi::ApiError;
+
+// P4-T6：刷新链主体抽到 zimu-agent::service（agent 工具 refresh_quotes 与
+// POST /api/market/refresh 走同一条链），响应类型随之迁移并在此再导出——
+// OpenAPI 组件名与 wire 形状不变（契约测试逐字节守护）。
+pub use zimu_agent::service::{RefreshResponse, SkippedRow};
 
 pub struct MarketState {
     /// sidecar 唯一消费入口（zimu-market，04 附录 B）
@@ -55,10 +56,6 @@ pub fn new_market(api: Arc<dyn MarketApi>) -> SharedMarket {
         api,
         calendar: CalendarCache::default(),
     })
-}
-
-fn lock(store: &SharedStore) -> std::sync::MutexGuard<'_, Store> {
-    store.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 路由装配：market 单状态路由 + refresh 双状态路由，merge 后擦除状态。
@@ -105,15 +102,6 @@ fn err_response(e: MarketError) -> Response {
                 .into_response()
         }
     }
-}
-
-fn store_error(e: impl std::fmt::Display) -> Response {
-    tracing::error!("存储层错误：{e}");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ApiError::new("store_error", "存储层内部错误，已记录日志")),
-    )
-        .into_response()
 }
 
 // ============================================================================
@@ -392,34 +380,13 @@ pub(crate) async fn calendar(State(m): State<SharedMarket>, Query(q): Query<Cale
 // POST /api/market/refresh —— 行情回写 + 服务端 recalc() 链
 // ============================================================================
 
-/// 未回写标的的明细行（降级不断供：对应持仓保持库存旧值）
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SkippedRow {
-    pub code: String,
-    /// 原因：拼不出市场前缀（B7）/ 行情行状态异常（停牌、退市、no_data）/ 响应缺行
-    pub reason: String,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct RefreshResponse {
-    /// 行情时点（sidecar as_of 透传）；空持仓未打 sidecar 时为 null
-    pub as_of: Option<String>,
-    /// 实际回写的持仓行数
-    pub updated: usize,
-    /// 未回写标的明细（保持库存旧值）
-    pub skipped: Vec<SkippedRow>,
-    /// sidecar 兜底链降级标注（透传）
-    pub degraded: bool,
-    /// 逐源尝试明细（透传，降级可观测）
-    pub attempts: Vec<Attempt>,
-    /// 回写后 `recalc()` 全量重算的组合全景（03 §5；数字与 /api/holdings 同源）
-    pub portfolio: PortfolioView,
-}
-
 /// 拉全部持仓实时行情 → 回写 `holdings.price/prev/name/limit_pct` →
 /// `store.portfolio()` 全量重算（派生与汇总只出自 `zimu-domain::recalc`，03 §5）。
 /// sidecar 不可达 → 503（不写库、不动旧数字）；个别标的无行情 → skipped 留原因，
 /// 该行保持库存陈旧值（降级不断供）。
+///
+/// P4-T6 起链体在 `zimu-agent::service::refresh_portfolio`——agent 工具
+/// `refresh_quotes` 与本端点走同一条链，口径不分叉；这里只剩 HTTP 语义映射。
 #[utoipa::path(
     post,
     path = "/api/market/refresh",
@@ -433,107 +400,17 @@ pub struct RefreshResponse {
     )
 )]
 pub(crate) async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Response {
-    let holdings = match lock(&store).holdings() {
-        Ok(h) => h,
-        Err(e) => return store_error(e),
-    };
-
-    // symbol 拼装（B7：显式 mkt 字段，拼不出前缀即拒绝，不发出去挨 400）
-    let mut symbols: Vec<String> = Vec::new();
-    let mut skipped: Vec<SkippedRow> = Vec::new();
-    let mut pairs: Vec<(String, usize)> = Vec::new();
-    for (i, h) in holdings.iter().enumerate() {
-        match symbol_of(&h.mkt, &h.code) {
-            Some(s) => {
-                if !symbols.contains(&s) {
-                    symbols.push(s.clone());
-                }
-                pairs.push((s, i));
-            }
-            None => skipped.push(SkippedRow {
-                code: h.code.clone(),
-                reason: format!("mkt={} 拼不出市场前缀（B7：仅 SH/SZ）", h.mkt),
-            }),
+    use zimu_agent::service::{refresh_portfolio, RefreshError};
+    match refresh_portfolio(&store, &*m.api).await {
+        Ok(r) => Json(r).into_response(),
+        Err(RefreshError::Store(msg)) => {
+            tracing::error!("存储层错误：{msg}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiError::new("store_error", "存储层内部错误，已记录日志")),
+            )
+                .into_response()
         }
+        Err(RefreshError::Market(e)) => err_response(e),
     }
-
-    // 空持仓/全拼不出：不打 sidecar，直接回重算视图
-    if symbols.is_empty() {
-        let view = match lock(&store).portfolio() {
-            Ok(v) => v,
-            Err(e) => return store_error(e),
-        };
-        return Json(RefreshResponse {
-            as_of: None,
-            updated: 0,
-            skipped,
-            degraded: false,
-            attempts: Vec::new(),
-            portfolio: view,
-        })
-        .into_response();
-    }
-
-    let payload = match m.api.quote(&symbols).await {
-        Ok(p) => p,
-        Err(e) => return err_response(e),
-    };
-
-    // 回写过滤（04 附录 B）：仅 status==ok 且 price>0 的行更新价格；
-    // limit_pct 仅在数据层未配置时推断（st=false——ST 识别依赖行情字段，03 §2）
-    let by_sym: HashMap<&str, &zimu_market::models::QuoteRow> =
-        payload.quotes.iter().map(|r| (r.symbol.as_str(), r)).collect();
-    let ts = now_shanghai().format("%Y-%m-%d %H:%M").to_string();
-    let mut updates: Vec<QuoteUpdate> = Vec::new();
-    for (sym, i) in &pairs {
-        let h = &holdings[*i];
-        match by_sym.get(sym.as_str()) {
-            Some(q) if q.status == QuoteStatus::Ok && q.price.is_some_and(|p| p > 0.0) => {
-                let limit_pct = if h.limit_pct.is_some() {
-                    None // 数据层已配置：COALESCE 语义下传 None 保持原值
-                } else {
-                    zimu_domain::price_limit::limit_pct(h.kind, &h.code, false)
-                };
-                updates.push(QuoteUpdate {
-                    code: h.code.clone(),
-                    price: q.price,
-                    prev: q.prev.filter(|p| *p > 0.0),
-                    name: q.name.clone(),
-                    limit_pct,
-                    ts: ts.clone(),
-                });
-            }
-            Some(q) => {
-                let status = serde_json::to_value(q.status)
-                    .unwrap_or_else(|_| json!(format!("{:?}", q.status)));
-                skipped.push(SkippedRow {
-                    code: h.code.clone(),
-                    reason: format!("行情行状态 {status}，保持库存旧值"),
-                });
-            }
-            None => skipped.push(SkippedRow {
-                code: h.code.clone(),
-                reason: "行情响应缺该标的行".into(),
-            }),
-        }
-    }
-
-    let updated = match lock(&store).apply_quotes(&updates) {
-        Ok(n) => n,
-        Err(e) => return store_error(e),
-    };
-    let view = match lock(&store).portfolio() {
-        Ok(v) => v,
-        Err(e) => return store_error(e),
-    };
-
-    Json(RefreshResponse {
-        as_of: Some(payload.as_of),
-        updated,
-        skipped,
-        degraded: payload.degraded,
-        attempts: payload.attempts,
-        portfolio: view,
-    })
-    .into_response()
 }

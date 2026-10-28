@@ -13,6 +13,7 @@
 //! - **阈值判定带 ε 守卫**：[`THRESHOLD_EPS`]，恰好压线按「含边界」语义处理
 //!   （03 附录约定 4 / 比对规则第 5 条），防浮点噪声翻转边界用例。
 
+pub mod advice;
 pub mod dilution;
 pub mod discipline;
 pub mod fees;

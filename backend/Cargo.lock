@@ -3429,6 +3429,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "zimu-agent"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "robit-agent",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "utoipa",
+ "zimu-domain",
+ "zimu-market",
+ "zimu-store",
+]
+
+[[package]]
 name = "zimu-agent-cli"
 version = "0.0.1"
 dependencies = [
@@ -3438,6 +3457,10 @@ dependencies = [
  "robit-ai",
  "serde_json",
  "tokio",
+ "tracing",
+ "zimu-agent",
+ "zimu-market",
+ "zimu-store",
 ]
 
 [[package]]
@@ -3484,6 +3507,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "utoipa",
+ "zimu-agent",
  "zimu-domain",
  "zimu-market",
  "zimu-store",

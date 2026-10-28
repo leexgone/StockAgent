@@ -8,6 +8,8 @@ edition.workspace = true
 zimu-store = { path = "../zimu-store" }
 zimu-domain = { path = "../zimu-domain" }
 zimu-market = { path = "../zimu-market" }
+# P4-T6：agent 领域工具 + Skill 加载 + 刷新链应用服务（bin 装配 Agent，lib 复用 service 类型）
+zimu-agent = { path = "../zimu-agent" }
 robit-ai.workspace = true
 robit-agent.workspace = true
 robit-web.workspace = true
