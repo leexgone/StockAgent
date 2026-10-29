@@ -2,7 +2,7 @@
 
 面向个人投资者的股票助理程序：盯持仓、读行情、给可执行的买卖建议、诊断组合风险。发布形态是**常驻 Web 服务**——浏览器访问全部界面，也可以通过微信 / QQ 与助理对话、接收预警与盘后复盘（与 robit 的桌面端定位不同）。
 
-**当前阶段：P4 数据管道推进中——录入 API + SQLite 存储、`datafetch` 行情 sidecar 正式化、`zimu-market` Rust 行情适配器 + `/api/market/*`（刷新回写→`recalc` 重算、市场时钟、sidecar 挂了整体降级不瘫）、OpenAPI 契约同源（serde 结构体生成 `docs/api/openapi.json`，契约测试样例响应过 schema 校验，前端 TS 类型自契约生成）均已落地（2026-10-28，C5 关闭）；agent 领域工具与 Skill 模板落地（2026-10-29，P4-T6）——`zimu-agent` crate 8 工具 + `skills/` 三模板（/复盘 /盘前 /建议），打分按 ADR-0007 规则函数出数（03 §10 生产口径 + 黄金向量 advice 组）、模型只写文案且数字列先落 `advice_history` 留档；P1 原型定稿余 T9 人工验收。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）+ **手工逐笔录录入 API（`/api/holdings/trade` 等，校验复用领域库、落 SQLite 事务）**；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
+**当前阶段：P4 数据管道与存储收官（2026-10-29）——录入 API + SQLite 存储、`datafetch` 行情 sidecar 正式化、`zimu-market` Rust 行情适配器 + `/api/market/*`（刷新回写→`recalc` 重算、市场时钟、sidecar 挂了整体降级不瘫）、OpenAPI 契约同源（serde 结构体生成 `docs/api/openapi.json`，契约测试样例响应过 schema 校验，前端 TS 类型自契约生成）（2026-10-28，C5 关闭）；agent 领域工具与 Skill 模板（P4-T6）——`zimu-agent` crate 8 工具 + `skills/` 三模板（/复盘 /盘前 /建议），打分按 ADR-0007 规则函数出数（03 §10 生产口径 + 黄金向量 advice 组）、模型只写文案且数字列先落 `advice_history` 留档；调度与预警引擎（P4-T7）——交易日盘中分钟级轮询（预警判定口径 03 §12 + 黄金向量 alerts 组，同日同型去重落 `alerts`）+ 15:05 盘后链（`equity_snapshots` 净值快照幂等写入、`/复盘` 注入 agent 会话、`push_log` 留痕）+ `GET /api/alerts` 等三端点；P1 原型定稿余 T9 人工验收。** 技术路线已定案（[ADR-0005](docs/decisions/0005-tech-route-rust-robit-react-sidecar.md)）：Rust + [robit](https://github.com/leexgone/robit) agent 基建 / React + Vite 前端 / Python 行情 sidecar / SQLite。已跑通：`backend/`（axum）托管 `frontend/`（React）构建产物、单端口起服务——index 工作台静态复刻 + 智能问答 SSE 会话（robit Agent）+ **手工逐笔录录入 API（`/api/holdings/trade` 等，校验复用领域库、落 SQLite 事务）**；`docs/03` 全部数字口径落成 Rust（`zimu-domain`）与 TS（`frontend/src/domain/`）两份纯函数实现，跑同一份黄金测试向量全绿。`design/` 原型（零构建、演示样本）保留为设计参照与验收基准。
 
 ```powershell
 # 运行（生产形态：后端托管前端构建产物，单端口）
@@ -19,7 +19,7 @@ cd backend; cargo test -p zimu-domain     # Rust 领域库
 cd backend; cargo test -p zimu-store      # 存储层：录入事务 / 校验拒绝 / 重启不丢 / 行情回写
 cd backend; cargo test -p zimu-market     # 行情适配器：契约模型 / 市场时钟 / 当日 bar 合成 / 错误映射
 cd backend; cargo test -p zimu-server     # API 集成 + 契约：数字与 domain 逐位等价 / sidecar 降级 / 样例响应过 schema（离线）
-cd backend; cargo test -p zimu-agent      # agent 工具链：黄金向量端到端 / 打分留档 / Skill 模板加载（离线）
+cd backend; cargo test -p zimu-agent      # agent 工具链 + 调度引擎：黄金向量端到端 / 打分留档 / Skill 加载 / 模拟盘中触发预警与 15:05 盘后链（离线）
 cd frontend; npm test                     # TS 共享层（vitest）
 cd frontend; npm run gen:api              # 契约变更后再生成 TS 类型（docs/api/openapi.json → src/api/schema.d.ts）
 cd datafetch; uv run pytest               # 行情 sidecar：兜底链/熔断/限频/缓存（假源离线）
@@ -35,12 +35,12 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 
 | 路径 | 内容 |
 |---|---|
-| `backend/` | Rust 服务（Cargo workspace）：`zimu-server`（axum 主服务——health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + OpenAPI 契约）、`zimu-domain`（领域纯函数库：`docs/03` 全部数字口径的 Rust 实现 + 黄金向量测试，含 P4-T6 打分模块 `advice`）、`zimu-store`（存储层：SQLite schema + 迁移 + 录入事务 + 行情回写 + 建议留档，P4）、`zimu-market`（行情适配器：sidecar 唯一消费入口——契约模型/降级/市场时钟，P4-T4）、`zimu-agent`（agent 应用层：领域工具 + Skill 加载 + 刷新链服务，P4-T6）、`zimu-agent-cli`（Agent 调试 REPL）；细节见 `backend/README.md` |
+| `backend/` | Rust 服务（Cargo workspace）：`zimu-server`（axum 主服务——health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约，bin 侧启动调度器）、`zimu-domain`（领域纯函数库：`docs/03` 全部数字口径的 Rust 实现 + 黄金向量测试，含打分模块 `advice` 与预警判定 `alert`）、`zimu-store`（存储层：SQLite schema + 迁移 + 录入事务 + 行情回写 + 建议/预警/快照/推送日志读写，P4）、`zimu-market`（行情适配器：sidecar 唯一消费入口——契约模型/降级/市场时钟，P4-T4）、`zimu-agent`（agent 应用层：领域工具 + Skill 加载 + 刷新链服务 + 调度预警引擎，P4-T6/T7）、`zimu-agent-cli`（Agent 调试 REPL）；细节见 `backend/README.md` |
 | `skills/` | Agent Skill 模板（P4-T6）：盘后复盘 / 盘前关注 / 建议生成三份 SKILL.md（robit 约定），内嵌 `03` 口径引用、免责边界与「文案数字必须原样取自工具返回」硬规则 |
 | `frontend/` | React + TS + Vite 前端：index 工作台静态复刻 + 智能问答视图（SSE 会话）；`src/domain/` 为 TS 领域共享层（镜像 `zimu-domain`），`src/api/schema.d.ts` 为 OpenAPI 契约生成的类型面（P4-T5），设计令牌在 `src/styles/tokens.css` |
 | `datafetch/` | Python 行情 sidecar（uv + FastAPI + akshare/baostock）：P4-T3 正式化——`/quote` `/kline` `/cb_list` `/calendar` + 兜底链/熔断/限频/缓存/错误契约，主源故障降级不崩；由 `backend/crates/zimu-market` 唯一消费（P4-T4 已接线） |
 | `design/` | 界面原型（7 个页面 + 共享样式/数据/图表层），原型自带的说明见 `design/README.md` |
-| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（9 组 86 用例，含 advice 打分组），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
+| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（10 组 103 用例，含 advice 打分与 alerts 预警组），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
 | `fixtures/api/` | API 响应样例（P4-T5）：每端点一份提交样例，契约测试对其过 OpenAPI schema 校验；前端移植可直接当 mock |
 | `docs/` | 产品规格与工程规范：范围、界面、业务口径、数据契约、设计系统、路线图、待办；`docs/api/openapi.json` 为机器可读 API 契约（由代码生成，见 `04` 附录 C） |
 | `docs/decisions/` | 决策记录（ADR）—— 每个「为什么这样做」都留档 |

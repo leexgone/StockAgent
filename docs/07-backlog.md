@@ -23,6 +23,10 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 `03` §1 表格写股票「可卖数量 = 整数股」（A 股卖出允许奇零股、须一次性卖出），但原型买卖一律按 `qty % lot === 0` 拦截（`holdings.html:342`），且「全部清仓」按钮对奇零股持仓（如送股后 150 股）填入 `held` 后会被自己的校验拒绝。fixture 暂按原型行为编码（`lot.json` case `vq-sell-odd-lot`）；定稿后同步改 §1、原型与用例。关联 P4-T2（schema 要能存奇零股持仓）。
 **进展（2026-10-28，P4-T2）**：存储侧已就绪——`zimu-store` v1 schema 的 `holdings.shares` 为普通整数（仅 `> 0` 约束），奇零股存得下；后端录入校验沿用 `zimu-domain` 现行整手口径（与原型/fixture 一致）。卖出奇零股的业务口径仍待 B12 定稿，届时按 P3 流程先改 `03` 与 fixtures 再改两侧实现。
 
+### B13 · 自选（watchlist）预警无生产侧载体
+
+P4-T7 预警引擎只覆盖 `holdings` 持仓；原型 dashboard 的 `watchlist-card`（「未买入，仅条件触发时提醒」）在生产侧没有对应存储——schema 六表无 watchlist，`03` §12 判定范围明确写为持仓。缺口：自选的维护入口（增删/提醒条件）与判定范围扩展。P5-T2 移植 dashboard 前拍板：建 watchlist 表（schema v2 迁移）+ §12 判定范围扩到自选，或该卡先展示空态引导。关联：`push_log` 的读端点（wechat 屏推送日志）同样留待 P5-T2。
+
 ## 待决策
 
 | # | 问题 | 备注 |
@@ -47,7 +51,7 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 |---|---|---|
 | R1 | **Web/SSE 桥缺官方实现**（P2-T3）：robit 的 `Frontend` trait 只有 CLI/TUI 形态的参考实现；Web 宿主需要自己写 AgentEvent→wire 类型投影、确认槽位（`request_tool_confirmation` 挂起等 HTTP 回填）、broadcast 多客户端扇出。子木的实现见 `backend/crates/zimu-server/src/agent_bridge.rs`——确认语义与事件投影都是宿主无关的重复劳动。诉求：robit 提供可选 web 桥 crate（SSE/WS 的 Frontend 通用实现 + 消息注入约定），或至少给 `AgentEvent` 一个官方序列化 schema | ✅ 2026-10-27 落地（P2-T5）：robit v0.1.26 新增 `robit-web` crate——`WebEvent` 官方 JSON schema、`WebFrontend`（broadcast 扇出 + 确认槽位）、`WebBridge`（消息注入）；子木 zimu-server 已切换消费（pin tag v0.1.26），宿主手写桥删除。尾巴：robit 分支 `feat/web-bridge` 待合并推送、crates.io 待发布，之后子木 pin 换回 registry 写法 |
 | R2 | **ToolRegistry 装配后不可扩展**（P2-T2）：`bootstrap()` / `create_tools_from_config()` 返回不可变 `Arc<ToolRegistry>`，领域工具无法追加进内置工具面；只能绕过 bootstrap 手动 `ToolRegistry::new()` + `register()`（代价：丢掉 read/bash 等通用工具）。诉求：`bootstrap_with(extra_tools)` 或让 registry 支持装配后注册 | ⬜ 待提给 robit |
-| R3 | **init_logging 独占全局 tracing subscriber**（P2-T3）：宿主服务自带日志初始化时二者只能选其一——zimu-server 现按「有 robit 配置就交给 init_logging（靠 additional_directives 补 tower_http），否则回落自建 fmt」分支处理，且失去对日志格式的自主权。诉求：提供 tracing `Layer` 形态，由宿主组合进自己的 registry | ⬜ 待提给 robit |
+| R3 | **init_logging 独占全局 tracing subscriber**（P2-T3）：宿主服务自带日志初始化时二者只能选其一——zimu-server 现按「有 robit 配置就交给 init_logging（靠 additional_directives 补 tower_http），否则回落自建 fmt」分支处理，且失去对日志格式的自主权。诉求：提供 tracing `Layer` 形态，由宿主组合进自己的 registry。**P4-T7 又踩一形态**：build_filter 只放行 target_crate 与 robit 系 target，宿主 workspace 其余 crate（zimu_agent 调度器日志）落在默认底线被静默吞掉——调度器在跑但日志不可见，排查成本高；现靠 additional_directives 显式放行（`zimu_agent={level}` `zimu_market={level}`），诉求同上（Layer 化后宿主自管 target） | ⬜ 待提给 robit |
 
 ## 已修复（存档）
 

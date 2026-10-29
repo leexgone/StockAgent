@@ -20,6 +20,7 @@
 //! `03` 口径引用与免责边界；`ZIMU_SKILLS_DIR` 可覆盖目录。
 
 pub mod echo;
+pub mod scheduler;
 pub mod service;
 pub mod skills;
 pub mod tools;

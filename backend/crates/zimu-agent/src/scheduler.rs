@@ -1,0 +1,510 @@
+//! 调度与预警引擎（P4-T7，03 §12 生产口径）。
+//!
+//! 职责边界（照抄 §12）：
+//! - **本模块只做编排**——何时轮询（市场时钟 §9）、取哪些事实（行情/日线/
+//!   最近留档/转债强赎）、去重落库（同日 (code,type) 至多一条）、15:05 盘后链
+//!   （快照 + 复盘触发）。**预警判定的数字口径全在 `zimu-domain::alert`**，
+//!   这里不比较任何业务阈值。
+//! - 行情只经 `zimu-market`（sidecar 唯一消费入口）；刷新回写复用
+//!   [`crate::service::refresh_portfolio_detailed`]（与 HTTP refresh 同一条链）。
+//! - 降级如实：行情失败该轮**不判定**（不用库存旧价，不伪造）；日历不可用
+//!   退工作日启发式并记 note；转债强赎源降级 → 期限类当日不参与。
+//!
+//! 可测试性：[`SchedulerCore::tick`] 接受注入的 `now`——「模拟盘中可触发」
+//! 验收（roadmap P4-T7）靠它离线跑：FakeApi + 任意时刻，不需要真等交易时段。
+//! [`run`] 只是 tick + sleep 的实时薄壳。
+//!
+//! 复盘触发经 [`ReviewTrigger`] 回调注入（server 侧接 `WebBridge::send_user_text`），
+//! 本 crate 不依赖 robit-web——CLI/测试可传 None（快照照写，push_log 如实记未触发）。
+
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+
+use chrono::{DateTime, Days, FixedOffset, NaiveDate, Timelike};
+use zimu_domain::alert::{self, AlertItem};
+use zimu_domain::price_limit::{limit_pct, limit_prices};
+use zimu_domain::Kind;
+use zimu_market::clock::{market_clock, now_shanghai};
+use zimu_market::models::{QuoteRow, QuoteStatus};
+use zimu_market::symbols::symbol_of;
+use zimu_store::{EquitySnapshotRow, HoldingRow, NewAlert};
+
+use crate::service::{self, RefreshError};
+use crate::{lock, AgentDeps};
+
+/// 缺省轮询间隔（03 §12 常量表：60 秒；`04` 附录盘中频率结论支撑）
+pub const POLL_INTERVAL: Duration = Duration::from_secs(60);
+/// 盘后链时刻（03 §12）：交易日 ≥15:05 首轮触发，幂等 = 当日快照行存在
+const REVIEW_AT_MINS: u32 = 15 * 60 + 5;
+/// 日线回看窗口（自然日）：够 20 个交易日量 + 长假余量
+const KLINE_LOOKBACK_DAYS: u64 = 45;
+/// 量能窗口上限：近 20 根日线（不含今日，03 §12 序 6）
+const VOL_WINDOW: usize = 20;
+/// 复盘 Skill 触发词（skills/post-market-review）
+const REVIEW_TRIGGER_TEXT: &str = "/复盘";
+
+/// 复盘注入回调：返回是否被 agent 会话受理（受理 ≠ 产出完成，产出以
+/// advice_history 留档与会话事件为准——03 §12 留档）。
+pub type ReviewTrigger =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+
+/// 单轮调度的事实汇报（测试断言面 + 日志素材；不落库）
+#[derive(Debug, Default)]
+pub struct TickReport {
+    /// 市场时钟状态（§9：am/pm/lunch/closed/non_trading_day/…）
+    pub state: String,
+    pub trade_day: bool,
+    /// 本轮是否完成了行情轮询（live 时段且刷新链成功）
+    pub polled: bool,
+    pub quotes_updated: usize,
+    pub new_alerts: Vec<NewAlertInfo>,
+    pub snapshot_written: bool,
+    /// None = 本轮未触发复盘链（时刻未到/当日快照已存在）
+    pub review_ok: Option<bool>,
+    /// 降级与错误明细（如实上报，不吞）
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewAlertInfo {
+    pub id: i64,
+    pub code: String,
+    pub alert_type: String,
+    pub level: String,
+}
+
+/// 转债期限类事实（cb_list 每日一次的缓存值）
+#[derive(Debug, Clone)]
+struct CbFacts {
+    redeem_status: Option<String>,
+    last_trade_date: Option<String>,
+    maturity_date: Option<String>,
+}
+
+/// 日级缓存：跨日自动重置（tick 里对 date）
+#[derive(Debug, Default)]
+struct DailyState {
+    date: String,
+    /// code → 近 20 根日线量（不含今日）；None = 当日日线获取失败
+    /// （放量类当日不参与判定——不伪造，也不逐分钟重试白耗请求）
+    vol_hist: HashMap<String, Option<Vec<Option<f64>>>>,
+    /// code → 强赎/期限字段（cb_list 每日一次）
+    cb: HashMap<String, CbFacts>,
+    /// cb_list 今日是否已成功拉过（失败不置位 → 下一轮重试）
+    cb_checked: bool,
+}
+
+impl DailyState {
+    fn new(date: String) -> Self {
+        Self {
+            date,
+            ..Default::default()
+        }
+    }
+}
+
+pub struct SchedulerCore {
+    deps: Arc<AgentDeps>,
+    review: Option<ReviewTrigger>,
+    daily: Mutex<DailyState>,
+}
+
+impl SchedulerCore {
+    pub fn new(deps: Arc<AgentDeps>, review: Option<ReviewTrigger>) -> Arc<Self> {
+        Arc::new(Self {
+            deps,
+            review,
+            daily: Mutex::new(DailyState::default()),
+        })
+    }
+
+    fn daily(&self) -> MutexGuard<'_, DailyState> {
+        self.daily.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 一轮调度（`now` 注入——测试用模拟时刻，生产用 [`now_shanghai`]）。
+    /// 任何一步失败都不 panic：降级进 `notes`，下一轮自愈。
+    pub async fn tick(&self, now: DateTime<FixedOffset>) -> TickReport {
+        let mut rep = TickReport::default();
+
+        // 时钟（§9 生产口径）：日历缓存自带降级链（实拉 → 旧缓存 → 启发式）
+        let view = self.deps.calendar.view_for_clock(&*self.deps.market).await;
+        let clock = market_clock(now, &view);
+        rep.state = clock.state.to_string();
+        if clock.calendar_degraded {
+            rep.notes
+                .push("日历不可用：交易日判定退化为工作日启发式（未排除节假日）".into());
+        }
+        if clock.state == "non_trading_day" {
+            return rep; // 休市空转，不打 sidecar（03 §12）
+        }
+        rep.trade_day = true;
+        let today = clock.date.clone();
+
+        // 跨日重置日级缓存
+        {
+            let mut d = self.daily();
+            if d.date != today {
+                *d = DailyState::new(today.clone());
+            }
+        }
+
+        // 盘中分钟级轮询（集合竞价/早盘/午盘 = clock.live）
+        if clock.live {
+            self.poll_once(&today, now, &mut rep).await;
+        }
+
+        // 盘后链（≥15:05；幂等 = 当日快照行存在，含补跑语义）
+        if now.hour() * 60 + now.minute() >= REVIEW_AT_MINS {
+            self.after_close(&today, now, &mut rep).await;
+        }
+        rep
+    }
+
+    /// 盘中一轮：刷新链（回写 + recalc）→ 日级数据缓存 → 判定 → 去重落库
+    async fn poll_once(&self, today: &str, now: DateTime<FixedOffset>, rep: &mut TickReport) {
+        // 1) 行情刷新（与 HTTP refresh 同链）。失败 → 本轮不判定：
+        //    不用库存旧价判——不伪造（03 §12）
+        let (resp, quotes) =
+            match service::refresh_portfolio_detailed(&self.deps.store, &*self.deps.market).await {
+                Ok(v) => v,
+                Err(RefreshError::Market(e)) => {
+                    rep.notes
+                        .push(format!("行情刷新失败，本轮跳过预警判定（不用旧值判）：{e}"));
+                    return;
+                }
+                Err(RefreshError::Store(m)) => {
+                    rep.notes.push(format!("刷新链存储错误：{m}"));
+                    return;
+                }
+            };
+        rep.polled = true;
+        rep.quotes_updated = resp.updated;
+        for s in &resp.skipped {
+            rep.notes
+                .push(format!("{}：{}（本轮预警判定跳过该标的）", s.code, s.reason));
+        }
+
+        let holdings = match lock(&self.deps.store).holdings() {
+            Ok(h) => h,
+            Err(e) => {
+                rep.notes.push(format!("读取持仓失败：{e}"));
+                return;
+            }
+        };
+        if holdings.is_empty() {
+            return;
+        }
+
+        // 2) 日级事实：转债强赎（每日一次）+ 各标的日线量窗口（每日每 code 一次）
+        self.ensure_daily(today, &holdings, rep).await;
+
+        // 3) 组装判定输入 → 规则函数出判定（数字口径只在 zimu-domain::alert）
+        //    → 同日 (code,type) 去重 → 落库。本段无 await，daily 锁可安全持有。
+        let ts = now.format("%Y-%m-%d %H:%M").to_string();
+        let q_by_code: HashMap<&str, &QuoteRow> =
+            quotes.iter().map(|q| (q.code.as_str(), q)).collect();
+        let daily = self.daily();
+        for h in &holdings {
+            // 有效性过滤与回写链同语义（04 附录 B）：仅 status=ok 且 price>0 参与判定
+            let Some(q) = q_by_code.get(h.code.as_str()) else {
+                continue; // 响应缺行：skipped 已记 note
+            };
+            if q.status != QuoteStatus::Ok {
+                continue;
+            }
+            let Some(price) = q.price.filter(|p| *p > 0.0) else {
+                continue;
+            };
+
+            // 涨跌停限价（§2）：prev 行情行优先、库存回退；pct 数据层配置优先、
+            // 未配置按板块推断（推不出 → None → 涨跌停类不参与）
+            let prev = q.prev.filter(|p| *p > 0.0).or(h.prev);
+            let pct = h.limit_pct.or_else(|| limit_pct(h.kind, &h.code, false));
+            let (mut limit_up, mut limit_down) = (None, None);
+            if let (Some(p), Some(pc)) = (prev, pct) {
+                if p > 0.0 {
+                    let r = limit_prices(h.kind, p, pc);
+                    limit_up = r.limit_up;
+                    limit_down = r.limit_down;
+                }
+            }
+
+            // 最近一条建议留档的 stop/target_hi（无留档 → 不参与）
+            let (stop, target_hi) = match lock(&self.deps.store).list_advice(Some(&h.code), 1) {
+                Ok(mut v) => v.pop().map(|a| (a.stop, a.target_hi)).unwrap_or((None, None)),
+                Err(e) => {
+                    rep.notes.push(format!("读取 {} 建议留档失败：{e}", h.code));
+                    (None, None)
+                }
+            };
+
+            let cb = daily.cb.get(&h.code);
+            let item = AlertItem {
+                kind: h.kind,
+                price,
+                prev,
+                limit_up,
+                limit_down,
+                cost: Some(h.cost),
+                stop,
+                target_hi,
+                volume_today: q.volume,
+                vol_hist: daily
+                    .vol_hist
+                    .get(&h.code)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_default(),
+                redeem_status: cb.and_then(|c| c.redeem_status.clone()),
+                last_trade_date: cb.and_then(|c| c.last_trade_date.clone()),
+                maturity_date: cb.and_then(|c| c.maturity_date.clone()),
+            };
+            let out = alert::eval_alerts(&alert::AlertEvalInput {
+                today: today.to_string(),
+                item,
+            });
+            for d in out.alerts {
+                // 同日 (code,type) 去重（03 §12：每自然日至多一条）
+                match lock(&self.deps.store).alert_exists_on(&h.code, &d.alert_type, today) {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(e) => {
+                        rep.notes
+                            .push(format!("{} 预警去重查询失败（跳过该条）：{e}", h.code));
+                        continue;
+                    }
+                }
+                let na = NewAlert {
+                    ts: ts.clone(),
+                    code: h.code.clone(),
+                    name: h.name.clone(),
+                    alert_type: d.alert_type.clone(),
+                    level: d.level.clone(),
+                    text: d.text,
+                };
+                match lock(&self.deps.store).insert_alert(&na) {
+                    Ok(id) => {
+                        tracing::info!(
+                            code = %na.code, name = %na.name,
+                            r#type = %na.alert_type, level = %na.level,
+                            "预警触发（03 §12）"
+                        );
+                        rep.new_alerts.push(NewAlertInfo {
+                            id,
+                            code: na.code,
+                            alert_type: na.alert_type,
+                            level: na.level,
+                        });
+                    }
+                    Err(e) => rep.notes.push(format!("{} 预警落库失败：{e}", h.code)),
+                }
+            }
+        }
+    }
+
+    /// 日级事实缓存：cb_list（有转债持仓才打，每日一次）+ 日线量窗口（每日每 code 一次）
+    async fn ensure_daily(&self, today: &str, holdings: &[HoldingRow], rep: &mut TickReport) {
+        // a) 转债强赎/期限字段（cb_list 是全量在市列表的重请求——不进分钟级轮询）
+        let cb_held: Vec<&HoldingRow> = holdings
+            .iter()
+            .filter(|h| h.kind == Kind::Cb)
+            .collect();
+        let need_cb = !cb_held.is_empty() && !self.daily().cb_checked;
+        if need_cb {
+            match self.deps.market.cb_list().await {
+                Ok(p) => {
+                    if p.redeem_source.is_none() {
+                        rep.notes.push(
+                            "cb_list 强赎源降级：今日强赎/到期类判定跳过（价格类照常）".into(),
+                        );
+                    }
+                    let mut d = self.daily();
+                    for h in &cb_held {
+                        match p.items.iter().find(|i| i.code == h.code) {
+                            Some(it) => {
+                                d.cb.insert(
+                                    h.code.clone(),
+                                    CbFacts {
+                                        redeem_status: it.redeem_status.clone(),
+                                        last_trade_date: it.last_trade_date.clone(),
+                                        maturity_date: it.maturity_date.clone(),
+                                    },
+                                );
+                            }
+                            None => rep.notes.push(format!(
+                                "{} 未在 cb_list 在市列表中（强赎/到期类今日不参与）",
+                                h.code
+                            )),
+                        }
+                    }
+                    d.cb_checked = true;
+                }
+                // 不置 cb_checked：下一轮重试（首轮多为 sidecar 冷启动）
+                Err(e) => rep.notes.push(format!("cb_list 拉取失败（下一轮重试）：{e}")),
+            }
+        }
+
+        // b) 日线量窗口：近 20 根（不含今日）。当日失败记 None → 放量类今日
+        //    不参与判定（不伪造；也不逐分钟重试白耗请求——日线级故障等次日自愈）
+        let missing: Vec<(String, String)> = {
+            let d = self.daily();
+            holdings
+                .iter()
+                .filter(|h| !d.vol_hist.contains_key(&h.code))
+                .filter_map(|h| symbol_of(&h.mkt, &h.code).map(|s| (h.code.clone(), s)))
+                .collect()
+        };
+        if missing.is_empty() {
+            return;
+        }
+        let start = NaiveDate::parse_from_str(today, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.checked_sub_days(Days::new(KLINE_LOOKBACK_DAYS)))
+            .map(|d| d.format("%Y-%m-%d").to_string());
+        let mut fetched: Vec<(String, Option<Vec<Option<f64>>>)> = Vec::new();
+        for (code, sym) in &missing {
+            match self
+                .deps
+                .market
+                .kline(sym, None, start.as_deref(), Some(today))
+                .await
+            {
+                Ok(p) => {
+                    // 排除今日 bar（sidecar 盘中可能带当日未完成 bar——量不是全日量）
+                    let mut vols: Vec<Option<f64>> = p
+                        .kline
+                        .iter()
+                        .filter(|b| b.date != *today)
+                        .map(|b| b.volume)
+                        .collect();
+                    if vols.len() > VOL_WINDOW {
+                        vols.drain(..vols.len() - VOL_WINDOW);
+                    }
+                    fetched.push((code.clone(), Some(vols)));
+                }
+                Err(e) => {
+                    rep.notes
+                        .push(format!("{code} 日线获取失败，放量类今日不参与判定：{e}"));
+                    fetched.push((code.clone(), None));
+                }
+            }
+        }
+        let mut d = self.daily();
+        for (code, v) in fetched {
+            d.vol_hist.insert(code, v);
+        }
+    }
+
+    /// 盘后链（03 §12）：最终刷新 → equity_snapshots（date 主键幂等）→ 复盘触发。
+    /// 幂等闸 = 当日快照行存在；当日缺失且已过 15:05 → 任意一轮补跑（含重启后）。
+    async fn after_close(&self, today: &str, now: DateTime<FixedOffset>, rep: &mut TickReport) {
+        match lock(&self.deps.store).equity_snapshot(today) {
+            Ok(Some(_)) => return, // 今日链已完成
+            Ok(None) => {}
+            Err(e) => {
+                rep.notes.push(format!("读取净值快照失败：{e}"));
+                return;
+            }
+        }
+        // 最终刷新（15:00 后行情冻结为收盘价）；失败 → 整链顺延下一轮，宁缺不写旧数
+        let view = match service::refresh_portfolio(&self.deps.store, &*self.deps.market).await {
+            Ok(r) => r.portfolio,
+            Err(RefreshError::Market(e)) => {
+                rep.notes
+                    .push(format!("盘后最终刷新失败，快照顺延下一轮：{e}"));
+                return;
+            }
+            Err(RefreshError::Store(m)) => {
+                rep.notes.push(format!("盘后刷新链存储错误：{m}"));
+                return;
+            }
+        };
+        let ts = now.format("%Y-%m-%d %H:%M").to_string();
+        let snap = EquitySnapshotRow::from_agg(today, &ts, &view.agg);
+        if let Err(e) = lock(&self.deps.store).upsert_equity_snapshot(&snap) {
+            rep.notes.push(format!("净值快照落库失败：{e}"));
+            return;
+        }
+        rep.snapshot_written = true;
+        tracing::info!(
+            date = %today, total_assets = snap.total_assets,
+            day_pnl = snap.day_pnl, day_pnl_pct = snap.day_pnl_pct,
+            "净值快照已写入（15:05 盘后链，数字 = recalc agg 原值）"
+        );
+
+        // 触发盘后复盘（/复盘 → post-market-review Skill）；agent 离线如实记录，
+        // 快照照写——ok=1 只表示会话受理，产出以 advice_history 为准（03 §12 留档）
+        let (ok, detail) = match &self.review {
+            Some(trigger) => {
+                let accepted = trigger(REVIEW_TRIGGER_TEXT.to_string()).await;
+                (
+                    accepted,
+                    if accepted {
+                        "复盘已注入 agent 会话（/复盘 Skill）".to_string()
+                    } else {
+                        "会话注入失败（agent 循环已退出或通道关闭）".to_string()
+                    },
+                )
+            }
+            None => (
+                false,
+                "agent 未接线（缺 robit 配置或启动失败），复盘未触发".to_string(),
+            ),
+        };
+        rep.review_ok = Some(ok);
+        if let Err(e) = lock(&self.deps.store).insert_push_log(
+            &ts,
+            "agent",
+            "post_market_review",
+            ok,
+            &detail,
+        ) {
+            rep.notes.push(format!("push_log 落库失败：{e}"));
+        }
+        tracing::info!(ok, detail = %detail, "盘后复盘触发（15:05 调度）");
+    }
+}
+
+/// 实时循环（生产入口）：tick + sleep 的薄壳——判定逻辑全在 [`SchedulerCore::tick`]，
+/// 测试直接注入模拟时刻，不经过这里。
+pub async fn run(core: Arc<SchedulerCore>, interval: Duration) {
+    tracing::info!(
+        "预警调度器已启动：盘中（live 时段）每 {}s 轮询 + 交易日 15:05 盘后链（03 §12）",
+        interval.as_secs()
+    );
+    loop {
+        let rep = core.tick(now_shanghai()).await;
+        log_tick(&rep);
+        tokio::time::sleep(interval).await;
+    }
+}
+
+fn log_tick(rep: &TickReport) {
+    let interesting = !rep.new_alerts.is_empty()
+        || rep.snapshot_written
+        || rep.review_ok.is_some()
+        || !rep.notes.is_empty();
+    if interesting {
+        tracing::info!(
+            state = %rep.state,
+            polled = rep.polled,
+            updated = rep.quotes_updated,
+            alerts = rep.new_alerts.len(),
+            snapshot = rep.snapshot_written,
+            review = ?rep.review_ok,
+            notes = %rep.notes.join("；"),
+            "调度轮"
+        );
+    } else {
+        tracing::debug!(
+            state = %rep.state,
+            polled = rep.polled,
+            updated = rep.quotes_updated,
+            "调度轮（无事件）"
+        );
+    }
+}

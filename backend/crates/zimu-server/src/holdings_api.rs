@@ -28,12 +28,12 @@ use crate::openapi::ApiError;
 pub type SharedStore = Arc<Mutex<Store>>;
 
 /// 锁中毒（上一持有者 panic）不致命：按中毒前的值继续（into_inner）。
-fn lock(store: &SharedStore) -> MutexGuard<'_, Store> {
+pub(crate) fn lock(store: &SharedStore) -> MutexGuard<'_, Store> {
     store.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 存储内部错误 → 500（细节只进日志，不把 SQL 吐给客户端）。调用点负责打日志。
-fn store_error() -> Response {
+pub(crate) fn store_error() -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ApiError::new("store_error", "存储层内部错误，已记录日志")),

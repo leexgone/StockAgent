@@ -62,6 +62,16 @@ pub async fn refresh_portfolio(
     store: &SharedStore,
     api: &dyn MarketApi,
 ) -> Result<RefreshResponse, RefreshError> {
+    refresh_portfolio_detailed(store, api).await.map(|(r, _)| r)
+}
+
+/// 与 [`refresh_portfolio`] 同一条链，额外返回本轮 quote 原始行——调度器
+/// （P4-T7）复用回写链的同时还要 volume/prev 等判定事实（03 §12），这些
+/// 不进 wire 契约，所以不扩 `RefreshResponse` 而是走第二返回值。
+pub async fn refresh_portfolio_detailed(
+    store: &SharedStore,
+    api: &dyn MarketApi,
+) -> Result<(RefreshResponse, Vec<zimu_market::models::QuoteRow>), RefreshError> {
     let holdings = lock(store).holdings().map_err(store_err)?;
 
     // symbol 拼装（B7：显式 mkt 字段，拼不出前缀即拒绝，不发出去挨 400）
@@ -86,14 +96,17 @@ pub async fn refresh_portfolio(
     // 空持仓/全拼不出：不打 sidecar，直接回重算视图
     if symbols.is_empty() {
         let view = lock(store).portfolio().map_err(store_err)?;
-        return Ok(RefreshResponse {
-            as_of: None,
-            updated: 0,
-            skipped,
-            degraded: false,
-            attempts: Vec::new(),
-            portfolio: view,
-        });
+        return Ok((
+            RefreshResponse {
+                as_of: None,
+                updated: 0,
+                skipped,
+                degraded: false,
+                attempts: Vec::new(),
+                portfolio: view,
+            },
+            Vec::new(),
+        ));
     }
 
     let payload = api
@@ -143,14 +156,15 @@ pub async fn refresh_portfolio(
     let updated = lock(store).apply_quotes(&updates).map_err(store_err)?;
     let view = lock(store).portfolio().map_err(store_err)?;
 
-    Ok(RefreshResponse {
+    let resp = RefreshResponse {
         as_of: Some(payload.as_of),
         updated,
         skipped,
         degraded: payload.degraded,
         attempts: payload.attempts,
         portfolio: view,
-    })
+    };
+    Ok((resp, payload.quotes))
 }
 
 fn store_err(e: impl std::fmt::Display) -> RefreshError {

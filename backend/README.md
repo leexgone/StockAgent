@@ -2,14 +2,16 @@
 
 ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开公网入站。
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
-Agent SSE 会话 + 持仓录入 API + 行情 API + OpenAPI 契约，P2-T3/P4-T1/P4-T4/P4-T5；
-P2-T5 起桥体消费 robit `robit-web` crate）、`zimu-agent`（P4-T6 agent 应用层：
-8 个领域工具 + Skill 模板加载 + 与 HTTP API 共用的刷新链服务，server 与 CLI
-共同消费）、`zimu-agent-cli`（Agent 调试 REPL：P2-T2 spike 起，P4-T6 换装与
-server 相同的领域工具面与 Skill）、`zimu-domain`（P3-T3 领域纯函数库：`docs/03`
-全部数字口径的 Rust 实现，含 P4-T6 打分模块 `advice`，`cargo test -p zimu-domain`
-跑 `fixtures/golden/` 黄金向量）、`zimu-store`（P4-T1/T2 存储层：SQLite schema +
-迁移 + 录入事务 + 建议留档，校验复用 zimu-domain，`cargo test -p zimu-store`）与
+Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约，
+P2-T3/P4-T1/P4-T4/P4-T5/P4-T7；P2-T5 起桥体消费 robit `robit-web` crate；bin 侧
+启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：8 个领域工具 +
+Skill 模板加载 + 与 HTTP API 共用的刷新链服务 + 调度预警引擎 `scheduler`，
+server 与 CLI 共同消费）、`zimu-agent-cli`（Agent 调试 REPL：P2-T2 spike 起，
+P4-T6 换装与 server 相同的领域工具面与 Skill）、`zimu-domain`（P3-T3 领域纯函数库：
+`docs/03` 全部数字口径的 Rust 实现，含 P4-T6 打分模块 `advice` 与 P4-T7 预警
+判定 `alert`，`cargo test -p zimu-domain` 跑 `fixtures/golden/` 黄金向量）、
+`zimu-store`（P4-T1/T2 存储层：SQLite schema + 迁移 + 录入事务 + 建议/预警/
+快照/推送日志读写，校验复用 zimu-domain，`cargo test -p zimu-store`）与
 `zimu-market`（P4-T4 行情适配器：datafetch sidecar 的**唯一消费入口**——类型化
 契约、降级三分类、市场时钟、当日 bar 合成，`cargo test -p zimu-market`）。
 
@@ -65,7 +67,7 @@ curl.exe -sN http://127.0.0.1:8080/api/chat/stream   # 另开窗口看事件流
 curl.exe -s -X POST http://127.0.0.1:8080/api/chat -H "Content-Type: application/json" --data-binary "@payload.json"
 ```
 
-## zimu-agent（P4-T6 agent 应用层：领域工具 + Skill 模板）
+## zimu-agent（P4-T6/T7 agent 应用层：领域工具 + Skill 模板 + 调度引擎）
 
 server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 echo 工具两处
 重复的债在此收敛。边界：**数字口径只在 `zimu-domain`**，工具只做取数
@@ -98,14 +100,57 @@ Markdown 正文；`/触发词` 命中时正文以临时 system message 注入本
 | `generate-advice` 建议生成 | `/advice` `/建议 <代码>` | refresh_quotes → calc_advice（拿 advice_id + 全部数字）→ 三段式文案（结论/为什么/怎么做 + 失效条件）→ **finalize_advice 归档后才算完成** |
 
 ```powershell
-cargo test -p zimu-agent   # 10 项集成（全离线）：黄金向量 av-bull-add 同款输入端到端
+cargo test -p zimu-agent   # 17 项集成（全离线）——tools 10 项：黄金向量 av-bull-add 同款输入端到端
                            #（日线 24 根 + 当日 bar 实时合成 → score 73/conf 0.9/加仓 → 留档逐位一致）、
                            # 文案回填不动数字、risks 空被拒、B7 裸代码拒绝、限价与 domain 同源、
-                           # sidecar 挂时 refresh 报错不写库 / market_status 不瘫、Skill 触发词唯一 + tools_required 已注册
+                           # sidecar 挂时 refresh 报错不写库 / market_status 不瘫、Skill 触发词唯一 + tools_required 已注册；
+                           # scheduler 7 项见下节
 ```
 
 注意：工具输出经 JSON 文本往返后与内存值可差 1 ulp（serde_json 浮点解析
 fast path 的双舍入），测试比对与 03 附录同款按容差（1e-9），不做 Value 精确相等。
+
+## 调度与预警引擎（P4-T7，03 §12）
+
+`zimu-agent::scheduler`——**纯编排**，预警判定的数字口径全在
+`zimu-domain::alert::eval_alerts`（8 类判定序：涨跌停/跌破成本/止损/止盈/
+放量/强赎/临近到期，黄金向量 `alerts.json` 17 例），调度器只组装事实、去重、
+落库。核心是 `SchedulerCore::tick(now)`——**时刻注入**，测试用模拟盘中直接
+驱动（验收「模拟盘中可触发」），生产由 `run()` 薄壳每 60s 调一次
+（`now_shanghai()`）。server 的 bin 侧启动（`main.rs`），`ZIMU_SCHEDULER_DISABLE=1`
+停用；复盘触发经 `ReviewTrigger` 回调接 `WebBridge::send_user_text("/复盘")`——
+本 crate 不依赖 robit-web，CLI/测试传 None。
+
+一轮 tick 的行为（全部降级如实、不伪造）：
+
+| 时机 | 动作 |
+|---|---|
+| 非交易日 | 空转，不打 sidecar（市场时钟 §9 判定） |
+| 交易日 live（集合竞价/早盘/午盘） | 刷新链（`service::refresh_portfolio_detailed`，与 HTTP refresh 同链）→ 判定 → 同日 (code,type) 去重 → 落 `alerts`；**行情失败该轮不判定**（不用库存旧价） |
+| 每交易日首轮 | `/cb_list` 一次（仅持转债时；重请求不进分钟级轮询）；各标的日线拉近 20 根量窗口缓存（当日失败 → 放量类今日不参与） |
+| 交易日 ≥15:05 且当日无快照 | 最终刷新 → `equity_snapshots`（date 主键 upsert 幂等，数字 = recalc agg 原值不舍入）→ `/复盘` 注入会话 → `push_log` 留痕；刷新失败整链顺延（宁缺不写旧数）；重启后当日缺失自动补跑 |
+
+stop/target_hi 取该标的**最近一条 `advice_history` 留档**（无留档 → 止损/止盈
+类不参与）；限价按 §2 由 `price_limit` 拼装（数据层配置优先，未配置推断）。
+
+```powershell
+cargo test -p zimu-agent --test scheduler   # 7 项（全离线，FakeApi + 注入时刻）：
+    # 模拟 10:30 触发跌破成本+止损（判定序）并同日去重 / 非交易日与午休空转不打 sidecar /
+    # sidecar 挂降级不判旧值且恢复后自愈 / 15:05 快照手算锚点 + 复盘回调恰一次 + push_log /
+    # agent 缺席快照照写 ok=0 / 刷新失败快照顺延补跑 / cb 强赎+放量触发与日级缓存计数
+```
+
+## 预警与净值快照 API（P4-T7）
+
+内容由调度引擎判定落库，端点只读取与归档（`alerts_api.rs`，不生成不改写）：
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/alerts?done=&limit=` | 预警列表，新在前；`done=true/false` 过滤归档态，缺省全部（默认 100，上限 500） |
+| `POST /api/alerts/{id}/done` | 归档（done=1，不删行，重复归档幂等）；id 不存在 → 404 `no_alert` |
+| `GET /api/equity_snapshots?limit=` | 净值快照，**date 升序**（净值曲线输入形态）；limit 取最近 N 条（默认 120，上限 500） |
+
+`push_log` 的读端点留给 P5-T2 wechat 屏（推送日志卡）一并落地。
 
 ## 持仓录入 API（P4-T1，手工逐笔先行）
 
@@ -174,7 +219,7 @@ cargo test -p zimu-market -p zimu-server   # 适配器 29 项 + server（集成 
 **前后端类型同源**：API 响应/请求全部是类型化 serde 结构体（`json!` 临时拼装
 已清除），在定义处 `#[derive(ToSchema)]`（zimu-domain / zimu-store /
 zimu-market / zimu-server 四 crate），`src/openapi.rs` 的 `ApiDoc`（utoipa 5）
-汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（36 schema、16 路径；文档
+汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（38 schema、19 路径；文档
 永不手改）。前端 `npm run gen:api`（openapi-typescript）生成
 `src/api/schema.d.ts`，P5-T1 的 API client 直接消费。运行时
 `GET /api/openapi.json` 提供同一文档。
@@ -186,7 +231,7 @@ draft 2020-12）三连：
    会直接红）；
 2. seeded 测试服务（FakeApi 注入，`tests/common/` 共享装置）全端点**实时
    响应**过其声明的响应 schema，含 422/404/400/503 错误契约；
-3. **`fixtures/api/` 15 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
+3. **`fixtures/api/` 19 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
 
 health/chat 实现在 bin（依赖 robit 装配），契约在 `openapi.rs` 以 doc-stub
 声明、类型定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化键集 == schema
@@ -207,14 +252,18 @@ SQLite 单文件（C9 已决：rusqlite bundled，备份 = 拷文件；`.db` 在
 留档可审计；`holding_code` **不是外键**——流水必须在清仓后仍留档）、
 `advice_history`（`generated_at + data_version`，B9 正式解；**P4-T6 起写入**——
 `insert_advice` 数字列 → `finalize_advice` 只回填 reason/risks 文案列，数字
-不可改写，ADR-0007）、`alerts`、`equity_snapshots`（15:05 调度写入是 P4-T7）、`push_log`。
+不可改写，ADR-0007）、`alerts` / `equity_snapshots` / `push_log`（**P4-T7 起
+写入**——调度引擎落预警行与去重查询 `alert_exists_on`、15:05 盘后链 upsert
+快照（date 主键幂等，`from_agg` 只搬运 recalc 原值）与 push_log 留痕；六表
+读写自此齐备）。
 
 迁移机制：`PRAGMA user_version` 逐版前进，每版一个事务；已发布版本的 SQL 永不修改，
 新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.40）——
 `libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
 
 ```powershell
-cargo test -p zimu-store   # 23 项：录入事务/校验拒绝/回滚/重启不丢数据/行情回写（P4-T4）/建议留档（P4-T6）
+cargo test -p zimu-store   # 26 项：录入事务/校验拒绝/回滚/重启不丢数据/行情回写（P4-T4）/建议留档（P4-T6）/
+                           # 预警去重与归档、快照 upsert 幂等与升序读取、push_log（P4-T7）
 ```
 
 `portfolio_input()` 是领域输入的**唯一组装点**（03 §5 无行情降级语义：price
@@ -258,12 +307,15 @@ P4-T6 起 CLI 与 server 是**同一份工具面与 Skill**（`zimu-agent::tools
 净值指标、波动合成、涨跌停（比例推断 / 整数单元限价 / 委托价校验，P1-T2
 定稿）、**分析结论打分**（`advice`，P4-T6：03 §10 生产口径——信号票制、
 中性维 60、70/55/45 三带、纪律拦截优先、target/stop 锚现价 half-up；ADR-0007
-「数字归规则」的唯一实现，TS 共享层镜像 `frontend/src/domain/advice.ts`）——
+「数字归规则」的唯一实现，TS 共享层镜像 `frontend/src/domain/advice.ts`）、
+**预警判定**（`alert`，P4-T7：03 §12——8 类判定序、含边界压线语义、数据缺失
+不参与不伪造、text 展示层模板；镜像 `frontend/src/domain/alert.ts`，自然日差
+用 days_from_civil 纯算不引 chrono）——
 全部纯函数无 I/O，输入输出 serde 结构体的字段名与
 `fixtures/golden/*.json` 键一一对应。测试即验收：
 
 ```powershell
-cargo test -p zimu-domain   # 16 个单测 + 黄金向量 runner（9 组 86 用例；pending 组自动跳过，现全部 active）
+cargo test -p zimu-domain   # 26 个单测 + 黄金向量 runner（10 组 103 用例；pending 组自动跳过，现全部 active）
 ```
 
 改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层
@@ -281,31 +333,34 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 | `ZIMU_MARKET_URL` | `http://127.0.0.1:8300` | 行情 sidecar 基地址（P4-T4；不可达时行情端点降级 503，服务照常） |
 | `ZIMU_MARKET_TIMEOUT_MS` | `10000` | sidecar 请求超时（毫秒） |
 | `ZIMU_SKILLS_DIR` | `仓库根/skills`（按编译期 manifest 定位） | Skill 模板目录（P4-T6；每子目录一个 SKILL.md，robit 约定） |
-| `RUST_LOG` | 未设置时按 robit config `log_level`（缺省 info，含 tower_http=debug） | 设置了则优先于 robit 配置；有 robit 配置时日志由 `init_logging` 接管（控制台 + `<cwd>/.robit/logs`），无配置时回落服务自己的 tracing_subscriber（R3，见 `docs/07-backlog.md`） |
+| `ZIMU_SCHEDULER_DISABLE` | 未设置（调度器随服务启动） | 设任意值停用调度与预警引擎（P4-T7，开发/测试用；手动 refresh 与 agent 工具不受影响） |
+| `RUST_LOG` | 未设置时按 robit config `log_level`（缺省 info，含 tower_http=debug 与 `zimu_agent`/`zimu_market` 同级放行） | 设置了则优先于 robit 配置；有 robit 配置时日志由 `init_logging` 接管（控制台 + `<cwd>/.robit/logs`），无配置时回落服务自己的 tracing_subscriber。**注意**：robit 的过滤器只放行 target crate 与 robit 系 target，宿主其余 crate 必须走附加 directive 显式放行（P4-T7 已接 `zimu_agent={level}` `zimu_market={level}`——调度器日志否则被默认底线静默吞掉，R3，见 `docs/07-backlog.md`） |
 
 ## 目录
 
 ```text
 Cargo.toml                  workspace（robit crates pin 本地 git tag v0.1.26，其余依赖版本与 robit workspace 对齐）
-crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + OpenAPI 契约
+crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
-                            ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；robit 配置缺失时优雅降级；bin 侧契约键集单测）
+                            ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
                             ├─ agent_bridge.rs   Agent 装配（工具面/Skill 来自 zimu-agent；WebBridge 接线）
                             ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1，错误→状态码映射；utoipa::path 契约标注）
                             ├─ market_api.rs     /api/market/*（P4-T4：status/quote/kline/cb_list/calendar；refresh 处理器 P4-T6 起薄壳调 zimu-agent::service）
+                            ├─ alerts_api.rs     /api/alerts* /api/equity_snapshots（P4-T7：调度引擎落库内容的读取与归档，不生成不改写）
                             ├─ openapi.rs        OpenAPI 3.1 汇编（P4-T5：ApiDoc + ApiError/Health 等共享契约类型 + 再生成入口）
-                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/样例过 schema）· common/ 共享装置（FakeApi/seed）
-crates/zimu-agent/          agent 应用层（P4-T6）：领域工具 + Skill 加载 + 应用服务（server/CLI 共用）
+                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/19 份样例过 schema）· common/ 共享装置（FakeApi/seed）
+crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill 加载 + 应用服务 + 调度预警引擎（server/CLI 共用）
                             ├─ lib.rs            AgentDeps（store + market + 日历缓存）与 crate 边界说明
                             ├─ tools/            8 领域工具 + echo（mod.rs 注册器；market/portfolio/advice 三组）
-                            ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
+                            ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链；P4-T7 增 detailed 变体供调度器复用——多回 quote 原始行，wire 契约不变）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
+                            ├─ scheduler.rs      调度与预警引擎（P4-T7，03 §12 纯编排：tick(now) 时刻注入可测、盘中轮询判定落 alerts、日级缓存（kline 量窗口/cb_list）、15:05 快照 + /复盘 触发 + push_log）
                             ├─ skills.rs         Skill 目录解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ robit loader 接线
-                            └─ tests/tools.rs    10 项集成（黄金向量端到端/留档/降级/Skill 完整性，全离线）
+                            └─ tests/            tools.rs 10 项（黄金向量端到端/留档/降级/Skill 完整性）· scheduler.rs 7 项（模拟盘中触发/去重/空转/降级/盘后链幂等，全离线）
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
-crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）
-                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，9 组 86 用例）
-crates/zimu-store/          存储层（P4-T1/T2）：SQLite 六表 + user_version 迁移 + 录入事务 + 行情回写（apply_quotes）+ 建议留档（insert/finalize/list_advice，P4-T6）
-                            └─ tests/store.rs      23 项集成测试（含重启不丢数据、COALESCE 回写、留档数字不可经文案回填改写）
+crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
+                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 103 用例）
+crates/zimu-store/          存储层（P4-T1/T2/T7）：SQLite 六表 + user_version 迁移 + 录入事务 + 行情回写（apply_quotes）+ 建议留档（insert/finalize/list_advice，P4-T6）+ 预警/快照/推送日志（insert_alert/alert_exists_on 去重/mark_alert_done、upsert_equity_snapshot 幂等/from_agg、insert_push_log，P4-T7）
+                            └─ tests/store.rs      26 项集成测试（含重启不丢数据、COALESCE 回写、留档数字不可经文案回填改写、预警同日去重与归档、快照 upsert 幂等）
 crates/zimu-market/         行情适配器（P4-T4）：sidecar 唯一消费入口
                             ├─ client.rs         MarketApi trait（注入点）+ HttpMarketClient（错误三分类映射）
                             ├─ models.rs         类型化契约（quote/kline/cb_list/calendar/healthz/错误体）

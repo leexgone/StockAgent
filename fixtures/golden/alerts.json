@@ -1,0 +1,346 @@
+{
+  "group": "alerts",
+  "title": "预警判定（生产口径，调度引擎的规则函数侧）",
+  "spec": "docs/03-domain-rules.md §12",
+  "schema_version": 1,
+  "status": "active",
+  "tolerance": 1e-9,
+  "notes": "eval_alerts 无状态纯函数：逐持仓输入事实（行情/成本/最近留档 stop+target_hi/日线量能/转债强赎字段）→ 按固定判定序输出全部触发的预警 {type,level,text}。type 封闭词汇：触及涨停/触及跌停/跌破成本/触及止损线/触及止盈线/放量/强赎公告/临近到期；level 词汇（§11）：up/down 只用于价格方向、warn 要动作类，引擎不产出 flat。text 是展示层模板（比对规则 6：expect 未列不校验）。数据缺失 → 对应序不参与判定，不伪造。同日 (code,type) 去重是调度器职责（需要库状态），不在本组。today 为上海日期 YYYY-MM-DD，用于转债期限的自然日差。",
+  "cases": [
+    {
+      "id": "al-limit-up",
+      "fn": "eval_alerts",
+      "desc": "涨停压线：limit_up = 10.00×1.10 = 11.00（§2 整数单元 half-up，调用方拼装传入），price = 11.0 恰好等于 → 含边界触发。cost/stop/target_hi/量能全缺 → 其余序不参与。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 11.0, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "触及涨停", "level": "up" }
+        ]
+      }
+    },
+    {
+      "id": "al-limit-down",
+      "fn": "eval_alerts",
+      "desc": "跌停压线：limit_down = 10.00×0.90 = 9.00，price = 9.0 恰好等于 → 含边界触发，level = down（方向语义，§11）。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 9.0, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "触及跌停", "level": "down" }
+        ]
+      }
+    },
+    {
+      "id": "al-below-cost-and-stop",
+      "fn": "eval_alerts",
+      "desc": "同标的双预警按判定序全部产出：price 9.5 < cost 10.0 → 跌破成本（浮亏 (9.5−10)/10×100 = −5.00%）；price 9.5 ≤ stop 9.5 恰好压线含边界 → 触及止损线。序 3 在序 4 前。",
+      "tags": ["normal"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 9.5, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": 10.0, "stop": 9.5, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "跌破成本", "level": "down" },
+          { "type": "触及止损线", "level": "down" }
+        ]
+      }
+    },
+    {
+      "id": "al-cost-line-safe",
+      "fn": "eval_alerts",
+      "desc": "price = cost = 10.0 相等不算跌破（压线算安全，附录规则 4）→ 无预警。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 10.0, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": 10.0, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": { "alerts": [] }
+    },
+    {
+      "id": "al-take-profit",
+      "fn": "eval_alerts",
+      "desc": "price 12.0 ≥ target_hi 12.0 恰好压线含边界 → 触及止盈线；level = warn（要动作的提醒，非方向语义——与原型「止盈提醒」样本一致）。price > stop 9.0 → 序 4 不触发。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 12.0, "prev": 11.0,
+          "limit_up": null, "limit_down": null,
+          "cost": 10.0, "stop": 9.0, "target_hi": 12.0,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "触及止盈线", "level": "warn" }
+        ]
+      }
+    },
+    {
+      "id": "al-vol-surge-up",
+      "fn": "eval_alerts",
+      "desc": "放量上涨：vol_hist 20 根含 1 个 null → 有效样本 19 ≥ 5，avg = 38000/19 = 2000；ratio = 5000/2000 = 2.5 ≥ 2.0 → 触发；方向 (10.5−10)/10 = +5% ≥ 0 → level = up。",
+      "tags": ["normal"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 10.5, "prev": 10.0,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": 5000, "vol_hist": [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, null],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "放量", "level": "up" }
+        ]
+      }
+    },
+    {
+      "id": "al-vol-surge-down-at-line",
+      "fn": "eval_alerts",
+      "desc": "放量下跌压线：avg = 20000/10 = 2000，ratio = 4000/2000 = 2.0 恰好等于阈值 → 含边界触发；方向 (9.8−10)/10 = −2% < 0 → level = down。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 9.8, "prev": 10.0,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": 4000, "vol_hist": [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "放量", "level": "down" }
+        ]
+      }
+    },
+    {
+      "id": "al-vol-surge-no-prev",
+      "fn": "eval_alerts",
+      "desc": "方向不可判：prev 缺失 → 放量仍触发（avg = 5000/5 = 1000，ratio = 5000/1000 = 5.0；有效样本 5 根恰好压线 ≥5 参与）但 level = warn。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "etf", "price": 1.05, "prev": null,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": 5000, "vol_hist": [1000, 1000, 1000, 1000, 1000],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "放量", "level": "warn" }
+        ]
+      }
+    },
+    {
+      "id": "al-vol-surge-insufficient",
+      "fn": "eval_alerts",
+      "desc": "样本不足：vol_hist 有效样本 4 < 5 → 放量不参与判定（哪怕 volume_today 夸张），不伪造 → 无预警。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 10.0, "prev": 10.0,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": 999999, "vol_hist": [1000, 1000, 1000, 1000],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": { "alerts": [] }
+    },
+    {
+      "id": "al-cb-redeem",
+      "fn": "eval_alerts",
+      "desc": "转债强赎：redeem_status「已公告强赎」含「强赎」且不以「不」开头 → 强赎公告 warn；last_trade_date 2026-11-20 − today 2026-10-29 = 22 自然日 > 5 → 临近到期不触发。",
+      "tags": ["normal"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "cb", "price": 132.5, "prev": 131.0,
+          "limit_up": null, "limit_down": null,
+          "cost": 120.0, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": "已公告强赎", "last_trade_date": "2026-11-20", "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "强赎公告", "level": "warn" }
+        ]
+      }
+    },
+    {
+      "id": "al-cb-not-redeemed",
+      "fn": "eval_alerts",
+      "desc": "「不强赎」含「强赎」子串但以「不」开头 → 不触发（封闭判据防误报）；last_trade_date 2026-11-06 − today = 8 自然日 > 5 窗口外 → 无预警。price 132.5 > cost 120 → 序 3 不触发。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "cb", "price": 132.5, "prev": 131.0,
+          "limit_up": null, "limit_down": null,
+          "cost": 120.0, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": "不强赎", "last_trade_date": "2026-11-06", "maturity_date": null
+        }
+      },
+      "expect": { "alerts": [] }
+    },
+    {
+      "id": "al-cb-deadline-line",
+      "fn": "eval_alerts",
+      "desc": "期限压线：last_trade_date 2026-11-03 − today 2026-10-29 = 5 自然日，恰好等于 CB_DEADLINE_DAYS = 5 → 含边界触发 临近到期 warn。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "cb", "price": 108.0, "prev": 107.5,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": "2026-11-03", "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "临近到期", "level": "warn" }
+        ]
+      }
+    },
+    {
+      "id": "al-cb-maturity-fallback",
+      "fn": "eval_alerts",
+      "desc": "last_trade_date 缺失 → 用 maturity_date：2026-11-01 − today = 3 自然日 ∈ [0,5] → 临近到期 warn。",
+      "tags": ["normal"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "cb", "price": 101.2, "prev": 101.0,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": "2026-11-01"
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "临近到期", "level": "warn" }
+        ]
+      }
+    },
+    {
+      "id": "al-cb-past-date",
+      "fn": "eval_alerts",
+      "desc": "已过期不参与：last_trade_date 2026-10-01 − today = −28 < 0（数据异常，行情侧自会以停牌/退市跳过）→ 无预警。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "cb", "price": 100.0, "prev": 100.0,
+          "limit_up": null, "limit_down": null,
+          "cost": null, "stop": null, "target_hi": null,
+          "volume_today": null, "vol_hist": [],
+          "redeem_status": null, "last_trade_date": "2026-10-01", "maturity_date": null
+        }
+      },
+      "expect": { "alerts": [] }
+    },
+    {
+      "id": "al-quiet",
+      "fn": "eval_alerts",
+      "desc": "全安静：9.0 < 10.2 < 11.0（限内）；price > cost 10.0（未跌破）；price > stop 9.0；price < target_hi 12.0；ratio = 1500/1000 = 1.5 < 2.0（avg = 20000/20 = 1000）→ 无预警。",
+      "tags": ["normal"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 10.2, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": 10.0, "stop": 9.0, "target_hi": 12.0,
+          "volume_today": 1500, "vol_hist": [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": { "alerts": [] }
+    },
+    {
+      "id": "al-zero-price",
+      "fn": "eval_alerts",
+      "desc": "price ≤ 0 → 整行跳过不伪造（调用方本应以行情有效性过滤，规则函数再守一道）→ 无预警。",
+      "tags": ["boundary"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 0.0, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": 10.0, "stop": 9.5, "target_hi": 12.0,
+          "volume_today": 5000, "vol_hist": [1000, 1000, 1000, 1000, 1000],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": { "alerts": [] }
+    },
+    {
+      "id": "al-multi-order",
+      "fn": "eval_alerts",
+      "desc": "多预警排序 = 判定序：price 11.0 = limit_up → 触及涨停（序 1）；ratio = 5000/1000 = 5.0 ≥ 2.0、方向 (11−10)/10 = +10% ≥ 0 → 放量 up（序 6）。price > cost 10.5、> stop 9.4 → 序 3/4 不触发；target_hi 缺失 → 序 5 不参与。",
+      "tags": ["normal"],
+      "input": {
+        "today": "2026-10-29",
+        "item": {
+          "kind": "stock", "price": 11.0, "prev": 10.0,
+          "limit_up": 11.0, "limit_down": 9.0,
+          "cost": 10.5, "stop": 9.4, "target_hi": null,
+          "volume_today": 5000, "vol_hist": [1000, 1000, 1000, 1000, 1000],
+          "redeem_status": null, "last_trade_date": null, "maturity_date": null
+        }
+      },
+      "expect": {
+        "alerts": [
+          { "type": "触及涨停", "level": "up" },
+          { "type": "放量", "level": "up" }
+        ]
+      }
+    }
+  ]
+}

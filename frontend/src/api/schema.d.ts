@@ -20,6 +20,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_alerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts/{id}/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["mark_alert_done"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -76,6 +108,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["chat_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/equity_snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_equity_snapshots"];
         put?: never;
         post?: never;
         delete?: never;
@@ -339,6 +387,27 @@ export interface components {
             total_pnl_pct: number;
         };
         /**
+         * @description 预警行。`type`/`level`/`text` 全部由规则函数产出（调度器只搬运，不改写）；
+         *     `done` 是用户归档态（API 置位，不删行）。
+         */
+        AlertRow: {
+            code: string;
+            done: boolean;
+            /** Format: int64 */
+            id: number;
+            /** @description up/down/warn（§11：up/down 只用于价格方向；引擎不产出 flat） */
+            level: string;
+            name: string;
+            text: string;
+            /** @description 触发时刻（上海，YYYY-MM-DD HH:MM） */
+            ts: string;
+            /**
+             * @description 封闭词汇（03 §12 判定表）：触及涨停/触及跌停/跌破成本/触及止损线/
+             *     触及止盈线/放量/强赎公告/临近到期
+             */
+            type: string;
+        };
+        /**
          * @description 统一错误体：`error` 机器可读码、`message` 中文可直接展示。
          *     特定拒绝带附加数值字段（前端就地高亮用，其余场景不出现）：
          *     涨跌停越界 `limit_down/limit_up/decimals`（显示与拦截同一对限价，03 §2）、
@@ -462,6 +531,36 @@ export interface components {
         ConfirmRequest: {
             approved: boolean;
             tool_call_id: string;
+        };
+        /**
+         * @description 每交易日一行的组合快照。数字直接取 `recalc` 的 `Agg` 原值（不舍入，
+         *     逐位可回溯）；`date` 主键 upsert——服务重启不重复（幂等）。
+         */
+        EquitySnapshotRow: {
+            /** Format: double */
+            cash: number;
+            /** @description 交易日 YYYY-MM-DD（主键） */
+            date: string;
+            /** Format: double */
+            day_pnl: number;
+            /** Format: double */
+            day_pnl_pct: number;
+            /** Format: double */
+            exposure: number;
+            /** Format: double */
+            hhi: number;
+            /** Format: double */
+            top3_sector: number;
+            /** Format: double */
+            total_assets: number;
+            /** Format: double */
+            total_mv: number;
+            /** Format: double */
+            total_pnl: number;
+            /** Format: double */
+            total_pnl_pct: number;
+            /** @description 写入时刻（上海，YYYY-MM-DD HH:MM） */
+            ts: string;
         };
         FeeBreakdown: {
             /** Format: double */
@@ -876,6 +975,78 @@ export interface operations {
             };
         };
     };
+    get_alerts: {
+        parameters: {
+            query?: {
+                /** @description true = 只看已归档 / false = 只看待处理 / 缺省全部 */
+                done?: boolean;
+                /** @description 行数上限：1–500，缺省 100 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预警列表，新在前（ts DESC, id DESC）。由调度引擎在交易日盘中判定落库（03 §12：type 封闭词汇、level up/down/warn、同日同型去重）；type/level/text 全部出自规则函数，端点不改写 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    mark_alert_done: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 归档成功，返回更新后的行（done=true；归档不删行，重复归档幂等） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertRow"];
+                };
+            };
+            /** @description 没有该 id 的预警（no_alert） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     chat_send: {
         parameters: {
             query?: never;
@@ -997,6 +1168,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_equity_snapshots: {
+        parameters: {
+            query?: {
+                /** @description 条数上限（取**最近** N 条，返回仍按 date 升序）：1–500，缺省 120 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 净值快照，date 升序（净值曲线的输入形态）。每交易日一行，由 15:05 盘后链写入（03 §12）；数字 = zimu-domain::recalc 汇总原值，不舍入、逐位可回溯 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EquitySnapshotRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
             };
         };
     };

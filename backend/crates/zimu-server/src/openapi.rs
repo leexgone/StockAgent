@@ -39,8 +39,8 @@ use zimu_market::models::{
     QuoteStatus,
 };
 use zimu_store::{
-    AccountRow, HoldingRow, NewHoldingMeta, PortfolioView, RecordReceipt, SimPreview, TradeRequest,
-    TradeRow,
+    AccountRow, AlertRow, EquitySnapshotRow, HoldingRow, NewHoldingMeta, PortfolioView,
+    RecordReceipt, SimPreview, TradeRequest, TradeRow,
 };
 
 // ============================================================================
@@ -207,6 +207,7 @@ fn chat_cancel_doc() {}
         (name = "system", description = "健康检查、契约文档与 Agent SSE 会话"),
         (name = "holdings", description = "持仓与录入（P4-T1，ADR-0006 手工逐笔先行；校验与派生全部走 zimu-domain）"),
         (name = "market", description = "行情（P4-T4，经 zimu-market 适配器——sidecar 唯一消费入口；错误三分类见 04 附录 B）"),
+        (name = "alerts", description = "预警与净值快照（P4-T7）：内容由调度引擎判定落库（口径 03 §12，判定函数在 zimu-domain::alert），端点只读取与归档"),
     ),
     paths(
         health_doc, chat_stream_doc, chat_doc, chat_confirm_doc, chat_cancel_doc,
@@ -221,6 +222,9 @@ fn chat_cancel_doc() {}
         crate::market_api::cb_list,
         crate::market_api::calendar,
         crate::market_api::refresh,
+        crate::alerts_api::get_alerts,
+        crate::alerts_api::mark_alert_done,
+        crate::alerts_api::get_equity_snapshots,
     ),
     components(schemas(
         ApiError, Health, ChatRequest, ConfirmRequest,
@@ -232,6 +236,7 @@ fn chat_cancel_doc() {}
         Agg, PerHolding, SectorAgg,
         AccountRow, HoldingRow, NewHoldingMeta, PortfolioView, RecordReceipt,
         SimPreview, TradeRequest, TradeRow,
+        AlertRow, EquitySnapshotRow,
         MarketClock,
         Attempt, CalendarPayload, CbItem, CbListPayload, KlineBar, KlinePayload,
         QuotePayload, QuoteRow, QuoteStatus,

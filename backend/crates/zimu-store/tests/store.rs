@@ -4,7 +4,10 @@
 
 use zimu_domain::Kind;
 use zimu_domain::Side;
-use zimu_store::{AccountRow, NewAdvice, NewHoldingMeta, RecordError, Store, TradeRequest};
+use zimu_store::{
+    AccountRow, EquitySnapshotRow, NewAdvice, NewAlert, NewHoldingMeta, RecordError, Store,
+    TradeRequest,
+};
 
 fn meta(code_name: (&str, &str), kind: Kind, prev: Option<f64>, pct: Option<i64>) -> NewHoldingMeta {
     NewHoldingMeta {
@@ -486,4 +489,91 @@ fn advice_list_orders_new_first_and_filters_code() {
     let only = s.list_advice(Some("600519"), 50).unwrap();
     assert_eq!(only.iter().map(|r| r.id).collect::<Vec<_>>(), vec![b, a]);
     assert_eq!(s.list_advice(None, 2).unwrap().len(), 2);
+}
+
+// ============================================================================
+// 预警 / 净值快照 / 推送日志（P4-T7）
+// ============================================================================
+
+fn new_alert(ts: &str, code: &str, t: &str) -> NewAlert {
+    NewAlert {
+        ts: ts.into(),
+        code: code.into(),
+        name: "测试股".into(),
+        alert_type: t.into(),
+        level: "down".into(),
+        text: "测试文案".into(),
+    }
+}
+
+#[test]
+fn alerts_dedup_list_and_done() {
+    let s = seed_store(1.0);
+    let a = s.insert_alert(&new_alert("2026-10-29 09:35", "600000", "跌破成本")).unwrap();
+    s.insert_alert(&new_alert("2026-10-29 10:32", "600000", "放量")).unwrap();
+    s.insert_alert(&new_alert("2026-10-28 14:47", "600000", "跌破成本")).unwrap();
+
+    // 去重依据（03 §12）：同日 (code,type) → true；跨日/异型/异码 → false
+    assert!(s.alert_exists_on("600000", "跌破成本", "2026-10-29").unwrap());
+    assert!(s.alert_exists_on("600000", "跌破成本", "2026-10-28").unwrap());
+    assert!(!s.alert_exists_on("600000", "跌破成本", "2026-10-30").unwrap());
+    assert!(!s.alert_exists_on("600000", "触及止盈线", "2026-10-29").unwrap());
+    assert!(!s.alert_exists_on("600001", "跌破成本", "2026-10-29").unwrap());
+
+    // 新在前（ts DESC, id DESC），未归档 done=false
+    let all = s.list_alerts(None, 50).unwrap();
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[0].ts, "2026-10-29 10:32");
+    assert_eq!(all[1].id, a); // 09:35 那条
+    assert_eq!(all[2].ts, "2026-10-28 14:47"); // 跨日最旧
+    assert!(all.iter().all(|r| !r.done));
+
+    // 归档：返回行且 done=true；重复归档幂等；不存在 id → None
+    let row = s.mark_alert_done(a).unwrap().unwrap();
+    assert!(row.done && row.id == a);
+    assert!(s.mark_alert_done(a).unwrap().unwrap().done);
+    assert!(s.mark_alert_done(999).unwrap().is_none());
+    assert_eq!(s.list_alerts(Some(false), 50).unwrap().len(), 2);
+    assert_eq!(s.list_alerts(Some(true), 50).unwrap().len(), 1);
+}
+
+#[test]
+fn equity_snapshot_upsert_idempotent() {
+    let s = seed_store(100_000.0);
+    let agg = s.portfolio().unwrap().agg; // 空持仓：total_assets = cash = 100000
+    s.upsert_equity_snapshot(&EquitySnapshotRow::from_agg("2026-10-29", "2026-10-29 15:05", &agg))
+        .unwrap();
+    // 同日重跑盘后链：REPLACE 不产生第二行，后写覆盖（服务重启幂等）
+    let mut snap2 = EquitySnapshotRow::from_agg("2026-10-29", "2026-10-29 15:06", &agg);
+    snap2.total_assets = 100_001.0;
+    s.upsert_equity_snapshot(&snap2).unwrap();
+    s.upsert_equity_snapshot(&EquitySnapshotRow::from_agg("2026-10-28", "2026-10-28 15:05", &agg))
+        .unwrap();
+
+    let rows = s.equity_snapshots(50).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].date, "2026-10-28"); // date 升序（净值曲线输入形态）
+    assert_eq!(rows[1].ts, "2026-10-29 15:06");
+    assert!((rows[1].total_assets - 100_001.0).abs() < 1e-9);
+    assert!((rows[1].cash - 100_000.0).abs() < 1e-9);
+    // limit 取最近 N 条（截断后仍升序）
+    let last1 = s.equity_snapshots(1).unwrap();
+    assert_eq!(last1.len(), 1);
+    assert_eq!(last1[0].date, "2026-10-29");
+    assert!(s.equity_snapshot("2026-10-29").unwrap().is_some());
+    assert!(s.equity_snapshot("2026-10-27").unwrap().is_none());
+}
+
+#[test]
+fn push_log_roundtrip() {
+    let s = seed_store(1.0);
+    s.insert_push_log("2026-10-29 15:05", "agent", "post_market_review", true, "复盘已注入会话")
+        .unwrap();
+    s.insert_push_log("2026-10-30 15:05", "agent", "post_market_review", false, "agent 未在线")
+        .unwrap();
+    let rows = s.push_logs(50).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].ts, "2026-10-30 15:05"); // 新在前
+    assert!(!rows[0].ok && rows[0].detail == "agent 未在线");
+    assert!(rows[1].ok && rows[1].channel == "agent");
 }

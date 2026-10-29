@@ -14,6 +14,7 @@
 //!   （03 附录约定 4 / 比对规则第 5 条），防浮点噪声翻转边界用例。
 
 pub mod advice;
+pub mod alert;
 pub mod dilution;
 pub mod discipline;
 pub mod fees;

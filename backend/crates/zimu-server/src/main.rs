@@ -9,8 +9,14 @@
 //! - `/api/holdings*` `/api/trades` `/api/account`   持仓录入 API（P4-T1，见 lib holdings_api）
 //! - `/api/market/*`          行情 API（P4-T4，见 lib market_api：status/quote/kline/
 //!                            cb_list/calendar/refresh——sidecar 挂了整体降级不瘫）
+//! - `/api/alerts*` `/api/equity_snapshots`  预警与净值快照（P4-T7，见 lib alerts_api：
+//!                            内容由调度引擎判定落库，03 §12；端点只读取与归档）
 //! - `GET  /api/openapi.json` API 契约文档（P4-T5，见 lib openapi）
 //! - 其余路径                 静态托管 `frontend/dist`，回落 `index.html`（SPA 路由）
+//!
+//! bin 侧还负责启动**调度与预警引擎**（P4-T7，`zimu_agent::scheduler`）：
+//! 交易日盘中分钟级轮询 + 15:05 盘后链（快照 + /复盘 注入会话）；
+//! `ZIMU_SCHEDULER_DISABLE=1` 停用。
 //!
 //! health/chat 的响应与请求类型定义在 lib（`openapi.rs`）并进 OpenAPI 契约；
 //! bin 侧单测断言 Health 序列化键集与 schema 键集一致（doc-stub 不留漂移盲区）。
@@ -207,12 +213,25 @@ async fn main() -> anyhow::Result<()> {
     // 领域工具与 HTTP API 共用同一份句柄，spawn_agent 需要它们。
     let robit_config = robit_ai::load_config(None);
     match &robit_config {
-        Ok(config) => robit_ai::init_logging(
-            config.app.as_ref(),
-            "zimu_server",
-            &working_dir,
-            &["tower_http=debug"],
-        ),
+        Ok(config) => {
+            // robit 的过滤器只放行 target_crate（zimu_server）与 robit 系 crate，
+            // 其余 target 落在默认底线（error）——宿主 workspace 其他 crate
+            // （zimu_agent 调度器/工具、zimu_market 适配器）的日志要作为附加
+            // directive 显式放行，级别跟随配置的 log_level
+            let level = config
+                .app
+                .as_ref()
+                .and_then(|a| a.log_level.clone())
+                .unwrap_or_else(|| "info".to_string());
+            let agent_dir = format!("zimu_agent={level}");
+            let market_dir = format!("zimu_market={level}");
+            robit_ai::init_logging(
+                config.app.as_ref(),
+                "zimu_server",
+                &working_dir,
+                &["tower_http=debug", &agent_dir, &market_dir],
+            )
+        }
         Err(_) => tracing_subscriber::fmt()
             .with_env_filter(
                 EnvFilter::try_from_default_env()
@@ -257,7 +276,7 @@ async fn main() -> anyhow::Result<()> {
     // POST /api/market/refresh 是同一条链，agent 出的数字与端点同源。
     let agent = match robit_config {
         Ok(config) => {
-            match spawn_agent(working_dir.clone(), config, store.clone(), market_client) {
+            match spawn_agent(working_dir.clone(), config, store.clone(), market_client.clone()) {
                 Ok(bridge) => Some(Arc::new(bridge)),
                 Err(e) => {
                     tracing::error!("Agent 启动失败，/api/chat* 将返回 503：{e:#}");
@@ -270,6 +289,34 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+
+    // 调度与预警引擎（P4-T7，03 §12）：交易日盘中分钟级轮询（行情刷新 → 预警
+    // 判定 → alerts 落库）+ 15:05 盘后链（equity_snapshots 快照 + /复盘 注入
+    // agent 会话，push_log 留痕）。复盘回调接 WebBridge；agent 离线传 None——
+    // 快照照写，push_log 如实记未触发。ZIMU_SCHEDULER_DISABLE=1 整体停用
+    // （开发/测试用；手动 refresh 与 agent 工具不受影响）。
+    if std::env::var("ZIMU_SCHEDULER_DISABLE").is_err() {
+        use std::future::Future;
+        use std::pin::Pin;
+        use zimu_agent::scheduler::{ReviewTrigger, POLL_INTERVAL};
+
+        let review: Option<ReviewTrigger> = agent.as_ref().map(|bridge| {
+            let bridge = bridge.clone();
+            Arc::new(move |text: String| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                let bridge = bridge.clone();
+                Box::pin(async move { bridge.web.send_user_text(text).await.is_ok() })
+            }) as ReviewTrigger
+        });
+        let core = zimu_agent::scheduler::SchedulerCore::new(
+            // 独立 AgentDeps（自己的 CalendarCache）：调度与工具面/HTTP 侧解耦，
+            // 多一个 1h TTL 缓存实例无害（与 agent_bridge 同款取舍）
+            zimu_agent::AgentDeps::new(store.clone(), market_client.clone()),
+            review,
+        );
+        tokio::spawn(zimu_agent::scheduler::run(core, POLL_INTERVAL));
+    } else {
+        tracing::warn!("ZIMU_SCHEDULER_DISABLE 已设：预警调度器停用（03 §12 调度口径）");
+    }
 
     let app = Router::new()
         .route("/api/health", get(health))

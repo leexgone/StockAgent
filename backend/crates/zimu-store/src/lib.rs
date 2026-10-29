@@ -1059,3 +1059,277 @@ impl Store {
         rows.collect::<Result<Vec<_>, _>>().context("读取建议留档失败")
     }
 }
+
+// ============================================================================
+// 预警留档（alerts，P4-T7 起写入——判定口径在 zimu-domain::alert，03 §12）
+// ============================================================================
+
+/// 预警行。`type`/`level`/`text` 全部由规则函数产出（调度器只搬运，不改写）；
+/// `done` 是用户归档态（API 置位，不删行）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AlertRow {
+    pub id: i64,
+    /// 触发时刻（上海，YYYY-MM-DD HH:MM）
+    pub ts: String,
+    pub code: String,
+    pub name: String,
+    /// 封闭词汇（03 §12 判定表）：触及涨停/触及跌停/跌破成本/触及止损线/
+    /// 触及止盈线/放量/强赎公告/临近到期
+    #[serde(rename = "type")]
+    pub alert_type: String,
+    /// up/down/warn（§11：up/down 只用于价格方向；引擎不产出 flat）
+    pub level: String,
+    pub text: String,
+    pub done: bool,
+}
+
+/// 新预警行（调度器判定后写入；ts 由调用方给上海时刻）
+pub struct NewAlert {
+    pub ts: String,
+    pub code: String,
+    pub name: String,
+    pub alert_type: String,
+    pub level: String,
+    pub text: String,
+}
+
+const ALERT_COLS: &str = "id, ts, code, name, type, level, text, done";
+
+fn map_alert_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AlertRow> {
+    Ok(AlertRow {
+        id: r.get(0)?,
+        ts: r.get(1)?,
+        code: r.get(2)?,
+        name: r.get(3)?,
+        alert_type: r.get(4)?,
+        level: r.get(5)?,
+        text: r.get(6)?,
+        done: r.get::<_, i64>(7)? != 0,
+    })
+}
+
+impl Store {
+    pub fn insert_alert(&self, a: &NewAlert) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO alerts (ts, code, name, type, level, text, done)
+             VALUES (?1,?2,?3,?4,?5,?6,0)",
+            params![a.ts, a.code, a.name, a.alert_type, a.level, a.text],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// 新在前（ts DESC, id DESC）；`done` 为 None 时不过滤。
+    pub fn list_alerts(&self, done: Option<bool>, limit: i64) -> Result<Vec<AlertRow>> {
+        let sql = if done.is_some() {
+            format!("SELECT {ALERT_COLS} FROM alerts WHERE done = ?1 ORDER BY ts DESC, id DESC LIMIT ?2")
+        } else {
+            format!("SELECT {ALERT_COLS} FROM alerts ORDER BY ts DESC, id DESC LIMIT ?1")
+        };
+        let mut stmt = self.conn.prepare(&sql)?;
+        // done 列是 INTEGER 0/1：显式转 i64 绑定，不依赖 bool 的 ToSql 行为
+        let rows = match done {
+            Some(d) => stmt.query_map(params![i64::from(d), limit], map_alert_row)?,
+            None => stmt.query_map(params![limit], map_alert_row)?,
+        };
+        rows.collect::<Result<Vec<_>, _>>().context("读取预警失败")
+    }
+
+    /// 归档（done=1，不删行）。返回更新后的行；id 不存在 → None。
+    pub fn mark_alert_done(&self, id: i64) -> Result<Option<AlertRow>> {
+        let n = self
+            .conn
+            .execute("UPDATE alerts SET done = 1 WHERE id = ?1", params![id])?;
+        if n == 0 {
+            return Ok(None);
+        }
+        let mut stmt = self
+            .conn
+            .prepare(&format!("SELECT {ALERT_COLS} FROM alerts WHERE id = ?1"))?;
+        let mut rows = stmt.query_map(params![id], map_alert_row)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    /// 同日 (code,type) 是否已有——调度器去重依据（03 §12：每自然日至多一条）。
+    /// `date` 是上海日期 YYYY-MM-DD，按 ts 前缀匹配。
+    pub fn alert_exists_on(&self, code: &str, alert_type: &str, date: &str) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM alerts WHERE code = ?1 AND type = ?2 AND ts LIKE ?3",
+            params![code, alert_type, format!("{date}%")],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+}
+
+// ============================================================================
+// 净值快照（equity_snapshots，P4-T7：15:05 盘后链写入，03 §12）
+// ============================================================================
+
+/// 每交易日一行的组合快照。数字直接取 `recalc` 的 `Agg` 原值（不舍入，
+/// 逐位可回溯）；`date` 主键 upsert——服务重启不重复（幂等）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct EquitySnapshotRow {
+    /// 交易日 YYYY-MM-DD（主键）
+    pub date: String,
+    /// 写入时刻（上海，YYYY-MM-DD HH:MM）
+    pub ts: String,
+    pub total_assets: f64,
+    pub total_mv: f64,
+    pub cash: f64,
+    pub day_pnl: f64,
+    pub day_pnl_pct: f64,
+    pub total_pnl: f64,
+    pub total_pnl_pct: f64,
+    pub exposure: f64,
+    pub hhi: f64,
+    pub top3_sector: f64,
+}
+
+impl EquitySnapshotRow {
+    /// 从 `recalc` 汇总拼装（数据搬运，不定义口径——列与 Agg 字段一一对应）
+    pub fn from_agg(date: &str, ts: &str, agg: &Agg) -> Self {
+        Self {
+            date: date.to_string(),
+            ts: ts.to_string(),
+            total_assets: agg.total_assets,
+            total_mv: agg.total_mv,
+            cash: agg.cash,
+            day_pnl: agg.day_pnl,
+            day_pnl_pct: agg.day_pnl_pct,
+            total_pnl: agg.total_pnl,
+            total_pnl_pct: agg.total_pnl_pct,
+            exposure: agg.exposure,
+            hhi: agg.hhi,
+            top3_sector: agg.top3_sector,
+        }
+    }
+}
+
+const SNAPSHOT_COLS: &str = "date, ts, total_assets, total_mv, cash, day_pnl, day_pnl_pct,
+     total_pnl, total_pnl_pct, exposure, hhi, top3_sector";
+
+fn map_snapshot_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<EquitySnapshotRow> {
+    Ok(EquitySnapshotRow {
+        date: r.get(0)?,
+        ts: r.get(1)?,
+        total_assets: r.get(2)?,
+        total_mv: r.get(3)?,
+        cash: r.get(4)?,
+        day_pnl: r.get(5)?,
+        day_pnl_pct: r.get(6)?,
+        total_pnl: r.get(7)?,
+        total_pnl_pct: r.get(8)?,
+        exposure: r.get(9)?,
+        hhi: r.get(10)?,
+        top3_sector: r.get(11)?,
+    })
+}
+
+impl Store {
+    /// 幂等写入（INSERT OR REPLACE，date 主键）：同日重复跑盘后链不产生第二行。
+    pub fn upsert_equity_snapshot(&self, row: &EquitySnapshotRow) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO equity_snapshots
+               (date, ts, total_assets, total_mv, cash, day_pnl, day_pnl_pct,
+                total_pnl, total_pnl_pct, exposure, hhi, top3_sector)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![
+                row.date,
+                row.ts,
+                row.total_assets,
+                row.total_mv,
+                row.cash,
+                row.day_pnl,
+                row.day_pnl_pct,
+                row.total_pnl,
+                row.total_pnl_pct,
+                row.exposure,
+                row.hhi,
+                row.top3_sector
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn equity_snapshot(&self, date: &str) -> Result<Option<EquitySnapshotRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SNAPSHOT_COLS} FROM equity_snapshots WHERE date = ?1"
+        ))?;
+        let mut rows = stmt.query_map(params![date], map_snapshot_row)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    /// date 升序（净值曲线的输入形态）；`limit` 取**最近** N 条（先倒序截断再反转）。
+    pub fn equity_snapshots(&self, limit: i64) -> Result<Vec<EquitySnapshotRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SNAPSHOT_COLS} FROM equity_snapshots ORDER BY date DESC LIMIT ?1"
+        ))?;
+        let mut rows = stmt
+            .query_map(params![limit], map_snapshot_row)?
+            .collect::<Result<Vec<_>, _>>()
+            .context("读取净值快照失败")?;
+        rows.reverse();
+        Ok(rows)
+    }
+}
+
+// ============================================================================
+// 推送日志（push_log，P4-T7：复盘触发/渠道推送的统一留痕）
+// ============================================================================
+
+/// 推送/触发留痕行。`ok=1` 只表示请求被受理（如复盘已注入 agent 会话），
+/// 产出是否完成以会话事件与 advice_history 为准（03 §12 留档）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PushLogRow {
+    pub id: i64,
+    /// 上海时刻 YYYY-MM-DD HH:MM
+    pub ts: String,
+    /// agent / wechat / qq（P6 渠道落地后扩展）
+    pub channel: String,
+    /// post_market_review / alert_push / …（封闭词汇随渠道落地扩展）
+    pub kind: String,
+    pub ok: bool,
+    pub detail: String,
+}
+
+impl Store {
+    pub fn insert_push_log(
+        &self,
+        ts: &str,
+        channel: &str,
+        kind: &str,
+        ok: bool,
+        detail: &str,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO push_log (ts, channel, kind, ok, detail) VALUES (?1,?2,?3,?4,?5)",
+            params![ts, channel, kind, ok as i64, detail],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// 新在前（ts DESC, id DESC）
+    pub fn push_logs(&self, limit: i64) -> Result<Vec<PushLogRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, ts, channel, kind, ok, detail FROM push_log
+             ORDER BY ts DESC, id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |r| {
+            Ok(PushLogRow {
+                id: r.get(0)?,
+                ts: r.get(1)?,
+                channel: r.get(2)?,
+                kind: r.get(3)?,
+                ok: r.get::<_, i64>(4)? != 0,
+                detail: r.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().context("读取推送日志失败")
+    }
+}

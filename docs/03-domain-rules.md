@@ -300,6 +300,53 @@ position/dims + `generated_at` + `data_version`），返回 `advice_id`；模型
   - **交易方向**（买入/卖出、加仓/减仓、结论标签）用 `.buy / .sell`——`--up/--down` 的别名令牌，沿用 A 股红买绿卖惯例，但类名与涨跌解耦；
   - 两套语义可同屏出现，禁止混类。
 
+## 12. 预警与调度（P4-T7 定稿，2026-10-29）
+
+预警引擎生产口径：调度器在交易日轮询行情，规则函数判定预警，结果写 `alerts` 表（schema 见 P4-T2）。**数字判定唯一实现** `zimu-domain::alert::eval_alerts`（TS 共享层镜像 `src/domain/alert.ts`），黄金向量组 `alerts.json`；调度编排（何时轮询、去重、落库、触发复盘）在 `zimu-agent::scheduler` 应用层——编排不含数字口径。
+
+### 调度（何时判）
+
+- **分钟级轮询**：每分钟读一次市场时钟（§9 生产口径：恒 Asia/Shanghai + 交易日历优先）。仅**交易日且 `live = true`**（集合竞价/早盘/午盘）时轮询；非交易日与非 live 时段空转，不打 sidecar。
+- 每轮 = 全部持仓行情**合并一次请求**（`04` 附录盘中频率结论：新浪 hq 合并请求每分钟一轮可行）→ `apply_quotes` 回写 → `recalc` 重算 → 预警判定。轮询兼任盘中行情持续刷新（`/api/holdings` 数字保持新鲜）。
+- **行情失败不判定**：该轮跳过（不用库存旧价判——不伪造），降级如实记日志，下一轮再试。个别标的行情行状态非 ok 或 `price ≤ 0` → 该标的本轮跳过（`04` 附录 B 回写过滤同款语义）。
+- **转债期限类检查每日一次**：强赎/到期字段来自 `/cb_list`（全量在市列表，重请求——不进分钟级轮询），交易日首轮轮询时执行；强赎源降级（redeem 字段全 null）→ 当日强赎/到期类不参与判定，价格类照常。
+- **15:05 盘后链**：交易日 ≥15:05 的首轮调度依次执行：
+  1. 最终刷新（15:00 后行情冻结为收盘价，何时跑拿到的都是当日收盘数字）；刷新失败 → 整链跳过下一轮重试（**宁缺不写旧数**）；
+  2. 写 `equity_snapshots`：每交易日一行，`date` 主键 INSERT OR REPLACE——幂等，服务重启不重复；列直接取 `recalc` 的 `agg` 原值（**不舍入**，逐位可回溯）：`total_assets / total_mv / cash / day_pnl / day_pnl_pct / total_pnl / total_pnl_pct / exposure / hhi / top3_sector`；
+  3. 触发盘后复盘：向 agent 会话注入 `/复盘`（走 P4-T6 post-market-review Skill 链）；agent 离线 → 复盘不触发，`push_log` 如实记 `ok=0`，快照照写。
+  **补跑**：当日快照不存在且时刻已过 15:05 → 任意一轮补跑整链（含白天宕机、晚间重启的情形）；快照已存在 → 整链跳过。
+- 调度器可整体停用（`ZIMU_SCHEDULER_DISABLE=1`，开发/测试用）；停用不影响手动 `POST /api/market/refresh` 与 agent 工具。
+
+### 预警判定（逐持仓，固定顺序）
+
+范围 = `holdings` 表全部持仓（生产侧暂无自选表，原型的 watchlist 提醒是演示形态，见 `07` backlog）。输入 = 本轮实时行情 + 库存事实（cost / limit_pct）+ 最近一条 `advice_history` 留档（stop / target_hi）；`price` 缺失或 ≤0 → 该标的整行跳过。同一标的多条预警**全部产出**，输出数组序 = 下表判定序：
+
+| 序 | `type`（封闭词汇） | 判据 | `level` | 最少数据（缺 → 不参与判定，不伪造） |
+|---|---|---|---|---|
+| 1 | 触及涨停 | `price ≥ limit_up`（§2 限价，含边界） | `up` | `limit_up`：`prev > 0` + `limit_pct`（数据层配置优先，未配置按 §2 推断；推不出 → 不参与） |
+| 2 | 触及跌停 | `price ≤ limit_down`（含边界） | `down` | 同上 |
+| 3 | 跌破成本 | `price < cost`（相等不算跌破——压线算安全，附录规则 4） | `down` | `cost > 0` |
+| 4 | 触及止损线 | `price ≤ stop`（含边界） | `down` | 最近一条留档的 `stop`；无留档 → 不参与 |
+| 5 | 触及止盈线 | `price ≥ target_hi`（含边界） | `warn`（要动作的提醒，非方向语义） | 最近一条留档的 `target_hi`；无留档/留档为 null → 不参与 |
+| 6 | 放量 | `volume_today ≥ 2.0 × vol_avg20`；`vol_avg20` = 近 20 根日线（**不含今日**，调用方截窗传入）中有效样本均量（null / ≤0 不计入样本） | 方向：`(price−prev)/prev ≥ 0` → `up`，`< 0` → `down`；`prev` 缺失或 ≤0（方向不可判）→ `warn` | 有效样本 ≥5 根 |
+| 7 | 强赎公告 | cb 且 `redeem_status` 含「强赎」且不以「不」开头（如「已公告强赎」触发；「不强赎」不触发） | `warn` | 集思录强赎字段（源降级 → 不参与） |
+| 8 | 临近到期 | cb 且 `0 ≤ last_trade_date − today ≤ 5` 自然日；`last_trade_date` 缺失用 `maturity_date`；已过期（差 < 0）不参与（数据异常，行情侧自会以停牌/退市跳过该标的） | `warn` | 同上 |
+
+- `level` 词汇沿用 §11：`up/down` 只用于价格方向语义；`warn` 是要动作/注意类；引擎不产出 `flat`（盘后复盘不落 `alerts`，落 `push_log`）。
+- 阈值压线的浮点噪声由 `THRESHOLD_EPS` 消化（附录比对规则第 5 条同款）。
+- **去重**：同一 `(code, type)` 每自然日（`ts` 的上海日期前缀）至多一条——当日后续轮询条件仍成立也不再插入；跨日重新判定。去重需要库状态，属调度器职责；规则函数无状态。
+- **`text` 文案**：规则函数按事实模板生成（展示层，与 §10 `dims[].t` 同约定——不进 fixture，数字只取输入值；价格按 §1 小数位、百分比带符号两位小数）。
+- `kind` 非 cb 的标的，第 7/8 序不参与判定；非持仓事实（cost/stop/target_hi）对 ETF/转债同规则适用。
+
+### 留档
+
+- 预警新行写 `alerts`（`ts` 上海 `YYYY-MM-DD HH:MM`，`done=0`）；用户归档经 API 置 `done=1`，不删行。
+- 复盘触发写 `push_log`：`channel="agent"`、`kind="post_market_review"`、`ok` = 是否成功注入会话、`detail` = 结果说明——`ok=1` 只表示复盘请求已被 agent 受理，模型产出是否完成以会话事件与 `advice_history` 留档为准，`push_log` 不代答。
+
+### 常量（改这里 = 改口径，先动 fixture 再动两边实现）
+
+放量倍数 `VOL_SURGE_MULT = 2.0`；均量窗口 20 根、最少有效样本 5 根；转债期限窗口 `CB_DEADLINE_DAYS = 5`（自然日）；盘后链时刻 `15:05`；轮询间隔 60 秒。
+
 ## 附录 · 黄金测试向量（P3-T1，2026-10-27）
 
 `fixtures/golden/` 是本手册数字口径的唯一权威样例集：Rust 领域纯函数库（P3-T3）与 TS 共享层（P3-T4）跑**同一份文件**。改任何公式 = 先改 fixture 与对应正文小节，再改实现——两边实现永远不许「各自对拍」，只对 fixture。
@@ -340,6 +387,7 @@ position/dims + `generated_at` + `data_version`），返回 `advice_id`；模型
 | `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
 | `price_limit.json` | `limit_pct` / `limit_prices` / `validate_price` | §2 | `kind,code,st` → 涨跌幅比例（ETF/北交所 null）/ `kind,prev,pct` → 涨停与跌停价（整数单元 half-up）/ `price,limit_up,limit_down` → `{valid,reason}` |
 | `advice.json` | `score_advice` | §10 生产口径 | `kind,closes[],volumes[],price,held,weight,cash_reserve_pass` → `action,horizon,score,conf,dims[4]{k,s},target_lo/hi,stop,position{current,suggested,mode},stats`（观察文字 `dims[].t` 是展示层，fixture 不校验） |
+| `alerts.json` | `eval_alerts` | §12 | `today,item{kind,price,prev,limit_up/down,cost,stop,target_hi,volume_today,vol_hist[],redeem_status,last_trade_date,maturity_date}` → `alerts[]{type,level}`（按判定序；`text` 是展示层模板，fixture 不校验） |
 
 ### 本附录固定的口径（新增约定，与正文同级）
 

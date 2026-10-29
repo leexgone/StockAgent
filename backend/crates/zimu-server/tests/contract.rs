@@ -23,6 +23,7 @@ use common::*;
 use serde_json::{json, Value};
 use zimu_market::error::MarketError;
 use zimu_market::models::*;
+use zimu_store::{EquitySnapshotRow, NewAlert};
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -193,7 +194,28 @@ async fn live_responses_and_samples_pass_schema() {
         version: Some("0.1.0".into()),
         rest: Default::default(),
     }));
-    let base = spawn_api(fake.clone(), seed()).await;
+    // alerts 面样例种子（P4-T7）：1 条待处理预警 + 1 行当日快照。
+    // 快照数字 = 种子组合 recalc agg 原值（样例可直接当前端 mock）
+    let store = seed();
+    store
+        .insert_alert(&NewAlert {
+            ts: format!("{today} 10:30"),
+            code: "600519".into(),
+            name: "贵州茅台".into(),
+            alert_type: "跌破成本".into(),
+            level: "down".into(),
+            text: "现价 1437.00 低于成本 1500.39，浮亏 -4.22%".into(),
+        })
+        .unwrap();
+    let agg = store.portfolio().unwrap().agg;
+    store
+        .upsert_equity_snapshot(&EquitySnapshotRow::from_agg(
+            &today,
+            &format!("{today} 15:05"),
+            &agg,
+        ))
+        .unwrap();
+    let base = spawn_api(fake.clone(), store).await;
     let http = reqwest::Client::new();
 
     // ---- holdings 面（P4-T1）----
@@ -271,7 +293,27 @@ async fn live_responses_and_samples_pass_schema() {
     assert_eq!(s, 200);
     check(&doc, "calendar", "get", "/api/market/calendar", 200, &b);
 
+    // ---- alerts 面（P4-T7）：读取 / 归档 / 净值快照 ----
+    let (s, b) = get(&http, &base, "/api/alerts?limit=50").await;
+    assert_eq!(s, 200);
+    check(&doc, "alerts", "get", "/api/alerts", 200, &b);
+
+    let (s, b) = post(&http, &base, "/api/alerts/1/done", json!(null)).await;
+    assert_eq!(s, 200);
+    assert_eq!(b["done"], json!(true));
+    check(&doc, "alert_done", "post", "/api/alerts/{id}/done", 200, &b);
+
+    let (s, b) = get(&http, &base, "/api/equity_snapshots?limit=120").await;
+    assert_eq!(s, 200);
+    check(&doc, "equity_snapshots", "get", "/api/equity_snapshots", 200, &b);
+
     // ---- 错误契约 ----
+    // 归档不存在的预警 → 404 no_alert
+    let (s, b) = post(&http, &base, "/api/alerts/999/done", json!(null)).await;
+    assert_eq!(s, 404);
+    assert_eq!(b["error"], json!("no_alert"));
+    check(&doc, "error_no_alert", "post", "/api/alerts/{id}/done", 404, &b);
+
     let (s, b) = get(&http, &base, "/api/market/quote?codes=").await;
     assert_eq!(s, 400);
     assert_eq!(b["error"], json!("bad_params"));

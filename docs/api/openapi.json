@@ -65,6 +65,100 @@
         }
       }
     },
+    "/api/alerts": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "operationId": "get_alerts",
+        "parameters": [
+          {
+            "name": "done",
+            "in": "query",
+            "description": "true = 只看已归档 / false = 只看待处理 / 缺省全部",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "行数上限：1–500，缺省 100",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "预警列表，新在前（ts DESC, id DESC）。由调度引擎在交易日盘中判定落库（03 §12：type 封闭词汇、level up/down/warn、同日同型去重）；type/level/text 全部出自规则函数，端点不改写",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AlertRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alerts/{id}/done": {
+      "post": {
+        "tags": [
+          "alerts"
+        ],
+        "operationId": "mark_alert_done",
+        "responses": {
+          "200": {
+            "description": "归档成功，返回更新后的行（done=true；归档不删行，重复归档幂等）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertRow"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有该 id 的预警（no_alert）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/chat": {
       "post": {
         "tags": [
@@ -154,6 +248,51 @@
           },
           "503": {
             "description": "Agent 未启动（缺 robit 配置）"
+          }
+        }
+      }
+    },
+    "/api/equity_snapshots": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "operationId": "get_equity_snapshots",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "条数上限（取**最近** N 条，返回仍按 date 升序）：1–500，缺省 120",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "净值快照，date 升序（净值曲线的输入形态）。每交易日一行，由 15:05 盘后链写入（03 §12）；数字 = zimu-domain::recalc 汇总原值，不舍入、逐位可回溯",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EquitySnapshotRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -817,6 +956,50 @@
           }
         }
       },
+      "AlertRow": {
+        "type": "object",
+        "description": "预警行。`type`/`level`/`text` 全部由规则函数产出（调度器只搬运，不改写）；\n`done` 是用户归档态（API 置位，不删行）。",
+        "required": [
+          "id",
+          "ts",
+          "code",
+          "name",
+          "type",
+          "level",
+          "text",
+          "done"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "level": {
+            "type": "string",
+            "description": "up/down/warn（§11：up/down 只用于价格方向；引擎不产出 flat）"
+          },
+          "name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "string",
+            "description": "触发时刻（上海，YYYY-MM-DD HH:MM）"
+          },
+          "type": {
+            "type": "string",
+            "description": "封闭词汇（03 §12 判定表）：触及涨停/触及跌停/跌破成本/触及止损线/\n触及止盈线/放量/强赎公告/临近到期"
+          }
+        }
+      },
       "ApiError": {
         "type": "object",
         "description": "统一错误体：`error` 机器可读码、`message` 中文可直接展示。\n特定拒绝带附加数值字段（前端就地高亮用，其余场景不出现）：\n涨跌停越界 `limit_down/limit_up/decimals`（显示与拦截同一对限价，03 §2）、\n现金不足 `cash_after`。",
@@ -1223,6 +1406,74 @@
           },
           "tool_call_id": {
             "type": "string"
+          }
+        }
+      },
+      "EquitySnapshotRow": {
+        "type": "object",
+        "description": "每交易日一行的组合快照。数字直接取 `recalc` 的 `Agg` 原值（不舍入，\n逐位可回溯）；`date` 主键 upsert——服务重启不重复（幂等）。",
+        "required": [
+          "date",
+          "ts",
+          "total_assets",
+          "total_mv",
+          "cash",
+          "day_pnl",
+          "day_pnl_pct",
+          "total_pnl",
+          "total_pnl_pct",
+          "exposure",
+          "hhi",
+          "top3_sector"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "date": {
+            "type": "string",
+            "description": "交易日 YYYY-MM-DD（主键）"
+          },
+          "day_pnl": {
+            "type": "number",
+            "format": "double"
+          },
+          "day_pnl_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "hhi": {
+            "type": "number",
+            "format": "double"
+          },
+          "top3_sector": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_assets": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_mv": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_pnl": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_pnl_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "ts": {
+            "type": "string",
+            "description": "写入时刻（上海，YYYY-MM-DD HH:MM）"
           }
         }
       },
@@ -2254,6 +2505,10 @@
     {
       "name": "market",
       "description": "行情（P4-T4，经 zimu-market 适配器——sidecar 唯一消费入口；错误三分类见 04 附录 B）"
+    },
+    {
+      "name": "alerts",
+      "description": "预警与净值快照（P4-T7）：内容由调度引擎判定落库（口径 03 §12，判定函数在 zimu-domain::alert），端点只读取与归档"
     }
   ]
 }

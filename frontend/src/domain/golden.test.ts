@@ -76,6 +76,8 @@ function compute(group: string, fn: string, input: any): Json {
       return domain.validatePrice(input.price, input.limit_up, input.limit_down);
     case "advice/score_advice":
       return domain.scoreAdvice(input);
+    case "alerts/eval_alerts":
+      return domain.evalAlerts(input);
     default:
       throw new Error(`未知 组/函数：${group}/${fn}`);
   }
