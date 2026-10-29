@@ -11,3 +11,6 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 utoipa.workspace = true # PortfolioView/TradeRow 等 API 契约类型 derive ToSchema（P4-T5）
+
+[dev-dependencies]
+rusqlite.workspace = true # 迁移测试：手工构造 v1 老库（降 user_version）验证自动前进

@@ -40,6 +40,7 @@ from .config import (
     SINA_HQ,
     SINA_INDEX_DAILY,
     SINA_STOCK_DAILY,
+    TENCENT_QT,
     Settings,
 )
 from .errors import all_failed, attempt, bad_params
@@ -55,8 +56,12 @@ from .symbols import (
 log = logging.getLogger("zimu.datafetch")
 
 # 默认源链（顺序即优先级；spike/复测结论见 docs/04 附录）
+# B14（2026-10-29）：腾讯进二通道——新浪不 carry 部分指数（中证转债 sh000832
+# 回空名零价行），quote 编排按**标的粒度补齐**（见 MarketService.quote），
+# 未覆盖标的自动落到下一源，而不是整批成功即止。
 DEFAULT_QUOTE_CHAIN: list[tuple[str, Callable]] = [
     (SINA_HQ, SRC.sina_hq_quote),
+    (TENCENT_QT, SRC.tencent_qt_quote),
     (EM_PUSH2, SRC.em_push2_quote),
 ]
 DEFAULT_KLINE_CHAINS: dict[str, list[tuple[str, Callable]]] = {
@@ -156,21 +161,61 @@ class MarketService:
 
         attempts: list[dict] = []
         if missing:
-            fetched, _used, attempts = self._chain(
-                self.quote_sources, lambda fn: fn(missing)
-            )
-            by_sym = {r["symbol"]: r for r in fetched}
-            for sym in missing:
-                # 源没返回该标的（非法/停牌除名）→ 合成 no_data 行，保持逐标的可归一
-                row = by_sym.get(sym) or {
+            # 逐标的补齐（B14）：与 _chain 的整批语义不同——某源成功但**未覆盖**
+            # 部分标的（如新浪没有中证转债指数）时，剩余标的继续走下一源；
+            # 只有「没有任何源成功过」才 502（UPSTREAM_ALL_FAILED 语义不变）。
+            by_sym: dict[str, dict] = {}
+            pending = list(missing)
+            any_success = False
+            chain = self.quote_sources
+            for idx, (name, fn) in enumerate(chain):
+                if not pending:
+                    break
+                if name in self.s.disabled:
+                    attempts.append(attempt(name, "disabled（ZIMU_DF_DISABLE 故障注入）"))
+                    continue
+                allowed, why = self.breaker.check(name)
+                if not allowed:
+                    attempts.append(attempt(name, f"熔断跳过：{why}"))
+                    continue
+                self.gate.wait(name)
+                try:
+                    fetched = fn(pending)
+                except Exception as e:  # noqa: BLE001 —— 任何源异常都进兜底链，绝不让它逃出端点
+                    self.breaker.failure(name)
+                    attempts.append(attempt(name, f"{type(e).__name__}: {e}"))
+                    log.warning("source %s failed: %s: %s", name, type(e).__name__, e)
+                    continue
+                self.breaker.success(name)
+                any_success = True
+                got = {r["symbol"]: r for r in fetched}
+                still: list[str] = []
+                for sym in pending:
+                    row = got.get(sym)
+                    if row is None or row.get("status") == "no_data":
+                        still.append(sym)  # 源未返回/未收录 → 交给下一源
+                    else:
+                        by_sym[sym] = row
+                if still and idx < len(chain) - 1:
+                    attempts.append(attempt(
+                        name,
+                        f"未返回 {len(still)} 个标的（{'、'.join(still[:3])}），交由下一源补齐"))
+                pending = still
+            if pending and not any_success:
+                raise all_failed(attempts)
+            for sym in pending:
+                # 链尽仍缺（非法代码/停牌除名/全链未收录）→ 合成 no_data 行，
+                # 保持逐标的可归一；不算降级（诚实缺行）
+                by_sym[sym] = {
                     "symbol": sym, "code": sym[2:], "mkt": sym[:2].upper(),
                     "kind": infer_kind(sym), "name": None,
                     "price": None, "prev": None, "open": None, "high": None,
                     "low": None, "volume": None, "amount": None, "chg_pct": None,
                     "date": None, "time": None, "status": "no_data", "source": None,
                 }
-                rows[sym] = row
-                self.cache.set(f"q:{sym}", row, self.s.quote_ttl)
+            for sym in missing:
+                rows[sym] = by_sym[sym]
+                self.cache.set(f"q:{sym}", rows[sym], self.s.quote_ttl)
 
         return {
             "as_of": _now_iso(),

@@ -23,13 +23,13 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 `03` §1 表格写股票「可卖数量 = 整数股」（A 股卖出允许奇零股、须一次性卖出），但原型买卖一律按 `qty % lot === 0` 拦截（`holdings.html:342`），且「全部清仓」按钮对奇零股持仓（如送股后 150 股）填入 `held` 后会被自己的校验拒绝。fixture 暂按原型行为编码（`lot.json` case `vq-sell-odd-lot`）；定稿后同步改 §1、原型与用例。关联 P4-T2（schema 要能存奇零股持仓）。
 **进展（2026-10-28，P4-T2）**：存储侧已就绪——`zimu-store` v1 schema 的 `holdings.shares` 为普通整数（仅 `> 0` 约束），奇零股存得下；后端录入校验沿用 `zimu-domain` 现行整手口径（与原型/fixture 一致）。卖出奇零股的业务口径仍待 B12 定稿，届时按 P3 流程先改 `03` 与 fixtures 再改两侧实现。
 
-### B13 · 自选（watchlist）预警无生产侧载体
+### B13 · 自选（watchlist）预警无生产侧载体 ✅ 已拍板 + 后端落地（2026-10-29）
 
-P4-T7 预警引擎只覆盖 `holdings` 持仓；原型 dashboard 的 `watchlist-card`（「未买入，仅条件触发时提醒」）在生产侧没有对应存储——schema 六表无 watchlist，`03` §12 判定范围明确写为持仓。缺口：自选的维护入口（增删/提醒条件）与判定范围扩展。P5-T2 移植 dashboard 前拍板：建 watchlist 表（schema v2 迁移）+ §12 判定范围扩到自选，或该卡先展示空态引导。关联：`push_log` 的读端点已随 P5-T2 index 屏落地（`GET /api/push_logs`，2026-10-29），wechat 屏推送日志卡直接复用。
+原缺口：P4-T7 预警引擎只覆盖 `holdings` 持仓，原型 dashboard 的 `watchlist-card` 在生产侧无存储载体。**用户拍板：建 watchlist 表（schema v2 迁移）+ `03` §12 判定范围扩到自选。** 落地（当日）：§12 正文修订——自选按「无持仓形态」判定（cost/stop/target_hi 不喂 → 序 3/4/5 不参与；序 1/2/6/7/8 同款；判定函数**零改动**，既有 fixture `al-limit-up` 等本就是无持仓形态锚点）；`zimu-store` v2 迁移（watchlist 表 + upsert/remove/list，含 v1→v2 合成老库迁移测试）；调度器扩展（自选行情单独合并拉取**不回写库**、与持仓重叠代码只判持仓形态一次、cb_list 拉取条件扩为持仓或自选含转债，scheduler 测试 7→9 项）；API `GET/POST/DELETE /api/watchlist`（契约 23 路径/42 schema/25 样例）。关联项 `push_log` 读端点已随 index 屏落地（`GET /api/push_logs`）。**余前端半边**：dashboard 自选卡消费 + 维护入口（增删表单）随 P5-T2 dashboard 屏。
 
-### B14 · 中证转债指数（sh000832）spot 行情无数据
+### B14 · 中证转债指数（sh000832）spot 行情无数据 ✅ 已解（2026-10-29）
 
-P5-T2 index 屏冒烟（2026-10-29 盘后）：`/api/market/quote` 五指数中四个正常（上证/深成/创业板/沪深300），`sh000832` 回 `price=0`、`status=halted_or_delisted`——sina spot 通道对该指数回空行（kline 通道 `sina_index_daily` 未测）。前端行情条已按「status=ok 且 price>0 才显示，否则 —」防御，不显示假 0。待办：查 spot 源对中证转债的正确前缀/号段（或该指数本就不在 sina spot 列表），决定换标的（如中证转债改国债/商品指数）或给 sidecar 补指数 spot 源；P5-T2 dashboard 移植（自选行情卡）前拍板。
+P5-T2 index 屏冒烟发现：sina spot 不 carry 中证转债指数（回空名零价行，被分类成 `halted_or_delisted` 假状态）。用户拍板「给 sidecar 补指数 spot 源」。落地：探测确认**腾讯 `qt.gtimg.cn` 全量覆盖**（sh000832 价格 452.63 与新浪 sh000001 交叉验证逐位一致）→ datafetch 三处改动——① `sources.py` 增腾讯解析器（14 位时间戳锚点相对取位，量单位手→股/份 ×100、指数原样，与东财约定对齐）+ 新浪解析器「空名零价 = 未收录，不出行」（不再伪装 halted）；② `service.py` quote 编排改**逐标的补齐**（未覆盖标的自动落下一源，502 语义收窄为无任何源成功）；③ 链序 sina → tencent → em。41 项离线测试 + 联网实测（000832 由腾讯补齐，degraded 留痕诚实）。前端行情条「status=ok 且 price>0 才显示」防御保留（04 附录 B）。
 
 ## 待决策
 

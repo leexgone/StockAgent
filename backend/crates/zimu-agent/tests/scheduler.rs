@@ -29,7 +29,7 @@ use zimu_market::models::{
     QuoteStatus, SidecarHealth,
 };
 use zimu_market::MarketApi;
-use zimu_store::{AccountRow, NewAdvice, NewHoldingMeta, Store, TradeRequest};
+use zimu_store::{AccountRow, NewAdvice, NewHoldingMeta, NewWatchlist, Store, TradeRequest};
 
 // ============================================================================
 // FakeApi（带调用计数——缓存语义断言用）
@@ -637,4 +637,112 @@ async fn cb_redeem_and_vol_surge_with_daily_caches() {
     assert!(rep2.new_alerts.is_empty()); // 同日去重
     assert_eq!(fake.cb_calls.load(Ordering::SeqCst), cb_calls_1);
     assert_eq!(fake.kline_calls.load(Ordering::SeqCst), kline_calls_1);
+}
+
+// ============================================================================
+// 自选（B13 定稿 2026-10-29：§12 范围扩展——无持仓形态判定、行情不回写）
+// ============================================================================
+
+#[tokio::test]
+async fn watchlist_alerts_use_positionless_shape_and_dedup() {
+    // 空持仓 + 自选一只（002415 SZ ±10%）：现价 9.0 = 跌停线（prev 10.0×0.9，
+    // 含边界）；当日量 5000 = 5× 20 日均量 1000 → 放量（chg −10% < 0 → down）。
+    // advice_history 虽有该标的留档（stop 9.2 / target_hi 9.5），自选一律按
+    // 无持仓处理：cost/stop/target_hi 不喂 → 序 3/4/5 不参与（03 §12）
+    let s = Store::in_memory().unwrap();
+    s.set_account(&AccountRow {
+        cash: 100_000.0,
+        ..AccountRow::default()
+    })
+    .unwrap();
+    s.add_watchlist(
+        &NewWatchlist {
+            code: "002415".into(),
+            name: "海康威视".into(),
+            mkt: "SZ".into(),
+            kind: zimu_domain::Kind::Stock,
+            limit_pct: Some(10),
+            sector: "电子".into(),
+            note: "自选测试".into(),
+        },
+        "2026-10-29 09:00",
+    )
+    .unwrap();
+    s.insert_advice(&NewAdvice {
+        code: "002415".into(),
+        action: "持有".into(),
+        score: 60.0,
+        conf: 0.5,
+        target_lo: None,
+        target_hi: Some(9.5),
+        stop: Some(9.2),
+        position: "当前 0% → 建议 观察".into(),
+        dims: json!([]),
+        data_version: "adv-v1|k=none|q=none".into(),
+        generated_at: "2026-10-28 15:05".into(),
+    })
+    .unwrap();
+    let store: SharedStore = Arc::new(Mutex::new(s));
+
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sz002415", "002415", "stock", 9.0, 10.0, 5000.0,
+    )]));
+
+    let core = core_with(store.clone(), fake.clone(), None);
+    let rep = core.tick(sh(29, 10, 30)).await;
+    assert!(rep.polled);
+    let kinds: Vec<(&str, &str)> = rep
+        .new_alerts
+        .iter()
+        .map(|a| (a.alert_type.as_str(), a.level.as_str()))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![("触及跌停", "down"), ("放量", "down")],
+        "序 2 在序 6 前；止损线（stop 9.2 ≥ price 9.0）因自选无持仓形态不参与"
+    );
+    assert!(rep.new_alerts.iter().all(|a| a.code == "002415"));
+
+    // 自选行情不回写：holdings 表保持空（holdings 表只存持仓，§12）
+    assert_eq!(lock(&store).holdings().unwrap().len(), 0);
+    // 空持仓 → 刷新链未打 sidecar；quote 仅自选合并请求一次
+    assert_eq!(fake.quote_calls.load(Ordering::SeqCst), 1);
+    // 日线量窗口与持仓共用同一日级缓存（每 code 每日一次）
+    assert_eq!(fake.kline_calls.load(Ordering::SeqCst), 1);
+
+    // 第二轮：同日 (code,type) 去重（alerts 表跨范围共用）；缓存不再打
+    let rep2 = core.tick(sh(29, 10, 31)).await;
+    assert!(rep2.new_alerts.is_empty());
+    assert_eq!(fake.kline_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn held_code_in_watchlist_is_not_double_judged() {
+    // 持有中的代码重复进自选 → 只按持仓形态判定一次（不重复拉行情、不双份预警）
+    let store = seeded_store(); // 600519 100 股 @110（cost 110.0511）
+    lock(&store)
+        .add_watchlist(
+            &NewWatchlist {
+                code: "600519".into(),
+                name: "贵州茅台".into(),
+                mkt: "SH".into(),
+                kind: zimu_domain::Kind::Stock,
+                limit_pct: Some(10),
+                sector: "白酒".into(),
+                note: "重叠测试".into(),
+            },
+            "2026-10-29 09:00",
+        )
+        .unwrap();
+    let fake = standard_fake();
+    // 现价 105 < cost 110.0511 → 仅「跌破成本」一条（无留档 → 止损类不参与）
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 105.0, 110.0, 1000.0,
+    )]));
+    let core = core_with(store.clone(), fake.clone(), None);
+    let rep = core.tick(sh(29, 10, 30)).await;
+    let kinds: Vec<&str> = rep.new_alerts.iter().map(|a| a.alert_type.as_str()).collect();
+    assert_eq!(kinds, vec!["跌破成本"], "持仓形态判定一次，自选侧不重复");
+    assert_eq!(fake.quote_calls.load(Ordering::SeqCst), 1); // 仅刷新链一次，自选未单独拉
 }

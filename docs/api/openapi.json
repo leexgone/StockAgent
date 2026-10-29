@@ -910,6 +910,138 @@
           }
         }
       }
+    },
+    "/api/watchlist": {
+      "get": {
+        "tags": [
+          "watchlist"
+        ],
+        "operationId": "get_watchlist",
+        "responses": {
+          "200": {
+            "description": "自选全量，加入时间序（added_at, code）。观察标的的静态属性（无 shares/cost——非持仓）；行情不回写本表，展示价走 /api/market/quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WatchlistRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "watchlist"
+        ],
+        "operationId": "add_watchlist",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewWatchlist"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "添加/更新后的行。按 code upsert 幂等：重复添加 = 更新名称/元信息/备注，added_at 保留首次值",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "输入问题：code/name 空、市场码非法（bad_input，B7 显式 mkt）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/watchlist/{code}": {
+      "delete": {
+        "tags": [
+          "watchlist"
+        ],
+        "operationId": "remove_watchlist",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "description": "标的代码（6 位）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "移除成功，返回被移除行。只动自选表——持仓、预警历史与留档不受影响",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchlistRow"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "自选里没有该代码（no_watchlist_item）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2085,6 +2217,44 @@
           }
         }
       },
+      "NewWatchlist": {
+        "type": "object",
+        "description": "自选添加请求。**按 code upsert**：重复添加 = 更新名称/元信息/备注（幂等，不报错）。",
+        "required": [
+          "code",
+          "name",
+          "mkt",
+          "kind"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "limit_pct": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "mkt": {
+            "type": "string",
+            "description": "'SH' | 'SZ'"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "sector": {
+            "type": "string"
+          }
+        }
+      },
       "PerHolding": {
         "type": "object",
         "required": [
@@ -2723,6 +2893,53 @@
             "type": "string"
           }
         }
+      },
+      "WatchlistRow": {
+        "type": "object",
+        "description": "自选行（观察标的，未持仓——无 shares/cost；预警判定按「无持仓形态」，\n见 03 §12：cost/stop/target_hi 不喂，序 3/4/5 不参与）。",
+        "required": [
+          "code",
+          "name",
+          "mkt",
+          "kind",
+          "sector",
+          "note",
+          "added_at"
+        ],
+        "properties": {
+          "added_at": {
+            "type": "string",
+            "description": "加入时刻（上海 YYYY-MM-DD HH:MM；upsert 不刷新）"
+          },
+          "code": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "limit_pct": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "§2 比例是标的属性（ETF 无法由代码推断 → 数据层配置；同 holdings.limit_pct 语义）"
+          },
+          "mkt": {
+            "type": "string",
+            "description": "'SH' | 'SZ'（显式字段，不按代码首字母猜——B7）"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "description": "观察备注（纯展示，不参与任何计算）"
+          },
+          "sector": {
+            "type": "string"
+          }
+        }
       }
     }
   },
@@ -2746,6 +2963,10 @@
     {
       "name": "advice",
       "description": "建议留档（P5-T2 读端点；写入在 agent 工具链，ADR-0007——数字归规则、文字归模型）"
+    },
+    {
+      "name": "watchlist",
+      "description": "自选（P5-T2，B13 定稿）：观察标的静态属性 CRUD；03 §12 预警判定范围扩到自选（无持仓形态），行情不回写本表"
     }
   ]
 }

@@ -5,6 +5,9 @@
 //!   最近留档/转债强赎）、去重落库（同日 (code,type) 至多一条）、15:05 盘后链
 //!   （快照 + 复盘触发）。**预警判定的数字口径全在 `zimu-domain::alert`**，
 //!   这里不比较任何业务阈值。
+//! - 判定范围 = 持仓 **+ 自选**（B13 定稿 2026-10-29）：自选按「无持仓形态」
+//!   喂判定（cost/stop/target_hi = None → 序 3/4/5 不参与），行情单独合并一次
+//!   拉取且**不回写库**；范围扩展全在本编排层，判定函数对两种范围零差别。
 //! - 行情只经 `zimu-market`（sidecar 唯一消费入口）；刷新回写复用
 //!   [`crate::service::refresh_portfolio_detailed`]（与 HTTP refresh 同一条链）。
 //! - 降级如实：行情失败该轮**不判定**（不用库存旧价，不伪造）；日历不可用
@@ -17,7 +20,7 @@
 //! 复盘触发经 [`ReviewTrigger`] 回调注入（server 侧接 `WebBridge::send_user_text`），
 //! 本 crate 不依赖 robit-web——CLI/测试可传 None（快照照写，push_log 如实记未触发）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -30,7 +33,7 @@ use zimu_domain::Kind;
 use zimu_market::clock::{market_clock, now_shanghai};
 use zimu_market::models::{QuoteRow, QuoteStatus};
 use zimu_market::symbols::symbol_of;
-use zimu_store::{EquitySnapshotRow, HoldingRow, NewAlert};
+use zimu_store::{EquitySnapshotRow, HoldingRow, NewAlert, WatchlistRow};
 
 use crate::service::{self, RefreshError};
 use crate::{lock, AgentDeps};
@@ -195,14 +198,46 @@ impl SchedulerCore {
                 return;
             }
         };
-        if holdings.is_empty() {
+        // 自选（B13 定稿 2026-10-29，03 §12 范围扩展）：与持仓重叠的代码走持仓
+        // 形态（刷新链已含其行情行），不重复拉取——两种形态不会同时判定
+        let watch: Vec<WatchlistRow> = match lock(&self.deps.store).watchlist() {
+            Ok(w) => w,
+            Err(e) => {
+                rep.notes
+                    .push(format!("读取自选失败（本轮自选不参与判定）：{e}"));
+                Vec::new()
+            }
+        };
+        let held: HashSet<&str> = holdings.iter().map(|h| h.code.as_str()).collect();
+        let extra: Vec<WatchlistRow> = watch
+            .into_iter()
+            .filter(|w| !held.contains(w.code.as_str()))
+            .collect();
+        if holdings.is_empty() && extra.is_empty() {
             return;
         }
 
-        // 2) 日级事实：转债强赎（每日一次）+ 各标的日线量窗口（每日每 code 一次）
-        self.ensure_daily(today, &holdings, rep).await;
+        // 2) 日级事实：转债强赎（每日一次，持仓**或自选**含转债才打）+
+        //    各标的日线量窗口（每日每 code 一次，持仓与自选共用缓存）
+        self.ensure_daily(today, &holdings, &extra, rep).await;
 
-        // 3) 组装判定输入 → 规则函数出判定（数字口径只在 zimu-domain::alert）
+        // 3) 自选行情：单独一次合并请求（**不回写库**——holdings 表只存持仓，
+        //    03 §12）。失败只降级自选侧：本轮自选不判定（不用旧值），持仓侧照常
+        let mut w_quotes: Vec<QuoteRow> = Vec::new();
+        if !extra.is_empty() {
+            let syms: Vec<String> = extra
+                .iter()
+                .filter_map(|w| symbol_of(&w.mkt, &w.code))
+                .collect();
+            match self.deps.market.quote(&syms).await {
+                Ok(p) => w_quotes = p.quotes,
+                Err(e) => rep.notes.push(format!(
+                    "自选行情获取失败，本轮自选跳过判定（不用旧值判）：{e}"
+                )),
+            }
+        }
+
+        // 4) 组装判定输入 → 规则函数出判定（数字口径只在 zimu-domain::alert）
         //    → 同日 (code,type) 去重 → 落库。本段无 await，daily 锁可安全持有。
         let ts = now.format("%Y-%m-%d %H:%M").to_string();
         let q_by_code: HashMap<&str, &QuoteRow> =
@@ -219,19 +254,8 @@ impl SchedulerCore {
             let Some(price) = q.price.filter(|p| *p > 0.0) else {
                 continue;
             };
-
-            // 涨跌停限价（§2）：prev 行情行优先、库存回退；pct 数据层配置优先、
-            // 未配置按板块推断（推不出 → None → 涨跌停类不参与）
-            let prev = q.prev.filter(|p| *p > 0.0).or(h.prev);
-            let pct = h.limit_pct.or_else(|| limit_pct(h.kind, &h.code, false));
-            let (mut limit_up, mut limit_down) = (None, None);
-            if let (Some(p), Some(pc)) = (prev, pct) {
-                if p > 0.0 {
-                    let r = limit_prices(h.kind, p, pc);
-                    limit_up = r.limit_up;
-                    limit_down = r.limit_down;
-                }
-            }
+            let (prev, limit_up, limit_down) =
+                prev_and_limits(h.kind, &h.code, h.limit_pct, q, h.prev);
 
             // 最近一条建议留档的 stop/target_hi（无留档 → 不参与）
             let (stop, target_hi) = match lock(&self.deps.store).list_advice(Some(&h.code), 1) {
@@ -263,57 +287,126 @@ impl SchedulerCore {
                 last_trade_date: cb.and_then(|c| c.last_trade_date.clone()),
                 maturity_date: cb.and_then(|c| c.maturity_date.clone()),
             };
-            let out = alert::eval_alerts(&alert::AlertEvalInput {
-                today: today.to_string(),
-                item,
-            });
-            for d in out.alerts {
-                // 同日 (code,type) 去重（03 §12：每自然日至多一条）
-                match lock(&self.deps.store).alert_exists_on(&h.code, &d.alert_type, today) {
-                    Ok(true) => continue,
-                    Ok(false) => {}
-                    Err(e) => {
-                        rep.notes
-                            .push(format!("{} 预警去重查询失败（跳过该条）：{e}", h.code));
-                        continue;
-                    }
-                }
-                let na = NewAlert {
-                    ts: ts.clone(),
-                    code: h.code.clone(),
-                    name: h.name.clone(),
-                    alert_type: d.alert_type.clone(),
-                    level: d.level.clone(),
-                    text: d.text,
+            self.eval_and_insert(&ts, today, &h.code, &h.name, item, rep);
+        }
+
+        // 自选按「无持仓形态」判定（03 §12）：cost/stop/target_hi 一律 None →
+        // 序 3/4/5 不参与；1/2/6/7/8 与持仓同款。去重共用 alerts 表同日 (code,type)
+        if !w_quotes.is_empty() {
+            let wq_by_code: HashMap<&str, &QuoteRow> =
+                w_quotes.iter().map(|q| (q.code.as_str(), q)).collect();
+            for w in &extra {
+                let Some(q) = wq_by_code.get(w.code.as_str()) else {
+                    continue; // 响应缺行：源未收录（sidecar 补齐链已尽力）
                 };
-                match lock(&self.deps.store).insert_alert(&na) {
-                    Ok(id) => {
-                        tracing::info!(
-                            code = %na.code, name = %na.name,
-                            r#type = %na.alert_type, level = %na.level,
-                            "预警触发（03 §12）"
-                        );
-                        rep.new_alerts.push(NewAlertInfo {
-                            id,
-                            code: na.code,
-                            alert_type: na.alert_type,
-                            level: na.level,
-                        });
-                    }
-                    Err(e) => rep.notes.push(format!("{} 预警落库失败：{e}", h.code)),
+                if q.status != QuoteStatus::Ok {
+                    continue;
                 }
+                let Some(price) = q.price.filter(|p| *p > 0.0) else {
+                    continue;
+                };
+                let (prev, limit_up, limit_down) =
+                    prev_and_limits(w.kind, &w.code, w.limit_pct, q, None);
+                let cb = daily.cb.get(&w.code);
+                let item = AlertItem {
+                    kind: w.kind,
+                    price,
+                    prev,
+                    limit_up,
+                    limit_down,
+                    cost: None,
+                    stop: None,
+                    target_hi: None,
+                    volume_today: q.volume,
+                    vol_hist: daily
+                        .vol_hist
+                        .get(&w.code)
+                        .cloned()
+                        .flatten()
+                        .unwrap_or_default(),
+                    redeem_status: cb.and_then(|c| c.redeem_status.clone()),
+                    last_trade_date: cb.and_then(|c| c.last_trade_date.clone()),
+                    maturity_date: cb.and_then(|c| c.maturity_date.clone()),
+                };
+                self.eval_and_insert(&ts, today, &w.code, &w.name, item, rep);
             }
         }
     }
 
-    /// 日级事实缓存：cb_list（有转债持仓才打，每日一次）+ 日线量窗口（每日每 code 一次）
-    async fn ensure_daily(&self, today: &str, holdings: &[HoldingRow], rep: &mut TickReport) {
+    /// 判定 → 同日 (code,type) 去重 → 落库（持仓与自选共用；数字口径只在
+    /// `zimu-domain::alert`，这里只搬运——03 §12）
+    fn eval_and_insert(
+        &self,
+        ts: &str,
+        today: &str,
+        code: &str,
+        name: &str,
+        item: AlertItem,
+        rep: &mut TickReport,
+    ) {
+        let out = alert::eval_alerts(&alert::AlertEvalInput {
+            today: today.to_string(),
+            item,
+        });
+        for d in out.alerts {
+            match lock(&self.deps.store).alert_exists_on(code, &d.alert_type, today) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(e) => {
+                    rep.notes
+                        .push(format!("{code} 预警去重查询失败（跳过该条）：{e}"));
+                    continue;
+                }
+            }
+            let na = NewAlert {
+                ts: ts.to_string(),
+                code: code.to_string(),
+                name: name.to_string(),
+                alert_type: d.alert_type.clone(),
+                level: d.level.clone(),
+                text: d.text,
+            };
+            match lock(&self.deps.store).insert_alert(&na) {
+                Ok(id) => {
+                    tracing::info!(
+                        code = %na.code, name = %na.name,
+                        r#type = %na.alert_type, level = %na.level,
+                        "预警触发（03 §12）"
+                    );
+                    rep.new_alerts.push(NewAlertInfo {
+                        id,
+                        code: na.code,
+                        alert_type: na.alert_type,
+                        level: na.level,
+                    });
+                }
+                Err(e) => rep.notes.push(format!("{code} 预警落库失败：{e}")),
+            }
+        }
+    }
+
+    /// 日级事实缓存：cb_list（持仓**或自选**有转债才打，每日一次）+
+    /// 日线量窗口（每日每 code 一次，持仓与自选共用同一缓存）
+    async fn ensure_daily(
+        &self,
+        today: &str,
+        holdings: &[HoldingRow],
+        watch: &[WatchlistRow],
+        rep: &mut TickReport,
+    ) {
         // a) 转债强赎/期限字段（cb_list 是全量在市列表的重请求——不进分钟级轮询）
-        let cb_held: Vec<&HoldingRow> = holdings
+        let cb_codes: Vec<String> = holdings
             .iter()
             .filter(|h| h.kind == Kind::Cb)
+            .map(|h| h.code.clone())
+            .chain(
+                watch
+                    .iter()
+                    .filter(|w| w.kind == Kind::Cb)
+                    .map(|w| w.code.clone()),
+            )
             .collect();
-        let need_cb = !cb_held.is_empty() && !self.daily().cb_checked;
+        let need_cb = !cb_codes.is_empty() && !self.daily().cb_checked;
         if need_cb {
             match self.deps.market.cb_list().await {
                 Ok(p) => {
@@ -323,11 +416,11 @@ impl SchedulerCore {
                         );
                     }
                     let mut d = self.daily();
-                    for h in &cb_held {
-                        match p.items.iter().find(|i| i.code == h.code) {
+                    for code in &cb_codes {
+                        match p.items.iter().find(|i| i.code == *code) {
                             Some(it) => {
                                 d.cb.insert(
-                                    h.code.clone(),
+                                    code.clone(),
                                     CbFacts {
                                         redeem_status: it.redeem_status.clone(),
                                         last_trade_date: it.last_trade_date.clone(),
@@ -336,8 +429,7 @@ impl SchedulerCore {
                                 );
                             }
                             None => rep.notes.push(format!(
-                                "{} 未在 cb_list 在市列表中（强赎/到期类今日不参与）",
-                                h.code
+                                "{code} 未在 cb_list 在市列表中（强赎/到期类今日不参与）"
                             )),
                         }
                     }
@@ -352,11 +444,15 @@ impl SchedulerCore {
         //    不参与判定（不伪造；也不逐分钟重试白耗请求——日线级故障等次日自愈）
         let missing: Vec<(String, String)> = {
             let d = self.daily();
-            holdings
+            let h_iter = holdings
                 .iter()
                 .filter(|h| !d.vol_hist.contains_key(&h.code))
-                .filter_map(|h| symbol_of(&h.mkt, &h.code).map(|s| (h.code.clone(), s)))
-                .collect()
+                .filter_map(|h| symbol_of(&h.mkt, &h.code).map(|s| (h.code.clone(), s)));
+            let w_iter = watch
+                .iter()
+                .filter(|w| !d.vol_hist.contains_key(&w.code))
+                .filter_map(|w| symbol_of(&w.mkt, &w.code).map(|s| (w.code.clone(), s)));
+            h_iter.chain(w_iter).collect()
         };
         if missing.is_empty() {
             return;
@@ -467,6 +563,29 @@ impl SchedulerCore {
         }
         tracing::info!(ok, detail = %detail, "盘后复盘触发（15:05 调度）");
     }
+}
+
+/// prev 与涨跌停限价（§2）：prev 行情行优先（缺失/≤0 回退 `fallback_prev`——
+/// 持仓为库存旧值，自选无库存传 None）；pct 数据层配置优先、未配置按板块推断
+/// （推不出 → 涨跌停类不参与判定，不伪造）。持仓与自选两条路径共用。
+fn prev_and_limits(
+    kind: Kind,
+    code: &str,
+    configured: Option<i64>,
+    q: &QuoteRow,
+    fallback_prev: Option<f64>,
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let prev = q.prev.filter(|p| *p > 0.0).or(fallback_prev);
+    let pct = configured.or_else(|| limit_pct(kind, code, false));
+    let (mut limit_up, mut limit_down) = (None, None);
+    if let (Some(p), Some(pc)) = (prev, pct) {
+        if p > 0.0 {
+            let r = limit_prices(kind, p, pc);
+            limit_up = r.limit_up;
+            limit_down = r.limit_down;
+        }
+    }
+    (prev, limit_up, limit_down)
 }
 
 /// 实时循环（生产入口）：tick + sleep 的薄壳——判定逻辑全在 [`SchedulerCore::tick`]，

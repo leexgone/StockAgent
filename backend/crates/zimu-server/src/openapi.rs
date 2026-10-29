@@ -39,8 +39,8 @@ use zimu_market::models::{
     QuoteStatus,
 };
 use zimu_store::{
-    AccountRow, AdviceRow, AlertRow, EquitySnapshotRow, HoldingRow, NewHoldingMeta, PortfolioView,
-    PushLogRow, RecordReceipt, SimPreview, TradeRequest, TradeRow,
+    AccountRow, AdviceRow, AlertRow, EquitySnapshotRow, HoldingRow, NewHoldingMeta, NewWatchlist,
+    PortfolioView, PushLogRow, RecordReceipt, SimPreview, TradeRequest, TradeRow, WatchlistRow,
 };
 
 // ============================================================================
@@ -209,6 +209,7 @@ fn chat_cancel_doc() {}
         (name = "market", description = "行情（P4-T4，经 zimu-market 适配器——sidecar 唯一消费入口；错误三分类见 04 附录 B）"),
         (name = "alerts", description = "预警、净值快照与推送留痕（P4-T7 + P5-T2）：内容由调度引擎判定落库（口径 03 §12，判定函数在 zimu-domain::alert），端点只读取与归档"),
         (name = "advice", description = "建议留档（P5-T2 读端点；写入在 agent 工具链，ADR-0007——数字归规则、文字归模型）"),
+        (name = "watchlist", description = "自选（P5-T2，B13 定稿）：观察标的静态属性 CRUD；03 §12 预警判定范围扩到自选（无持仓形态），行情不回写本表"),
     ),
     paths(
         health_doc, chat_stream_doc, chat_doc, chat_confirm_doc, chat_cancel_doc,
@@ -228,6 +229,9 @@ fn chat_cancel_doc() {}
         crate::alerts_api::get_equity_snapshots,
         crate::alerts_api::get_push_logs,
         crate::advice_api::get_advice,
+        crate::watchlist_api::get_watchlist,
+        crate::watchlist_api::add_watchlist,
+        crate::watchlist_api::remove_watchlist,
     ),
     components(schemas(
         ApiError, Health, ChatRequest, ConfirmRequest,
@@ -240,6 +244,7 @@ fn chat_cancel_doc() {}
         AccountRow, HoldingRow, NewHoldingMeta, PortfolioView, RecordReceipt,
         SimPreview, TradeRequest, TradeRow,
         AlertRow, EquitySnapshotRow, AdviceRow, PushLogRow,
+        WatchlistRow, NewWatchlist,
         MarketClock,
         Attempt, CalendarPayload, CbItem, CbListPayload, KlineBar, KlinePayload,
         QuotePayload, QuoteRow, QuoteStatus,

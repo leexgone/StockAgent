@@ -14,6 +14,8 @@
 //!                            判定落库，03 §12；端点只读取与归档）
 //! - `/api/advice`             建议留档读取（P5-T2，见 lib advice_api；写入在 agent
 //!                            工具链，ADR-0007 数字归规则、文字归模型）
+//! - `/api/watchlist*`         自选 CRUD（P5-T2，B13 定稿：schema v2，03 §12
+//!                            预警范围扩到自选；调度器判定，行情不回写自选表）
 //! - `GET  /api/openapi.json` API 契约文档（P4-T5，见 lib openapi）
 //! - 其余路径                 静态托管 `frontend/dist`，回落 `index.html`（SPA 路由）
 //!

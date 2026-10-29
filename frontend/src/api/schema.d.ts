@@ -356,6 +356,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/watchlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_watchlist"];
+        put?: never;
+        post: operations["add_watchlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/watchlist/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["remove_watchlist"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -779,6 +811,18 @@ export interface components {
             prev?: number | null;
             sector?: string;
         };
+        /** @description 自选添加请求。**按 code upsert**：重复添加 = 更新名称/元信息/备注（幂等，不报错）。 */
+        NewWatchlist: {
+            code: string;
+            kind: components["schemas"]["Kind"];
+            /** Format: int64 */
+            limit_pct?: number | null;
+            /** @description 'SH' | 'SZ' */
+            mkt: string;
+            name: string;
+            note?: string;
+            sector?: string;
+        };
         PerHolding: {
             code: string;
             /**
@@ -1008,6 +1052,27 @@ export interface components {
             realized?: number | null;
             side: components["schemas"]["Side"];
             ts: string;
+        };
+        /**
+         * @description 自选行（观察标的，未持仓——无 shares/cost；预警判定按「无持仓形态」，
+         *     见 03 §12：cost/stop/target_hi 不喂，序 3/4/5 不参与）。
+         */
+        WatchlistRow: {
+            /** @description 加入时刻（上海 YYYY-MM-DD HH:MM；upsert 不刷新） */
+            added_at: string;
+            code: string;
+            kind: components["schemas"]["Kind"];
+            /**
+             * Format: int64
+             * @description §2 比例是标的属性（ETF 无法由代码推断 → 数据层配置；同 holdings.limit_pct 语义）
+             */
+            limit_pct?: number | null;
+            /** @description 'SH' | 'SZ'（显式字段，不按代码首字母猜——B7） */
+            mkt: string;
+            name: string;
+            /** @description 观察备注（纯展示，不参与任何计算） */
+            note: string;
+            sector: string;
         };
     };
     responses: never;
@@ -1756,6 +1821,118 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TradeRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_watchlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自选全量，加入时间序（added_at, code）。观察标的的静态属性（无 shares/cost——非持仓）；行情不回写本表，展示价走 /api/market/quote */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    add_watchlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewWatchlist"];
+            };
+        };
+        responses: {
+            /** @description 添加/更新后的行。按 code upsert 幂等：重复添加 = 更新名称/元信息/备注，added_at 保留首次值 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistRow"];
+                };
+            };
+            /** @description 输入问题：code/name 空、市场码非法（bad_input，B7 显式 mkt） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    remove_watchlist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 标的代码（6 位） */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 移除成功，返回被移除行。只动自选表——持仓、预警历史与留档不受影响 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistRow"];
+                };
+            };
+            /** @description 自选里没有该代码（no_watchlist_item） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description 存储层内部错误 */

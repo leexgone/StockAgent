@@ -35,6 +35,9 @@ UA = {
 }
 SINA_HQ_URL = "https://hq.sinajs.cn/list={codes}"
 SINA_HEADERS = {**UA, "Referer": "https://finance.sina.com.cn"}
+TENCENT_QT_URL = "https://qt.gtimg.cn/q={codes}"
+_T_LINE_RE = re.compile(r'v_(\w+)="([^"]*)"')
+_T_TS_RE = re.compile(r"^20\d{12}$")
 EM_ULIST = "https://push2.eastmoney.com/api/qt/ulist.np/get"
 # f2 最新 f3 涨跌幅% f5 成交量 f6 成交额 f12 代码 f14 名称 f15 高 f16 低 f17 今开 f18 昨收
 EM_FIELDS = "f2,f3,f5,f6,f12,f14,f15,f16,f17,f18"
@@ -85,12 +88,9 @@ def _quote_row(symbol, *, source, status, name=None, price=None, prev=None, open
 
 # ---------- 实时 ----------
 
-def sina_hq_quote(symbols: list[str]) -> list[dict]:
-    """新浪 hq 直连：一次请求多标的。33/34 位股票系布局统一解析。"""
-    r = requests.get(SINA_HQ_URL.format(codes=",".join(symbols)),
-                     headers=SINA_HEADERS, timeout=SINA_TIMEOUT)
-    r.encoding = "gbk"
-    got = dict(_LINE_RE.findall(r.text))
+def _parse_sina_hq(text: str, symbols: list[str]) -> list[dict]:
+    """新浪 hq 响应解析（纯函数，测试直接喂样本文本）。33/34 位股票系布局。"""
+    got = dict(_LINE_RE.findall(text))
     rows = []
     for sym in symbols:
         if sym not in got:
@@ -105,6 +105,10 @@ def sina_hq_quote(symbols: list[str]) -> list[dict]:
             continue
         price, prev = _num(f[3]), _num(f[2])
         open_, volume = _num(f[1]), _num(f[8])
+        if not f[0] and not price:
+            # 空名 + 零价 = 新浪未收录该标的（如中证转债指数 sh000832——B14）：
+            # 不出行，service 的逐标的补齐会把它交给下一源，而不是伪装 halted
+            continue
         halted = (not price) or (not open_ and not volume)
         rows.append(_quote_row(
             sym, source="sina-hq",
@@ -114,6 +118,68 @@ def sina_hq_quote(symbols: list[str]) -> list[dict]:
             date_=f[30] if len(f) > 30 else None, time_=f[31] if len(f) > 31 else None,
         ))
     return rows
+
+
+def sina_hq_quote(symbols: list[str]) -> list[dict]:
+    """新浪 hq 直连：一次请求多标的。"""
+    r = requests.get(SINA_HQ_URL.format(codes=",".join(symbols)),
+                     headers=SINA_HEADERS, timeout=SINA_TIMEOUT)
+    r.encoding = "gbk"
+    return _parse_sina_hq(r.text, symbols)
+
+
+def _parse_tencent_qt(text: str, symbols: list[str]) -> list[dict]:
+    """腾讯 qt 响应解析（纯函数）。`~` 分隔；盘口段长度随标的类型变化，
+    绝对下标不可靠——价/昨/开/量取头部固定位（1–6），其余以 **14 位时间戳
+    字段为锚**相对取位：+1 涨跌 +2 涨跌% +3 高 +4 低 +5「最新/量(手)/额(元)」。
+    （布局按 2026-10-29 指数/股票/ETF/转债四类实测样本校准，B14。）"""
+    got = dict(_T_LINE_RE.findall(text))
+    rows = []
+    for sym in symbols:
+        payload = got.get(sym)
+        if not payload:
+            rows.append(_quote_row(sym, source="tencent-qt", status="no_data"))
+            continue
+        f = payload.split("~")
+        if len(f) < 7:
+            rows.append(_quote_row(sym, source="tencent-qt", status="no_data"))
+            continue
+        name = f[1] or None
+        price, prev, open_ = _num(f[3]), _num(f[4]), _num(f[5])
+        vol_lots = _num(f[6])
+        ts_i = next((i for i, x in enumerate(f) if _T_TS_RE.match(x)), None)
+        date_ = time_ = high = low = amount = None
+        if ts_i is not None:
+            ts = f[ts_i]
+            date_ = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+            time_ = f"{ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
+            if len(f) > ts_i + 4:
+                high, low = _num(f[ts_i + 3]), _num(f[ts_i + 4])
+            if len(f) > ts_i + 5 and "/" in f[ts_i + 5]:
+                amount = _num(f[ts_i + 5].split("/")[2])  # 元，与新浪 f[9] 同单位
+        if not name and not price:
+            continue  # 源未收录：不出行（service 逐标的补齐）
+        kind = S.infer_kind(sym)
+        # 量单位与东财同款约定：股票/ETF/转债 手→股/份/张 ×100；指数原样透传（B14 实测：
+        # sh000001 腾讯量 443564144 手与新浪指数字段逐位一致）
+        volume = vol_lots * 100 if (vol_lots is not None and kind != "index") else vol_lots
+        halted = not price
+        rows.append(_quote_row(
+            sym, source="tencent-qt",
+            status="halted_or_delisted" if halted else "ok",
+            name=name, price=price, prev=prev, open=open_,
+            high=high, low=low, volume=volume, amount=amount,
+            date_=date_, time_=time_,
+        ))
+    return rows
+
+
+def tencent_qt_quote(symbols: list[str]) -> list[dict]:
+    """腾讯 qt 直连（B14 指数 spot 补位；股票/ETF/转债同样覆盖，作通用二通道）。"""
+    r = requests.get(TENCENT_QT_URL.format(codes=",".join(symbols)),
+                     headers=UA, timeout=EM_TIMEOUT)
+    r.encoding = "gbk"
+    return _parse_tencent_qt(r.text, symbols)
 
 
 def em_push2_quote(symbols: list[str]) -> list[dict]:

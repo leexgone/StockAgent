@@ -23,7 +23,7 @@ use common::*;
 use serde_json::{json, Value};
 use zimu_market::error::MarketError;
 use zimu_market::models::*;
-use zimu_store::{EquitySnapshotRow, NewAdvice, NewAlert};
+use zimu_store::{EquitySnapshotRow, NewAdvice, NewAlert, NewWatchlist};
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -154,6 +154,12 @@ async fn post(http: &reqwest::Client, base: &str, path: &str, body: Value) -> (u
     (status, r.json::<Value>().await.unwrap())
 }
 
+async fn delete(http: &reqwest::Client, base: &str, path: &str) -> (u16, Value) {
+    let r = http.delete(format!("{base}{path}")).send().await.unwrap();
+    let status = r.status().as_u16();
+    (status, r.json::<Value>().await.unwrap())
+}
+
 // ============================================================================
 // 1. 契约文档新鲜度
 // ============================================================================
@@ -251,6 +257,21 @@ async fn live_responses_and_samples_pass_schema() {
             "post_market_review",
             true,
             "复盘已注入 agent 会话（契约样例种子）",
+        )
+        .unwrap();
+    // watchlist 样例种子（P5-T2，B13）：一条观察标的（非持仓）
+    store
+        .add_watchlist(
+            &NewWatchlist {
+                code: "002415".into(),
+                name: "海康威视".into(),
+                mkt: "SZ".into(),
+                kind: zimu_domain::Kind::Stock,
+                limit_pct: Some(10),
+                sector: "电子".into(),
+                note: "观察：AI 视觉商业化".into(),
+            },
+            "2026-10-28 09:30",
         )
         .unwrap();
     let base = spawn_api(fake.clone(), store).await;
@@ -364,6 +385,47 @@ async fn live_responses_and_samples_pass_schema() {
     assert_eq!(s, 200);
     assert_eq!(b[0]["kind"], json!("post_market_review"));
     check(&doc, "push_logs", "get", "/api/push_logs", 200, &b);
+
+    // ---- watchlist 面（P5-T2，B13 定稿）：CRUD + 错误契约 ----
+    let (s, b) = get(&http, &base, "/api/watchlist").await;
+    assert_eq!(s, 200);
+    assert_eq!(b[0]["code"], json!("002415"));
+    check(&doc, "watchlist", "get", "/api/watchlist", 200, &b);
+
+    // upsert：新增 601899（样例）
+    let (s, b) = post(
+        &http,
+        &base,
+        "/api/watchlist",
+        json!({"code": "601899", "name": "紫金矿业", "mkt": "SH", "kind": "stock",
+               "limit_pct": 10, "sector": "有色金属", "note": "与现有有色仓位重叠"}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    assert_eq!(b["code"], json!("601899"));
+    check(&doc, "watchlist_add", "post", "/api/watchlist", 200, &b);
+
+    let (s, b) = delete(&http, &base, "/api/watchlist/601899").await;
+    assert_eq!(s, 200);
+    assert_eq!(b["note"], json!("与现有有色仓位重叠"));
+    check(&doc, "watchlist_removed", "delete", "/api/watchlist/{code}", 200, &b);
+
+    // 404：移除不存在的自选
+    let (s, b) = delete(&http, &base, "/api/watchlist/999999").await;
+    assert_eq!(s, 404);
+    assert_eq!(b["error"], json!("no_watchlist_item"));
+    check(&doc, "error_no_watchlist_item", "delete", "/api/watchlist/{code}", 404, &b);
+
+    // 400：市场码非法（B7 显式 mkt，不按代码猜）
+    let (s, b) = post(
+        &http,
+        &base,
+        "/api/watchlist",
+        json!({"code": "000001", "name": "测试", "mkt": "BJ", "kind": "stock"}),
+    )
+    .await;
+    assert_eq!(s, 400);
+    assert_eq!(b["error"], json!("bad_input"));
 
     // ---- 错误契约 ----
     // 归档不存在的预警 → 404 no_alert

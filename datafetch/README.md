@@ -51,7 +51,7 @@ uv run spike_probe.py --quick            # 历史探测（P2-T1，三轮结论�
 
 | 类目 | 链（优先级从左到右） | 依据 |
 |---|---|---|
-| 实时 | 新浪 `hq.sinajs.cn` 直连 → 东财 `push2 ulist` 直连（浏览器 UA + `fltt=2`） | spike：akshare 的东财实时封装被指纹拦，直连通道不依赖它；东财被拦时快速失败 ~0.4s，适合熔断切源而非重试等待 |
+| 实时 | 新浪 `hq.sinajs.cn` 直连 → 腾讯 `qt.gtimg.cn` 直连 → 东财 `push2 ulist` 直连（浏览器 UA + `fltt=2`） | spike：akshare 的东财实时封装被指纹拦，直连通道不依赖它；东财被拦时快速失败 ~0.4s，适合熔断切源而非重试等待。腾讯进二通道（B14，2026-10-29）：新浪不 carry 部分指数（中证转债 sh000832 回空名零价行）；**quote 编排按标的粒度补齐**——某源成功但未收录的标的自动落下一源（attempts 留痕），链尽仍缺合成 `no_data`，502 收窄为「无任何源成功」 |
 | 股票日线 | 新浪 `stock_zh_a_daily`(qfq) → baostock(前复权) → akshare 东财 hist（成交量手→股 ×100 归一） | **baostock 复测通过**（2026-10-28 登录+日线+日历全 OK；spike 时的 10002007 是暂时故障）→ 保留，进兜底链 |
 | 指数日线 | 新浪 `stock_zh_index_daily` → baostock 指数 | |
 | ETF/转债日线 | 仅新浪系（baostock 不覆盖场内 ETF/转债） | 全链挂即 502，诚实降级 |
@@ -73,22 +73,24 @@ uv run spike_probe.py --quick            # 历史探测（P2-T1，三轮结论�
 
 ```bash
 ZIMU_DF_DISABLE=sina_hq uv run uvicorn zimu_datafetch.server:app --port 8300
-curl "http://127.0.0.1:8300/quote?codes=sh600519,sh510300"   # → 200，source=em-push2，degraded=true
-ZIMU_DF_DISABLE=sina_hq,em_push2 uv run uvicorn zimu_datafetch.server:app --port 8300
+curl "http://127.0.0.1:8300/quote?codes=sh600519,sh510300"   # → 200，source=tencent-qt，degraded=true
+ZIMU_DF_DISABLE=sina_hq,tencent_qt,em_push2 uv run uvicorn zimu_datafetch.server:app --port 8300
 curl "http://127.0.0.1:8300/quote?codes=sh600519"            # → 502 UPSTREAM_ALL_FAILED（JSON 契约，进程无恙）
 curl "http://127.0.0.1:8300/kline/sh600519"                  # → 200：另一条链，实时全挂不影响日线
 curl "http://127.0.0.1:8300/healthz"                         # → 200
 ```
 
-单测（36 项，`uv run pytest`）覆盖兜底顺序、熔断跳源、注入、缓存、`no_data`
-归一、错误契约形状、cb_list 降级、日历兜底。退市回归样本：`sh110074`
-（定格价 → `halted_or_delisted`）、`sz127022`（空行 → `empty_or_delisted`）。
+单测（41 项，`uv run pytest`）覆盖兜底顺序、逐标的补齐（B14）、熔断跳源、
+注入、缓存、`no_data` 归一、错误契约形状、cb_list 降级、日历兜底、新浪/腾讯
+解析器纯函数（真实抓包样本）。退市回归样本：`sh110074`（定格价 →
+`halted_or_delisted`）、`sz127022`（空行 → `empty_or_delisted`）；新浪未收录
+样本：`sh000832`（空名零价 → 不出行，交下一源——不再伪装 halted）。
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `ZIMU_DF_DISABLE` | 空 | 故障注入：逗号分隔源名（如 `sina_hq,em_push2,sina_calendar`），链上直接跳过并记 attempt |
+| `ZIMU_DF_DISABLE` | 空 | 故障注入：逗号分隔源名（如 `sina_hq,tencent_qt,em_push2,sina_calendar`），链上直接跳过并记 attempt |
 | `ZIMU_DF_QUOTE_TTL` / `ZIMU_DF_KLINE_TTL` / `ZIMU_DF_CB_TTL` / `ZIMU_DF_CALENDAR_TTL` | 3 / 300 / 300 / 21600（秒） | 各类目缓存时长 |
 | `ZIMU_DF_BREAKER_THRESHOLD` / `ZIMU_DF_BREAKER_COOLOFF` | 3 / 60（秒） | 熔断阈值与冷却 |
 | `ZIMU_DF_GATE_<源名大写>` | 见 `config.DEFAULT_GATES` | 单源限频闸间隔 |

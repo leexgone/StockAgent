@@ -119,7 +119,7 @@
 
 | 用途 | 首选 | 备选 | 实测 |
 |---|---|---|---|
-| 实时行情（股票/ETF/指数/转债，一次多标的） | 新浪 `hq.sinajs.cn` 直连（需 Referer 头） | 东财 `push2 ulist` 直连（**必须带浏览器 UA**） | ✅ 两者均通 |
+| 实时行情（股票/ETF/指数/转债，一次多标的） | 新浪 `hq.sinajs.cn` 直连（需 Referer 头） | 腾讯 `qt.gtimg.cn` 直连（B14 指数补位）→ 东财 `push2 ulist` 直连（**必须带浏览器 UA**） | ✅ 三通道均通；新浪不 carry 部分指数（中证转债 sh000832 回空名零价行），腾讯有全量数据（2026-10-29 实测：价格与新浪逐位一致，量单位手，指数原样/非指数 ×100 归一） |
 | 全市场扫描（低频） | akshare `stock_zh_a_spot`（新浪，全量翻页 ~20s） | 东财 push2 分页 | ✅ |
 | 股票日线 | 新浪 `stock_zh_a_daily`（qfq，全历史，含换手率/流通股本） | 东财 `stock_zh_a_hist`（多振幅/换手率列） | ✅ 新浪冒烟稳定（沪/深/创业板均通）；东财间歇被拦 |
 | ETF 日线 | akshare `fund_etf_hist_sina`（全历史） | — | ✅ |
@@ -199,6 +199,12 @@
 - **降级可观测**：响应带 `degraded` + `attempts[]`（逐源原因：disabled/熔断/异常），
   全链失败 502 `UPSTREAM_ALL_FAILED`——主程序（P4-T4）据此区分「主源正常」与
   「凑合活着」，`/healthz` 暴露熔断与缓存状态。
+- **quote 逐标的补齐（B14，2026-10-29）**：某源成功但**未收录**部分标的（解析层
+  对「空名 + 零价」行不出行，不再伪装 `halted_or_delisted`）时，剩余标的继续走
+  链上下一个源（attempts 记「未返回 N 个标的，交由下一源补齐」→ degraded=true）；
+  链尽仍缺 → 合成 `no_data` 行（诚实缺行，不算降级）。502 语义收窄为「没有任何
+  源成功过」。回归：`tests/test_quote.py::test_backfill_covers_symbol_missing_from_primary`
+  与 `tests/test_sources.py`（两解析器纯函数，真实抓包样本）。
 - **口径边界重申**：sidecar 不定义业务口径；ETF `limit_pct` 等标的属性由数据层
   （holdings meta）携带。成交量单位：股票/ETF 归一到股/份（东财 ×100），转债日线
   为源侧「张」口径（量比若需校准留给 P4-T4）。

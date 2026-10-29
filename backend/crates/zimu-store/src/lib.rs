@@ -27,7 +27,7 @@ use zimu_domain::{Kind, Side};
 
 /// schema 版本（PRAGMA user_version）。新增迁移在 `MIGRATIONS` 尾部追加，
 /// 永不修改已发布版本的 SQL——迁移只前进（P4-T2 迁移机制约定）。
-pub const CURRENT_VERSION: i64 = 1;
+pub const CURRENT_VERSION: i64 = 2;
 
 const MIGRATIONS: &[(i64, &str)] = &[(
     1,
@@ -126,7 +126,26 @@ CREATE TABLE push_log (
 
 CREATE INDEX idx_trades_ts ON trades(ts);
 "#,
-)];
+    ),
+    (
+        2,
+        r#"
+-- B13 定稿（2026-10-29）：自选表——观察标的（未持仓，无 shares/cost）。
+-- 03 §12 判定范围扩到自选（无持仓形态：序 3/4/5 不参与）；列语义与 holdings
+-- 静态列同款（B7 显式 mkt、limit_pct 是标的属性——数据层配置优先）。
+CREATE TABLE watchlist (
+  code       TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  mkt        TEXT NOT NULL CHECK (mkt IN ('SH','SZ')),
+  kind       TEXT NOT NULL CHECK (kind IN ('stock','etf','cb')),
+  limit_pct  INTEGER,
+  sector     TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT '',
+  added_at   TEXT NOT NULL
+);
+"#,
+    ),
+];
 
 // ============================================================================
 // 行类型
@@ -1331,5 +1350,170 @@ impl Store {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().context("读取推送日志失败")
+    }
+}
+
+// ============================================================================
+// 自选（watchlist，B13 定稿 2026-10-29：schema v2；03 §12 判定范围扩到自选）
+// ============================================================================
+
+/// 自选行（观察标的，未持仓——无 shares/cost；预警判定按「无持仓形态」，
+/// 见 03 §12：cost/stop/target_hi 不喂，序 3/4/5 不参与）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct WatchlistRow {
+    pub code: String,
+    pub name: String,
+    /// 'SH' | 'SZ'（显式字段，不按代码首字母猜——B7）
+    pub mkt: String,
+    pub kind: Kind,
+    /// §2 比例是标的属性（ETF 无法由代码推断 → 数据层配置；同 holdings.limit_pct 语义）
+    pub limit_pct: Option<i64>,
+    pub sector: String,
+    /// 观察备注（纯展示，不参与任何计算）
+    pub note: String,
+    /// 加入时刻（上海 YYYY-MM-DD HH:MM；upsert 不刷新）
+    pub added_at: String,
+}
+
+/// 自选添加请求。**按 code upsert**：重复添加 = 更新名称/元信息/备注（幂等，不报错）。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NewWatchlist {
+    pub code: String,
+    pub name: String,
+    /// 'SH' | 'SZ'
+    pub mkt: String,
+    pub kind: Kind,
+    #[serde(default)]
+    pub limit_pct: Option<i64>,
+    #[serde(default)]
+    pub sector: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// 自选录入拒绝原因（HTTP 层据此选状态码：BadInput → 422，Store → 500）
+#[derive(Debug, Clone)]
+pub enum WatchlistError {
+    BadInput(String),
+    Store(String),
+}
+
+impl std::fmt::Display for WatchlistError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadInput(m) => write!(f, "输入不合法：{m}"),
+            Self::Store(m) => write!(f, "存储层：{m}"),
+        }
+    }
+}
+
+impl std::error::Error for WatchlistError {}
+
+const WATCHLIST_COLS: &str = "code, name, mkt, kind, limit_pct, sector, note, added_at";
+
+fn map_watchlist_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<WatchlistRow> {
+    let kind_s: String = r.get(3)?;
+    Ok(WatchlistRow {
+        code: r.get(0)?,
+        name: r.get(1)?,
+        mkt: r.get(2)?,
+        // kind 有写入时的应用层校验 + CHECK 约束双保险；未知值（外改库）按 stock 容错不 panic
+        kind: kind_from(&kind_s).unwrap_or(Kind::Stock),
+        limit_pct: r.get(4)?,
+        sector: r.get(5)?,
+        note: r.get(6)?,
+        added_at: r.get(7)?,
+    })
+}
+
+impl Store {
+    /// 添加/更新自选（按 code upsert 幂等；added_at 保留首次值）。
+    /// 校验与新建持仓同款（B7 显式 mkt；名称非空）。
+    pub fn add_watchlist(
+        &self,
+        w: &NewWatchlist,
+        added_at: &str,
+    ) -> std::result::Result<WatchlistRow, WatchlistError> {
+        if w.code.trim().is_empty() {
+            return Err(WatchlistError::BadInput("code 不能为空".into()));
+        }
+        if w.name.trim().is_empty() {
+            return Err(WatchlistError::BadInput("name 不能为空".into()));
+        }
+        if w.mkt != "SH" && w.mkt != "SZ" {
+            return Err(WatchlistError::BadInput(format!(
+                "市场码非法：{}（应为 SH/SZ）",
+                w.mkt
+            )));
+        }
+        self.conn
+            .execute(
+                "INSERT INTO watchlist (code, name, mkt, kind, limit_pct, sector, note, added_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+                 ON CONFLICT(code) DO UPDATE SET
+                   name=excluded.name, mkt=excluded.mkt, kind=excluded.kind,
+                   limit_pct=excluded.limit_pct, sector=excluded.sector, note=excluded.note",
+                params![
+                    w.code,
+                    w.name,
+                    w.mkt,
+                    kind_str(w.kind),
+                    w.limit_pct,
+                    w.sector,
+                    w.note,
+                    added_at
+                ],
+            )
+            .map_err(|e| WatchlistError::Store(e.to_string()))?;
+        self.watchlist_row(&w.code)?
+            .ok_or_else(|| WatchlistError::Store("写入后读回失败".into()))
+    }
+
+    /// 删除自选；返回 None = code 不存在（HTTP 404）。删除幂等（重复删不报错）。
+    pub fn remove_watchlist(
+        &self,
+        code: &str,
+    ) -> std::result::Result<Option<WatchlistRow>, WatchlistError> {
+        let row = self.watchlist_row(code)?;
+        if row.is_some() {
+            self.conn
+                .execute("DELETE FROM watchlist WHERE code = ?1", params![code])
+                .map_err(|e| WatchlistError::Store(e.to_string()))?;
+        }
+        Ok(row)
+    }
+
+    /// 全量自选（加入时间序，稳定走查）。
+    pub fn watchlist(&self) -> std::result::Result<Vec<WatchlistRow>, WatchlistError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {WATCHLIST_COLS} FROM watchlist ORDER BY added_at, code"
+            ))
+            .map_err(|e| WatchlistError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map([], map_watchlist_row)
+            .map_err(|e| WatchlistError::Store(e.to_string()))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| WatchlistError::Store(e.to_string()))
+    }
+
+    fn watchlist_row(
+        &self,
+        code: &str,
+    ) -> std::result::Result<Option<WatchlistRow>, WatchlistError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {WATCHLIST_COLS} FROM watchlist WHERE code = ?1"
+            ))
+            .map_err(|e| WatchlistError::Store(e.to_string()))?;
+        let mut rows = stmt
+            .query_map(params![code], map_watchlist_row)
+            .map_err(|e| WatchlistError::Store(e.to_string()))?;
+        match rows.next() {
+            Some(r) => Ok(Some(r.map_err(|e| WatchlistError::Store(e.to_string()))?)),
+            None => Ok(None),
+        }
     }
 }

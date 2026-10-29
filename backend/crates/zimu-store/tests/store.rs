@@ -5,8 +5,8 @@
 use zimu_domain::Kind;
 use zimu_domain::Side;
 use zimu_store::{
-    AccountRow, EquitySnapshotRow, NewAdvice, NewAlert, NewHoldingMeta, RecordError, Store,
-    TradeRequest,
+    AccountRow, EquitySnapshotRow, NewAdvice, NewAlert, NewHoldingMeta, NewWatchlist, RecordError,
+    Store, TradeRequest, WatchlistError,
 };
 
 fn meta(code_name: (&str, &str), kind: Kind, prev: Option<f64>, pct: Option<i64>) -> NewHoldingMeta {
@@ -576,4 +576,80 @@ fn push_log_roundtrip() {
     assert_eq!(rows[0].ts, "2026-10-30 15:05"); // 新在前
     assert!(!rows[0].ok && rows[0].detail == "agent 未在线");
     assert!(rows[1].ok && rows[1].channel == "agent");
+}
+
+fn watch(code: &str, name: &str, mkt: &str) -> NewWatchlist {
+    NewWatchlist {
+        code: code.into(),
+        name: name.into(),
+        mkt: mkt.into(),
+        kind: Kind::Stock,
+        limit_pct: Some(10),
+        sector: "电子".into(),
+        note: "观察：AI 视觉商业化".into(),
+    }
+}
+
+#[test]
+fn watchlist_upsert_remove_and_validation() {
+    let s = seed_store(100_000.0);
+    let r1 = s.add_watchlist(&watch("002415", "海康威视", "SZ"), "2026-10-29 10:00").unwrap();
+    assert_eq!(r1.added_at, "2026-10-29 10:00");
+    assert_eq!(r1.limit_pct, Some(10));
+
+    // upsert：重复添加更新备注/元信息，added_at 保留首次值（幂等，不报错）
+    let mut w2 = watch("002415", "海康威视", "SZ");
+    w2.note = "备注更新".into();
+    let r2 = s.add_watchlist(&w2, "2026-10-30 09:00").unwrap();
+    assert_eq!(r2.note, "备注更新");
+    assert_eq!(r2.added_at, "2026-10-29 10:00");
+    assert_eq!(s.watchlist().unwrap().len(), 1);
+
+    // 排序 = 加入时间序
+    s.add_watchlist(&watch("601899", "紫金矿业", "SH"), "2026-10-29 11:00").unwrap();
+    let all = s.watchlist().unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].code, "002415"); // 10:00 先加入
+    assert_eq!(all[1].code, "601899"); // 11:00 后加入
+
+    // 校验：市场码非法 → BadInput（B7 显式 mkt，不按代码猜）
+    assert!(matches!(
+        s.add_watchlist(&watch("002415", "海康威视", "BJ"), "x"),
+        Err(WatchlistError::BadInput(_))
+    ));
+    // 名称非空校验
+    assert!(matches!(
+        s.add_watchlist(&watch("002416", "  ", "SZ"), "x"),
+        Err(WatchlistError::BadInput(_))
+    ));
+
+    // 删除：首次返回行，再次 None（幂等）
+    assert!(s.remove_watchlist("002415").unwrap().is_some());
+    assert!(s.remove_watchlist("002415").unwrap().is_none());
+    assert_eq!(s.watchlist().unwrap().len(), 1);
+}
+
+#[test]
+fn watchlist_migrates_v1_db_to_v2() {
+    // 合成 v1 老库：先建当前版库 → 手工降回 v1（删 watchlist + 版本号回拨），
+    // Store::open 应自动前进到 v2（迁移只前进，P4-T2 机制），且旧表数据不丢。
+    let dir = std::env::temp_dir().join(format!("zimu-store-mig-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("mig-v1.db");
+    let _ = std::fs::remove_file(&path);
+    let path_s = path.to_str().expect("临时路径是合法 UTF-8");
+    {
+        let s = Store::open(path_s).unwrap();
+        s.set_account(&AccountRow { cash: 12345.0, ..AccountRow::default() }).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("DROP TABLE watchlist; PRAGMA user_version = 1;").unwrap();
+    }
+    let s = Store::open(path_s).unwrap();
+    // 旧数据不丢（v1 表原样），新表可用（v2 迁移已前进）
+    assert!((s.portfolio().unwrap().account.cash - 12345.0).abs() < 1e-9);
+    s.add_watchlist(&watch("601899", "紫金矿业", "SH"), "2026-10-29 11:00").unwrap();
+    assert_eq!(s.watchlist().unwrap().len(), 1);
+    let _ = std::fs::remove_file(&path);
 }

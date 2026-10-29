@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 # ---------- 源名（熔断 / 限频 / 禁用注入的标识） ----------
 SINA_HQ = "sina_hq"                  # 实时主通道：新浪 hq.sinajs.cn 直连
+TENCENT_QT = "tencent_qt"            # 实时二通道：腾讯 qt.gtimg.cn 直连（B14：指数 spot 补位——新浪不 carry 中证转债等指数）
 EM_PUSH2 = "em_push2"                # 实时备通道：东财 push2 ulist 直连（UA）
 SINA_STOCK_DAILY = "sina_stock_daily"
 SINA_ETF_DAILY = "sina_etf_daily"
@@ -31,6 +32,7 @@ BAOSTOCK_CALENDAR = "baostock_calendar"
 # 新浪系与集思录按实测/礼貌值给；全市场快照类本就不进分钟级轮询（缓存兜住）。
 DEFAULT_GATES: dict[str, float] = {
     SINA_HQ: 0.2,
+    TENCENT_QT: 0.5,
     EM_PUSH2: 0.5,
     SINA_STOCK_DAILY: 0.5,
     SINA_ETF_DAILY: 0.5,

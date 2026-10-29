@@ -10,7 +10,9 @@
 //! - `alerts_api` —— 预警/净值快照/推送留痕的读取与归档（P4-T7 + P5-T2 补
 //!   push_logs 读端点；内容由调度引擎判定落库，判定口径在 `zimu-domain::alert`，
 //!   端点不生成不改写）；
-//! - `advice_api` —— 建议留档读取（P5-T2；写入在 agent 工具链，ADR-0007）。
+//! - `advice_api` —— 建议留档读取（P5-T2；写入在 agent 工具链，ADR-0007）；
+//! - `watchlist_api` —— 自选 CRUD（P5-T2，B13 定稿：schema v2 watchlist 表，
+//!   03 §12 预警范围扩到自选；行情不回写自选表）。
 //!   各层都不定义数字口径：口径只在 `zimu-domain`（03 唯一来源）。
 //! - `openapi` —— API 契约汇编（P4-T5）：全部响应/请求 serde 结构体 →
 //!   OpenAPI 3.1（`docs/api/openapi.json` 由测试保证与代码一致），前端 TS
@@ -21,8 +23,9 @@ pub mod alerts_api;
 pub mod holdings_api;
 pub mod market_api;
 pub mod openapi;
+pub mod watchlist_api;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 
 /// 持仓 API 路由（P4-T1）
@@ -55,6 +58,18 @@ pub fn advice_router(store: holdings_api::SharedStore) -> Router {
         .with_state(store)
 }
 
+/// 自选路由（P5-T2，B13 定稿）：CRUD；预警判定范围扩展在调度器（§12）
+pub fn watchlist_router(store: holdings_api::SharedStore) -> Router {
+    Router::new()
+        .route("/api/watchlist", get(watchlist_api::get_watchlist))
+        .route("/api/watchlist", post(watchlist_api::add_watchlist))
+        .route(
+            "/api/watchlist/{code}",
+            delete(watchlist_api::remove_watchlist),
+        )
+        .with_state(store)
+}
+
 /// 全部 `/api/*` 业务路由（持仓 + 行情 + 预警 + 契约文档）。不含 `/api/chat*` 与
 /// 静态托管——它们依赖 robit 装配与前端构建产物，留在 bin 侧。
 pub fn api_router(
@@ -66,5 +81,6 @@ pub fn api_router(
         .merge(holdings_router(store.clone()))
         .merge(alerts_router(store.clone()))
         .merge(advice_router(store.clone()))
+        .merge(watchlist_router(store.clone()))
         .merge(market_api::router(store, market))
 }

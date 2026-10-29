@@ -87,6 +87,23 @@ def test_missing_symbol_becomes_no_data():
     r = c.get("/quote", params={"codes": "sh600519,sz999999"})
     q = r.json()["quotes"][1]
     assert q["status"] == "no_data" and q["price"] is None
+    # 单源链没有下一源可补 → 诚实缺行不算降级（attempts 不记）
+    assert r.json()["degraded"] is False
+
+
+def test_backfill_covers_symbol_missing_from_primary():
+    """B14 逐标的补齐：主源成功但未收录某标的（不出行）→ 下一源只补缺失标的。"""
+    sina = Fake(lambda syms: [qrow(s) for s in syms if s != "sh000832"])
+    em = Fake(lambda syms: [qrow(s, source="fake-em") for s in syms])
+    c = make_client(sina=sina, em=em)
+    r = c.get("/quote", params={"codes": "sh600519,sh000832"})
+    body = r.json()
+    qs = {q["symbol"]: q for q in body["quotes"]}
+    assert qs["sh600519"]["source"] == "fake-sina"
+    assert qs["sh000832"]["source"] == "fake-em" and qs["sh000832"]["status"] == "ok"
+    assert body["degraded"] is True
+    assert any(a["source"] == SINA_HQ and "未返回" in a["error"] for a in body["attempts"])
+    assert em.args_log[0][0][0] == ["sh000832"]  # 只为缺失标的打第二源
 
 
 def test_max_symbols():
