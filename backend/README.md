@@ -149,8 +149,15 @@ cargo test -p zimu-agent --test scheduler   # 7 项（全离线，FakeApi + 注�
 | `GET /api/alerts?done=&limit=` | 预警列表，新在前；`done=true/false` 过滤归档态，缺省全部（默认 100，上限 500） |
 | `POST /api/alerts/{id}/done` | 归档（done=1，不删行，重复归档幂等）；id 不存在 → 404 `no_alert` |
 | `GET /api/equity_snapshots?limit=` | 净值快照，**date 升序**（净值曲线输入形态）；limit 取最近 N 条（默认 120，上限 500） |
+| `GET /api/push_logs?limit=` | 推送/触发留痕，新在前（P5-T2 补读端点，B13）；`ok=1` 只表示请求已被受理（03 §12），index 时间线与 wechat 屏推送日志共用 |
 
-`push_log` 的读端点留给 P5-T2 wechat 屏（推送日志卡）一并落地。
+## 建议留档 API（P5-T2）
+
+`advice_history` 的读端点（`advice_api.rs`）；写入在 agent 工具链（P4-T6，ADR-0007——数字列 = 规则函数产出直接落库，reason/risks 由 `finalize_advice` 回填模型文案）：
+
+| 端点 | 说明 |
+|---|---|
+| `GET /api/advice?code=&limit=` | 建议留档行，新在前（generated_at DESC）；`code` 缺省全部标的（默认 50，上限 500）；`reason` 空串 = 文案未回填，前端如实展示 |
 
 ## 持仓录入 API（P4-T1，手工逐笔先行）
 
@@ -219,7 +226,7 @@ cargo test -p zimu-market -p zimu-server   # 适配器 29 项 + server（集成 
 **前后端类型同源**：API 响应/请求全部是类型化 serde 结构体（`json!` 临时拼装
 已清除），在定义处 `#[derive(ToSchema)]`（zimu-domain / zimu-store /
 zimu-market / zimu-server 四 crate），`src/openapi.rs` 的 `ApiDoc`（utoipa 5）
-汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（38 schema、19 路径；文档
+汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（40 schema、21 路径；文档
 永不手改）。前端 `npm run gen:api`（openapi-typescript）生成
 `src/api/schema.d.ts`，P5-T1 的 API client 直接消费。运行时
 `GET /api/openapi.json` 提供同一文档。
@@ -231,7 +238,7 @@ draft 2020-12）三连：
    会直接红）；
 2. seeded 测试服务（FakeApi 注入，`tests/common/` 共享装置）全端点**实时
    响应**过其声明的响应 schema，含 422/404/400/503 错误契约；
-3. **`fixtures/api/` 19 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
+3. **`fixtures/api/` 21 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
 
 health/chat 实现在 bin（依赖 robit 装配），契约在 `openapi.rs` 以 doc-stub
 声明、类型定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化键集 == schema
@@ -340,15 +347,16 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 
 ```text
 Cargo.toml                  workspace（robit crates pin 本地 git tag v0.1.26，其余依赖版本与 robit workspace 对齐）
-crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约
+crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + OpenAPI 契约
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
                             ├─ agent_bridge.rs   Agent 装配（工具面/Skill 来自 zimu-agent；WebBridge 接线）
                             ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1，错误→状态码映射；utoipa::path 契约标注）
                             ├─ market_api.rs     /api/market/*（P4-T4：status/quote/kline/cb_list/calendar；refresh 处理器 P4-T6 起薄壳调 zimu-agent::service）
-                            ├─ alerts_api.rs     /api/alerts* /api/equity_snapshots（P4-T7：调度引擎落库内容的读取与归档，不生成不改写）
+                            ├─ alerts_api.rs     /api/alerts* /api/equity_snapshots /api/push_logs（P4-T7 + P5-T2：调度引擎落库内容的读取与归档，不生成不改写）
+                            ├─ advice_api.rs     /api/advice（P5-T2：建议留档读取；写入在 agent 工具链，ADR-0007）
                             ├─ openapi.rs        OpenAPI 3.1 汇编（P4-T5：ApiDoc + ApiError/Health 等共享契约类型 + 再生成入口）
-                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/19 份样例过 schema）· common/ 共享装置（FakeApi/seed）
+                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/21 份样例过 schema）· common/ 共享装置（FakeApi/seed）
 crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill 加载 + 应用服务 + 调度预警引擎（server/CLI 共用）
                             ├─ lib.rs            AgentDeps（store + market + 日历缓存）与 crate 边界说明
                             ├─ tools/            8 领域工具 + echo（mod.rs 注册器；market/portfolio/advice 三组）

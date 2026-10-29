@@ -25,7 +25,11 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 
 ### B13 · 自选（watchlist）预警无生产侧载体
 
-P4-T7 预警引擎只覆盖 `holdings` 持仓；原型 dashboard 的 `watchlist-card`（「未买入，仅条件触发时提醒」）在生产侧没有对应存储——schema 六表无 watchlist，`03` §12 判定范围明确写为持仓。缺口：自选的维护入口（增删/提醒条件）与判定范围扩展。P5-T2 移植 dashboard 前拍板：建 watchlist 表（schema v2 迁移）+ §12 判定范围扩到自选，或该卡先展示空态引导。关联：`push_log` 的读端点（wechat 屏推送日志）同样留待 P5-T2。
+P4-T7 预警引擎只覆盖 `holdings` 持仓；原型 dashboard 的 `watchlist-card`（「未买入，仅条件触发时提醒」）在生产侧没有对应存储——schema 六表无 watchlist，`03` §12 判定范围明确写为持仓。缺口：自选的维护入口（增删/提醒条件）与判定范围扩展。P5-T2 移植 dashboard 前拍板：建 watchlist 表（schema v2 迁移）+ §12 判定范围扩到自选，或该卡先展示空态引导。关联：`push_log` 的读端点已随 P5-T2 index 屏落地（`GET /api/push_logs`，2026-10-29），wechat 屏推送日志卡直接复用。
+
+### B14 · 中证转债指数（sh000832）spot 行情无数据
+
+P5-T2 index 屏冒烟（2026-10-29 盘后）：`/api/market/quote` 五指数中四个正常（上证/深成/创业板/沪深300），`sh000832` 回 `price=0`、`status=halted_or_delisted`——sina spot 通道对该指数回空行（kline 通道 `sina_index_daily` 未测）。前端行情条已按「status=ok 且 price>0 才显示，否则 —」防御，不显示假 0。待办：查 spot 源对中证转债的正确前缀/号段（或该指数本就不在 sina spot 列表），决定换标的（如中证转债改国债/商品指数）或给 sidecar 补指数 spot 源；P5-T2 dashboard 移植（自选行情卡）前拍板。
 
 ## 待决策
 

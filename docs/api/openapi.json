@@ -65,6 +65,60 @@
         }
       }
     },
+    "/api/advice": {
+      "get": {
+        "tags": [
+          "advice"
+        ],
+        "operationId": "get_advice",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "按标的代码过滤（如 600519）；缺省 = 全部标的",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "行数上限：1–500，缺省 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "建议留档行，新在前（generated_at DESC, id DESC）。数字列 = 规则函数产出（ADR-0007 数字不经模型转写）；reason 空串 = 文案未回填",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdviceRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/alerts": {
       "get": {
         "tags": [
@@ -125,6 +179,18 @@
           "alerts"
         ],
         "operationId": "mark_alert_done",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "预警行 id（主键）；不存在 → 404 no_alert",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "归档成功，返回更新后的行（done=true；归档不删行，重复归档幂等）",
@@ -755,6 +821,51 @@
         }
       }
     },
+    "/api/push_logs": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "operationId": "get_push_logs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "行数上限：1–500，缺省 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "推送/触发留痕行，新在前（ts DESC, id DESC）。ok=1 只表示请求已被受理（如复盘已注入 agent 会话），产出是否完成以会话事件与 advice_history 为准（03 §12 留档语义）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PushLogRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/trades": {
       "get": {
         "tags": [
@@ -866,6 +977,92 @@
           },
           "style": {
             "type": "string"
+          }
+        }
+      },
+      "AdviceRow": {
+        "type": "object",
+        "description": "分析结论留档行。**数字归规则**（`zimu-domain::advice` 产出 → `insert_advice`\n落数字列），**文字归模型**（`finalize_advice` 回填 reason/risks，ADR-0007）——\n数字列一经写入不经过模型转写，留档即可回溯「当时依据什么说的」。",
+        "required": [
+          "id",
+          "code",
+          "action",
+          "score",
+          "conf",
+          "position",
+          "reason",
+          "dims",
+          "risks",
+          "data_version",
+          "generated_at"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "结论标签（中文展示态：加仓/买入/持有/减仓/卖出/定投，由工具自 domain 枚举映射）"
+          },
+          "code": {
+            "type": "string"
+          },
+          "conf": {
+            "type": "number",
+            "format": "double",
+            "description": "样本内信号一致性，不是胜率（CLAUDE.md 安全边界）"
+          },
+          "data_version": {
+            "type": "string",
+            "description": "输入数据版本 `adv-v1|k={日线末bar|none}|q={行情as_of|none}`（B9）"
+          },
+          "dims": {
+            "description": "四维拆解 `[{k,s,t}]`（03 §10 固定四维；domain `AdviceDim` 序列化，坏 JSON 读回 `[]`）"
+          },
+          "generated_at": {
+            "type": "string",
+            "description": "生成时刻（上海，YYYY-MM-DD HH:MM）"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "position": {
+            "type": "string",
+            "description": "「当前 x% → 建议 y%」（工具侧拼装，03 §10 position 文案）"
+          },
+          "reason": {
+            "type": "string",
+            "description": "模型结论文案；空串 = 数字已留档、文案未回填"
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "风险自陈（03 §10：至少一条——非空校验在工具层，存储层如实存）"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "stop": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "target_hi": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "target_lo": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           }
         }
       },
@@ -1964,6 +2161,42 @@
           }
         }
       },
+      "PushLogRow": {
+        "type": "object",
+        "description": "推送/触发留痕行。`ok=1` 只表示请求被受理（如复盘已注入 agent 会话），\n产出是否完成以会话事件与 advice_history 为准（03 §12 留档）。",
+        "required": [
+          "id",
+          "ts",
+          "channel",
+          "kind",
+          "ok",
+          "detail"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "agent / wechat / qq（P6 渠道落地后扩展）"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "description": "post_market_review / alert_push / …（封闭词汇随渠道落地扩展）"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "ts": {
+            "type": "string",
+            "description": "上海时刻 YYYY-MM-DD HH:MM"
+          }
+        }
+      },
       "QuotePayload": {
         "type": "object",
         "required": [
@@ -2508,7 +2741,11 @@
     },
     {
       "name": "alerts",
-      "description": "预警与净值快照（P4-T7）：内容由调度引擎判定落库（口径 03 §12，判定函数在 zimu-domain::alert），端点只读取与归档"
+      "description": "预警、净值快照与推送留痕（P4-T7 + P5-T2）：内容由调度引擎判定落库（口径 03 §12，判定函数在 zimu-domain::alert），端点只读取与归档"
+    },
+    {
+      "name": "advice",
+      "description": "建议留档（P5-T2 读端点；写入在 agent 工具链，ADR-0007——数字归规则、文字归模型）"
     }
   ]
 }

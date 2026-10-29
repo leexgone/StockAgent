@@ -7,13 +7,16 @@
 //! 分层边界（04 附录 B）：
 //! - `holdings_api` —— 存储读写 + `zimu-domain` 校验/试算/重算的 HTTP 接线；
 //! - `market_api` —— `zimu-market` 适配器（sidecar 唯一消费入口）的 HTTP 接线；
-//! - `alerts_api` —— 预警/净值快照的读取与归档（P4-T7；内容由调度引擎判定落库，
-//!   判定口径在 `zimu-domain::alert`，端点不生成不改写）。
+//! - `alerts_api` —— 预警/净值快照/推送留痕的读取与归档（P4-T7 + P5-T2 补
+//!   push_logs 读端点；内容由调度引擎判定落库，判定口径在 `zimu-domain::alert`，
+//!   端点不生成不改写）；
+//! - `advice_api` —— 建议留档读取（P5-T2；写入在 agent 工具链，ADR-0007）。
 //!   各层都不定义数字口径：口径只在 `zimu-domain`（03 唯一来源）。
 //! - `openapi` —— API 契约汇编（P4-T5）：全部响应/请求 serde 结构体 →
 //!   OpenAPI 3.1（`docs/api/openapi.json` 由测试保证与代码一致），前端 TS
 //!   类型自该文档生成（前后端类型同源）。
 
+pub mod advice_api;
 pub mod alerts_api;
 pub mod holdings_api;
 pub mod market_api;
@@ -32,7 +35,7 @@ pub fn holdings_router(store: holdings_api::SharedStore) -> Router {
         .with_state(store)
 }
 
-/// 预警与净值快照路由（P4-T7）：调度引擎落库，端点只读取与归档
+/// 预警、净值快照与推送留痕路由（P4-T7 + P5-T2）：调度引擎落库，端点只读取与归档
 pub fn alerts_router(store: holdings_api::SharedStore) -> Router {
     Router::new()
         .route("/api/alerts", get(alerts_api::get_alerts))
@@ -41,6 +44,14 @@ pub fn alerts_router(store: holdings_api::SharedStore) -> Router {
             "/api/equity_snapshots",
             get(alerts_api::get_equity_snapshots),
         )
+        .route("/api/push_logs", get(alerts_api::get_push_logs))
+        .with_state(store)
+}
+
+/// 建议留档路由（P5-T2）：agent 工具链写入（ADR-0007），端点只读取
+pub fn advice_router(store: holdings_api::SharedStore) -> Router {
+    Router::new()
+        .route("/api/advice", get(advice_api::get_advice))
         .with_state(store)
 }
 
@@ -54,5 +65,6 @@ pub fn api_router(
         .route("/api/openapi.json", get(openapi::openapi_doc))
         .merge(holdings_router(store.clone()))
         .merge(alerts_router(store.clone()))
+        .merge(advice_router(store.clone()))
         .merge(market_api::router(store, market))
 }

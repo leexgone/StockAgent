@@ -37,7 +37,7 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 |---|---|
 | `backend/` | Rust 服务（Cargo workspace）：`zimu-server`（axum 主服务——health + SPA 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约，bin 侧启动调度器）、`zimu-domain`（领域纯函数库：`docs/03` 全部数字口径的 Rust 实现 + 黄金向量测试，含打分模块 `advice` 与预警判定 `alert`）、`zimu-store`（存储层：SQLite schema + 迁移 + 录入事务 + 行情回写 + 建议/预警/快照/推送日志读写，P4）、`zimu-market`（行情适配器：sidecar 唯一消费入口——契约模型/降级/市场时钟，P4-T4）、`zimu-agent`（agent 应用层：领域工具 + Skill 加载 + 刷新链服务 + 调度预警引擎，P4-T6/T7）、`zimu-agent-cli`（Agent 调试 REPL）；细节见 `backend/README.md` |
 | `skills/` | Agent Skill 模板（P4-T6）：盘后复盘 / 盘前关注 / 建议生成三份 SKILL.md（robit 约定），内嵌 `03` 口径引用、免责边界与「文案数字必须原样取自工具返回」硬规则 |
-| `frontend/` | React + TS + Vite 前端：index 工作台静态复刻 + 智能问答视图（SSE 会话）；`src/domain/` 为 TS 领域共享层（镜像 `zimu-domain`），`src/api/schema.d.ts` 为 OpenAPI 契约生成的类型面（P4-T5），设计令牌在 `src/styles/tokens.css`；P5-T1 工程约定落地（ADR-0008）——react-router 路由表 `src/routes.ts`（未移植屏 = 占位屏）+ openapi-fetch 客户端 `src/api/client.ts` + zustand 状态基线 |
+| `frontend/` | React + TS + Vite 前端：index 工作台（P5-T2 起真实数据接线，mock 层已删）+ 智能问答视图（SSE 会话）+ 占位屏（P5-T2 逐屏替换）；`src/domain/` 为 TS 领域共享层（镜像 `zimu-domain`），`src/api/schema.d.ts` 为 OpenAPI 契约生成的类型面（P4-T5），设计令牌在 `src/styles/tokens.css`；P5-T1 工程约定落地（ADR-0008）——react-router 路由表 `src/routes.ts`（未移植屏 = 占位屏）+ openapi-fetch 客户端 `src/api/client.ts` + zustand 状态基线 |
 | `datafetch/` | Python 行情 sidecar（uv + FastAPI + akshare/baostock）：P4-T3 正式化——`/quote` `/kline` `/cb_list` `/calendar` + 兜底链/熔断/限频/缓存/错误契约，主源故障降级不崩；由 `backend/crates/zimu-market` 唯一消费（P4-T4 已接线） |
 | `design/` | 界面原型（7 个页面 + 共享样式/数据/图表层），原型自带的说明见 `design/README.md` |
 | `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（10 组 103 用例，含 advice 打分与 alerts 预警组），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |

@@ -9,8 +9,11 @@
 //! - `/api/holdings*` `/api/trades` `/api/account`   持仓录入 API（P4-T1，见 lib holdings_api）
 //! - `/api/market/*`          行情 API（P4-T4，见 lib market_api：status/quote/kline/
 //!                            cb_list/calendar/refresh——sidecar 挂了整体降级不瘫）
-//! - `/api/alerts*` `/api/equity_snapshots`  预警与净值快照（P4-T7，见 lib alerts_api：
-//!                            内容由调度引擎判定落库，03 §12；端点只读取与归档）
+//! - `/api/alerts*` `/api/equity_snapshots` `/api/push_logs`  预警、净值快照与推送
+//!                            留痕（P4-T7 + P5-T2，见 lib alerts_api：内容由调度引擎
+//!                            判定落库，03 §12；端点只读取与归档）
+//! - `/api/advice`             建议留档读取（P5-T2，见 lib advice_api；写入在 agent
+//!                            工具链，ADR-0007 数字归规则、文字归模型）
 //! - `GET  /api/openapi.json` API 契约文档（P4-T5，见 lib openapi）
 //! - 其余路径                 静态托管 `frontend/dist`，回落 `index.html`（SPA 路由）
 //!

@@ -10,7 +10,7 @@
     "price": 4.1,
     "sector": "宽基指数",
     "shares": 2000,
-    "updated_at": "2026-10-29 02:05"
+    "updated_at": "2026-10-29 22:50"
   },
   "preview": {
     "fee_detail": {
@@ -52,6 +52,6 @@
     "qty": 1000,
     "realized": null,
     "side": "buy",
-    "ts": "2026-10-29 02:05"
+    "ts": "2026-10-29 22:50"
   }
 }

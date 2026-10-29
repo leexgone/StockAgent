@@ -4,11 +4,13 @@
 //! - `GET  /api/alerts?done=&limit=`   预警列表（新在前；done 过滤归档态）
 //! - `POST /api/alerts/{id}/done`      归档一条预警（done=1，不删行）
 //! - `GET  /api/equity_snapshots`      净值快照（date 升序——净值曲线输入形态）
+//! - `GET  /api/push_logs?limit=`      推送/触发留痕（P5-T2 补读端点，B13；
+//!                                     index 时间线与 wechat 屏推送日志共用）
 //!
 //! 边界：预警由调度引擎判定并落库（`zimu-agent::scheduler` + `zimu-domain::alert`，
 //! 口径 03 §12），本模块只做读取与归档的 HTTP 接线——**不生成、不改写**预警内容；
-//! 快照由 15:05 盘后链写入（数字 = `recalc` agg 原值），这里原样读出。
-//! 推送留痕（push_log）暂无读端点——wechat 屏（P5-T2，gate C4）落地时再加。
+//! 快照由 15:05 盘后链写入（数字 = `recalc` agg 原值），这里原样读出；
+//! push_log 由盘后链/渠道推送写入（ok=1 只表示请求被受理，03 §12 留档语义）。
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -16,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use utoipa::IntoParams;
-use zimu_store::{AlertRow, EquitySnapshotRow};
+use zimu_store::{AlertRow, EquitySnapshotRow, PushLogRow};
 
 use crate::holdings_api::{lock, store_error, SharedStore};
 use crate::openapi::ApiError;
@@ -55,6 +57,9 @@ pub async fn get_alerts(State(store): State<SharedStore>, Query(q): Query<Alerts
     post,
     path = "/api/alerts/{id}/done",
     tag = "alerts",
+    params(
+        ("id" = i64, Path, description = "预警行 id（主键）；不存在 → 404 no_alert"),
+    ),
     responses(
         (status = 200, description = "归档成功，返回更新后的行（done=true；归档不删行，重复归档幂等）", body = AlertRow),
         (status = 404, description = "没有该 id 的预警（no_alert）", body = ApiError),
@@ -102,6 +107,34 @@ pub async fn get_equity_snapshots(
         Ok(v) => Json(v).into_response(),
         Err(e) => {
             tracing::error!("equity_snapshots 读取失败：{e:#}");
+            store_error()
+        }
+    }
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PushLogsQuery {
+    /// 行数上限：1–500，缺省 50
+    limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/push_logs",
+    tag = "alerts",
+    params(PushLogsQuery),
+    responses(
+        (status = 200, description = "推送/触发留痕行，新在前（ts DESC, id DESC）。ok=1 只表示请求已被受理（如复盘已注入 agent 会话），产出是否完成以会话事件与 advice_history 为准（03 §12 留档语义）", body = Vec<PushLogRow>),
+        (status = 500, description = "存储层内部错误", body = ApiError),
+    )
+)]
+pub async fn get_push_logs(State(store): State<SharedStore>, Query(q): Query<PushLogsQuery>) -> Response {
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
+    match lock(&store).push_logs(limit) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => {
+            tracing::error!("push_logs 读取失败：{e:#}");
             store_error()
         }
     }

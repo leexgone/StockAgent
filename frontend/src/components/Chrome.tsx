@@ -1,17 +1,24 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { NAV, WECHAT_NAV, agg, dirClass, fmt, indices, marketClock, money } from "../data/demo";
-import { routeFor } from "../routes";
+import { clockView, marketClock } from "../lib/clock";
+import { dirClass, fmt, money } from "../lib/format";
+import { NAV, WECHAT_NAV, routeFor } from "../routes";
+import { pending, useAlerts } from "../store/alerts";
+import { INDEX_SYMBOLS, useMarket } from "../store/market";
+import { usePortfolio } from "../store/portfolio";
+import { useUi } from "../store/ui";
 import { ICONS, IconBell, IconFilter, IconRefresh, IconSearch, IconSpark } from "./Icons";
 
 /**
  * 共享外壳 —— 复刻 design/assets/data.js 的 chrome()（侧栏 / 顶栏 / 行情条 / 移动底栏）。
- * P5-T1：导航改 react-router 路由（单一来源 routes.ts），未移植屏渲染占位屏，
- * 面包屑与高亮由 pathname 派生。
- * 与原型的行为差异（静态复刻边界）：
- * - 顶栏刷新只重对时钟，不做价格跳动（tickPrices 属原型演示逻辑，真实行情
- *   随 P5-T2 接 /api/market/refresh）。
- * - 铃铛 toast、全局搜索回车、数字键/⌘K 快捷键未移植。
+ * P5-T2 接真实数据：
+ * - 市场时钟 = 后端 03 §9 生产口径（/api/market/status），倒计时本地走针；
+ *   后端不可用退本地启发式（仅展示降级，不作交易判定）。
+ * - 行情条指数 = /api/market/quote 实时行（sidecar 挂 → 显示 "—"，不瘫）；
+ *   总资产/今日盈亏 = 组合 store 的 recalc 汇总（后端唯一真值）。
+ * - 铃铛 = toast 汇总待处理预警（原型同款）；刷新按钮触发 onRefresh（App 接线
+ *   POST /api/market/refresh + 指数/时钟/预警重拉）。
+ * 未移植：全局搜索回车、数字键/⌘K 快捷键（T2 后段）。
  */
 
 interface ChromeProps {
@@ -23,9 +30,26 @@ interface ChromeProps {
 export default function Chrome({ now, onRefresh, children }: ChromeProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { pathname } = useLocation();
-  const clock = marketClock(now);
+  const status = useMarket((s) => s.status);
+  const quotes = useMarket((s) => s.quotes);
+  const quotesError = useMarket((s) => s.quotesError);
+  const view = usePortfolio((s) => s.view);
   const crumb = routeFor(pathname)?.crumb ?? "子木";
+  const clock = status ? clockView(status.clock, now) : marketClock(now);
+  const agg = view?.agg;
+  const account = view?.account;
   const close = () => setSidebarOpen(false);
+
+  const bellToast = () => {
+    const pend = pending(useAlerts.getState());
+    useUi
+      .getState()
+      .pushToast(
+        pend.length
+          ? `${pend.length} 条待处理预警 · 最近：${pend[0].text}`
+          : "没有待处理预警",
+      );
+  };
 
   const navItem = (item: (typeof NAV)[number], key: string) => {
     const Icon = ICONS[item.icon];
@@ -69,13 +93,13 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
           </Link>
           <div className="side-foot">
             <div className="side-acct">
-              <span className="side-acct-av">我</span>
+              <span className="side-acct-av">{account?.init ?? "我"}</span>
               <span className="side-acct-text">
-                <span className="side-acct-name">我的账户</span>
-                <span className="side-acct-sub">华泰证券 · 沪深 A 股账户（*8842）</span>
+                <span className="side-acct-name">{account?.name ?? "我的账户"}</span>
+                <span className="side-acct-sub">{account?.broker ?? "未连接后端"}</span>
               </span>
             </div>
-            <div className="side-note">数据为演示样本，建议由模型生成，不构成投资意见。</div>
+            <div className="side-note">行情来自公开数据源，可能延迟；建议由模型生成，不构成投资意见。</div>
           </div>
         </aside>
 
@@ -96,36 +120,55 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
               <input id="global-search" placeholder="搜代码 / 名称 / 问一句" autoComplete="off" />
               <span className="kbd">⌘K</span>
             </label>
-            <div className="mkt" id="mkt-clock">
+            <div className="mkt" id="mkt-clock" title={quotesError ?? undefined}>
               <span className={`dot ${clock.dot}`} />
               <span>{clock.state}</span>
               <span className="mkt-time">{clock.time}</span>
               <span className="mkt-next">{clock.next}</span>
             </div>
-            <button className="icon-btn" aria-label="预警" title="待处理预警汇总（toast 未移植）">
+            <button className="icon-btn" aria-label="预警" title="待处理预警汇总" onClick={bellToast}>
               <IconBell />
             </button>
-            <button className="icon-btn" aria-label="刷新行情" onClick={onRefresh} title="重新对时（价格跳动 P5-T2 接真实行情后启用）">
+            <button
+              className="icon-btn"
+              aria-label="刷新行情"
+              onClick={onRefresh}
+              title="拉最新行情 → 回写 → recalc 重算（POST /api/market/refresh）"
+            >
               <IconRefresh />
             </button>
           </header>
 
           <div className="strip" id="strip">
-            {indices.map((i) => (
-              <span className="strip-item" key={i.code}>
-                <span className="strip-name">{i.name}</span>
-                <span className={`strip-v ${dirClass(i.chg)}`}>{fmt(i.v, 2)}</span>
-                <span className={`delta ${dirClass(i.chg)}`}>
-                  {(i.chg > 0 ? "+" : "") + i.chg.toFixed(2)}%
+            {INDEX_SYMBOLS.map((ix) => {
+              const q = quotes[ix.symbol];
+              // 只有 status=ok 且 price>0 才算有数据：spot 源对个别指数回空行
+              // （如中证转债 sh000832 → halted_or_delisted，07-backlog B14），显示 "—" 不显示 0
+              const usable = q !== undefined && q.status === "ok" && (q.price ?? 0) > 0;
+              const price = usable ? q.price ?? null : null;
+              const chg = usable ? q.chg_pct ?? null : null;
+              return (
+                <span className="strip-item" key={ix.symbol}>
+                  <span className="strip-name">{q?.name ?? ix.name}</span>
+                  <span className={`strip-v ${chg !== null ? dirClass(chg) : "muted"}`}>
+                    {price !== null ? fmt(price, 2) : "—"}
+                  </span>
+                  {chg !== null && (
+                    <span className={`delta ${dirClass(chg)}`}>
+                      {(chg > 0 ? "+" : "") + chg.toFixed(2)}%
+                    </span>
+                  )}
                 </span>
-              </span>
-            ))}
+              );
+            })}
             <span className="strip-item" style={{ borderRight: 0 }}>
               <span className="strip-name">我的总资产</span>
-              <span className="strip-v">{money(agg.totalAssets)}</span>
-              <span className={`delta ${dirClass(agg.dayPnl)}`}>
-                今日 {(agg.dayPnl > 0 ? "+" : "") + fmt(agg.dayPnl, 0)}
-              </span>
+              <span className="strip-v">{agg ? money(agg.total_assets) : "—"}</span>
+              {agg && (
+                <span className={`delta ${dirClass(agg.day_pnl)}`}>
+                  今日 {(agg.day_pnl > 0 ? "+" : "") + fmt(agg.day_pnl, 0)}
+                </span>
+              )}
             </span>
           </div>
 

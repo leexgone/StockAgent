@@ -1,18 +1,3 @@
-import {
-  P,
-  agg,
-  adviceCodes,
-  alerts,
-  dirClass,
-  equity,
-  fmt,
-  holdings,
-  marketClock,
-  money,
-  pct,
-  qa,
-  sessions,
-} from "../data/demo";
 import { Link } from "react-router-dom";
 import {
   IconChat,
@@ -23,50 +8,60 @@ import {
   IconWallet,
   IconWechat,
 } from "../components/Icons";
+import { perf } from "../domain";
+import { clockView, marketClock } from "../lib/clock";
+import { dirClass, fmt, money, pct } from "../lib/format";
+import { coveredCount, useAdvice } from "../store/advice";
+import { useAlerts } from "../store/alerts";
+import { useEquity } from "../store/equity";
+import { useHealth } from "../store/health";
+import { useMarket } from "../store/market";
+import { usePortfolio } from "../store/portfolio";
+import { usePushLog } from "../store/push_log";
 
 /**
- * 工作台（index 屏静态复刻，P2-T4）—— 对照基准 design/index.html。
- * 摘要句与指标卡的数字全部现算自 demo.ts 的派生快照（不写死字面量），
- * 问候语与市场状态随真实时钟每秒重绘（与原型 renderHead + marketClock 同口径）。
+ * 工作台（index 屏，P5-T2 真实数据移植）—— 对照基准 design/index.html。
+ * 数字全部来自后端 API（recalc 汇总 / 预警 / 快照 / 建议留档 / 推送留痕），
+ * 前端不重算派生值（ADR-0008）；回撤走 src/domain 的 perf（黄金向量同款纯函数，
+ * 序列长度 <2 时安全返回 0）。摘要句与指标卡从真实 payload 现算——
+ * 「不写死数字」约定的样板位置；空持仓态按 docs/02 index 条目处理。
  */
 
 interface HomeScreenProps {
   now: Date;
 }
 
-/* 界面入口卡（stat 与原型 SCREENS 的模板逐一对应；path = routes.ts 路由，未移植屏进占位屏） */
-const SCREENS: {
-  path: string;
-  Icon: () => React.JSX.Element;
-  name: string;
-  desc: string;
-  stat: string;
-}[] = [
-  { path: "/dashboard", Icon: IconGrid, name: "总览仪表盘", desc: "资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。", stat: `${equity.dates.length} 日净值 · ${alerts.length} 条预警` },
-  { path: "/holdings", Icon: IconWallet, name: "持仓管理", desc: "股票 / ETF / 可转债分组明细，加减仓会实时重算摊薄成本与仓位。", stat: `${holdings.length} 只标的 · ${money(agg.cash)} 现金` },
-  { path: "/analysis", Icon: IconSpark, name: "AI 分析建议", desc: "买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。", stat: `已覆盖 ${adviceCodes.length} 只标的` },
-  { path: "/chat", Icon: IconChat, name: "智能问答", desc: "用大白话问股，回答会引用你的持仓、行情与公告原文。", stat: `${qa.length} 个示例问题 · 3 段历史会话` },
-  { path: "/diagnosis", Icon: IconShield, name: "组合诊断", desc: "行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。", stat: `HHI ${agg.hhi.toFixed(3)} · 回撤 ${P.mdd.toFixed(1)}%` },
-  { path: "/wechat", Icon: IconWechat, name: "微信助理接入", desc: "绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。", stat: "1 个微信账号 · 6 类推送" },
-];
+/* push_log.kind → 时间线文案（封闭词汇随渠道落地扩展，03 §12） */
+const KIND_LABEL: Record<string, string> = {
+  post_market_review: "盘后复盘",
+  alert_push: "预警推送",
+};
 
-/* 待决事项（与原型 ATT 数组同款；pill 用语义类：交易方向 .buy/.sell、
-   好坏轴 .ok/.warn/.danger——B5 语义分离已随 P1-T4 两边同步，up/down 只留给涨跌数字与标记） */
-const ATTENTION = [
-  { t: "把比亚迪仓位降到 15% 附近", d: "减 200 股（整手）即可，不必拆很多笔", pill: "减仓", cls: "sell" },
-  { t: "科创50ETF 触及 +12% 止盈线", d: "可分批止盈 3,000 份，或把止盈线上移到 +18%", pill: "止盈", cls: "warn" },
-  { t: "11-20 前处理博威转债", d: "强赎最后交易日前卖出或转股，逾期将承担额外损失", pill: "限期", cls: "danger" },
-];
+/* 待决事项排序：风险（down）> 动作提醒（warn）> 信息（up）；同级新在前 */
+const LEVEL_RANK: Record<string, number> = { down: 0, warn: 1, up: 2 };
+/* level → pill 语义类（好坏轴 .ok/.warn/.danger——涨跌方向色不进 pill，03 §11） */
+const LEVEL_PILL: Record<string, string> = { down: "danger", warn: "warn", up: "ok" };
 
-/* 时间线 = 最近会话 + 一条盘前任务（与原型 concat 逻辑一致） */
-const TIMELINE = sessions
-  .concat([
-    { t: "今日 08:30", who: "定时任务", text: "盘前要闻 6 条已生成，其中 1 条与你持仓相关", reply: "博威转债强赎提示", read: true },
-  ])
-  .slice(0, 5);
+interface AttentionItem {
+  t: string;
+  d: string;
+  pill: string;
+  cls: string;
+  to: string;
+}
 
 export default function HomeScreen({ now }: HomeScreenProps) {
-  const clock = marketClock(now);
+  const view = usePortfolio((s) => s.view);
+  const pError = usePortfolio((s) => s.error);
+  const loading = usePortfolio((s) => s.loading);
+  const alertRows = useAlerts((s) => s.rows);
+  const equityRows = useEquity((s) => s.rows);
+  const adviceRows = useAdvice((s) => s.rows);
+  const pushRows = usePushLog((s) => s.rows);
+  const health = useHealth((s) => s.health);
+  const status = useMarket((s) => s.status);
+
+  const clock = status ? clockView(status.clock, now) : marketClock(now);
   const h = now.getHours();
   const hello = h < 11 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
   const dateLine =
@@ -74,13 +69,105 @@ export default function HomeScreen({ now }: HomeScreenProps) {
     " · " +
     clock.state;
 
-  const pend = alerts.filter((a) => !a.done);
-  const byd = holdings.find((x) => x.code === "002594")!;
-  const maxWeight = holdings.reduce((m, x) => Math.max(m, x.weight), 0);
-  const desc =
-    `${clock.state === "已收盘" ? "今日已收盘" : clock.live ? "现在" + clock.state : clock.next}。` +
-    `${pend.length} 条预警待处理，${byd.name} 浮亏扩大至 ${pct(byd.pnlPct)}，` +
-    `组合最大单票占资产 ${maxWeight.toFixed(1)}%。`;
+  const agg = view?.agg;
+  const holdings = view?.holdings ?? [];
+  const per = view?.per ?? [];
+  const isEmpty = view !== null && holdings.length === 0;
+  const pend = alertRows.filter((a) => !a.done);
+
+  /* 摘要句素材：仓位最重标的 + 浮亏最深标的（数字全部来自后端 per 行） */
+  const paired = holdings
+    .map((hd, i) => ({ name: hd.name, p: per[i] }))
+    .filter((x): x is { name: string; p: NonNullable<typeof x.p> } => x.p !== undefined);
+  const topW = paired.reduce<{ name: string; weight: number } | null>(
+    (m, x) => (!m || x.p.weight > m.weight ? { name: x.name, weight: x.p.weight } : m),
+    null,
+  );
+  const worst = paired.reduce<{ name: string; pnlPct: number } | null>(
+    (m, x) => (!m || x.p.pnl_pct < m.pnlPct ? { name: x.name, pnlPct: x.p.pnl_pct } : m),
+    null,
+  );
+
+  const desc = !view
+    ? pError
+      ? `后端不可用：${pError}。启动 zimu-server（cargo run -p zimu-server）后点顶栏刷新重试。`
+      : loading
+        ? "正在读取组合与行情…"
+        : "尚未连接后端。"
+    : isEmpty
+      ? `组合还是空的——总资产 = 现金 ${money(agg?.cash ?? 0)}。先录入第一笔交易，或去问答页让子木带你上手。`
+      : `${clock.live ? "现在" + clock.state : clock.state}。${pend.length} 条预警待处理` +
+        (topW ? `，${topW.name} 占资产 ${topW.weight.toFixed(1)}%` : "") +
+        (worst && worst.pnlPct < 0 ? `，${worst.name} 浮亏 ${pct(worst.pnlPct)}` : "") +
+        "。";
+
+  /* 回撤：真实净值序列走 domain perf（03 §7）；快照 <2 天不展示（不伪装 0=安全） */
+  const mdd =
+    equityRows.length >= 2
+      ? perf({ nav: equityRows.map((r) => r.total_assets), bench: [] }).mdd
+      : null;
+  const covered = coveredCount(adviceRows);
+
+  /* 六张界面入口卡（stat 全部现算自真实数据；模板与原型 SCREENS 逐一对应） */
+  const screens: { path: string; Icon: () => React.JSX.Element; name: string; desc: string; stat: string }[] = [
+    {
+      path: "/dashboard", Icon: IconGrid, name: "总览仪表盘",
+      desc: "资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。",
+      stat: `${equityRows.length} 日净值 · ${pend.length} 条待处理预警`,
+    },
+    {
+      path: "/holdings", Icon: IconWallet, name: "持仓管理",
+      desc: "股票 / ETF / 可转债分组明细，加减仓会实时重算摊薄成本与仓位。",
+      stat: !view ? "—" : isEmpty ? `现金 ${money(agg?.cash ?? 0)} · 待录入第一笔` : `${holdings.length} 只标的 · ${money(agg?.cash ?? 0)} 现金`,
+    },
+    {
+      path: "/analysis", Icon: IconSpark, name: "AI 分析建议",
+      desc: "买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。",
+      stat: covered > 0 ? `已覆盖 ${covered} 只标的` : "暂无留档 · 盘后复盘自动生成",
+    },
+    {
+      path: "/chat", Icon: IconChat, name: "智能问答",
+      desc: "用大白话问股，回答会引用你的持仓、行情与公告原文。",
+      stat: health ? (health.agent_online ? "Agent 在线 · 流式回答" : "Agent 离线 · 检查 robit 配置") : "连接中…",
+    },
+    {
+      path: "/diagnosis", Icon: IconShield, name: "组合诊断",
+      desc: "行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。",
+      stat: mdd !== null && agg ? `HHI ${agg.hhi.toFixed(3)} · 回撤 ${mdd.toFixed(1)}%` : "待净值积累 · 每交易日 15:05 快照",
+    },
+    {
+      path: "/wechat", Icon: IconWechat, name: "微信助理接入",
+      desc: "绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。",
+      stat: "渠道待接入 · C4 待拍板",
+    },
+  ];
+
+  /* 助理最近的动作 = push_log 留痕（新在前取 5；ok=1 只表示已受理，03 §12） */
+  const timeline = pushRows.slice(0, 5).map((r) => ({
+    t: r.ts,
+    who: r.channel === "agent" ? "定时任务" : r.channel,
+    text: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.ok ? "已受理" : "受理失败"}`,
+    reply: r.ok ? undefined : r.detail,
+    read: r.ok,
+  }));
+
+  /* 今天需要你决定 = 待处理预警按紧迫度取 3；空态给引导（docs/02 index 条目） */
+  const attention: AttentionItem[] = pend.length
+    ? [...pend]
+        .sort((a, b) => (LEVEL_RANK[a.level] ?? 9) - (LEVEL_RANK[b.level] ?? 9) || b.ts.localeCompare(a.ts))
+        .slice(0, 3)
+        .map((a) => ({
+          t: `${a.name}（${a.code}）`,
+          d: a.text,
+          pill: a.type,
+          cls: LEVEL_PILL[a.level] ?? "warn",
+          to: `/analysis?code=${a.code}`,
+        }))
+    : isEmpty
+      ? [{ t: "录入第一笔持仓", d: "持仓页抽屉逐笔录入，自动校验整手、涨跌停与现金余额", pill: "引导", cls: "ok", to: "/holdings?add=1" }]
+      : view
+        ? [{ t: "今天没有待决事项", d: "盘中预警触发后会在这里按紧迫度汇总", pill: "正常", cls: "ok", to: "/dashboard" }]
+        : [];
 
   return (
     <main className="page" id="main" data-od-id="home-page">
@@ -92,11 +179,36 @@ export default function HomeScreen({ now }: HomeScreenProps) {
         </div>
         <div className="page-actions">
           <Link className="btn" to="/chat">问一句</Link>
-          <Link className="btn btn-primary" to="/dashboard">进入总览仪表盘</Link>
+          {isEmpty ? (
+            <Link className="btn btn-primary" to="/holdings?add=1">录入第一笔</Link>
+          ) : (
+            <Link className="btn btn-primary" to="/dashboard">进入总览仪表盘</Link>
+          )}
         </div>
       </div>
 
-      {/* 今日快照 */}
+      {/* 后端不可用：错误横幅 + 重试（旧数字不伪装，宁缺不假） */}
+      {!view && (
+        <section className="card" data-od-id="home-error" style={{ marginBottom: 16 }}>
+          <div className="card-body">
+            <div className="metric-label">后端连接</div>
+            <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--muted)" }}>
+              {pError ?? (loading ? "正在连接 zimu-server…" : "尚未加载。")}
+            </p>
+            {pError && (
+              <button
+                className="btn btn-sm"
+                style={{ marginTop: 10 }}
+                onClick={() => void usePortfolio.getState().load()}
+              >
+                重试
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* 今日快照（数字 = 后端 recalc 汇总原值；未加载显示 "—"） */}
       <section className="card" data-od-id="home-snapshot" style={{ marginBottom: 16 }}>
         <div
           className="card-body"
@@ -104,30 +216,34 @@ export default function HomeScreen({ now }: HomeScreenProps) {
         >
           <div data-od-id="home-snapshot-assets">
             <div className="metric-label">总资产（含现金）</div>
-            <div className="metric-value num" id="s-assets">{money(agg.totalAssets)}</div>
+            <div className="metric-value num" id="s-assets">{agg ? money(agg.total_assets) : "—"}</div>
             <div className="metric-meta">
               <span className="muted">
-                持仓市值 {money(agg.totalMv)} · 仓位 {agg.exposure.toFixed(1)}%
+                {agg ? `持仓市值 ${money(agg.total_mv)} · 仓位 ${agg.exposure.toFixed(1)}%` : "待加载"}
               </span>
             </div>
           </div>
           <div data-od-id="home-snapshot-day">
             <div className="metric-label">当日盈亏</div>
-            <div className={`metric-value num ${dirClass(agg.dayPnl)}`} id="s-day">
-              {(agg.dayPnl > 0 ? "+" : "") + fmt(agg.dayPnl, 2)}
+            <div className={`metric-value num ${agg ? dirClass(agg.day_pnl) : ""}`} id="s-day">
+              {agg ? (agg.day_pnl > 0 ? "+" : "") + fmt(agg.day_pnl, 2) : "—"}
             </div>
             <div className="metric-meta">
-              <span className={`delta ${dirClass(agg.dayPnl)}`}>{pct(agg.dayPnlPct)} 相对昨日</span>
+              {agg && <span className={`delta ${dirClass(agg.day_pnl)}`}>{pct(agg.day_pnl_pct)} 相对昨日</span>}
             </div>
           </div>
           <div data-od-id="home-snapshot-total">
             <div className="metric-label">累计盈亏</div>
-            <div className={`metric-value num ${dirClass(agg.totalPnl)}`} id="s-total">
-              {(agg.totalPnl > 0 ? "+" : "") + fmt(agg.totalPnl, 0)}
+            <div className={`metric-value num ${agg ? dirClass(agg.total_pnl) : ""}`} id="s-total">
+              {agg ? (agg.total_pnl > 0 ? "+" : "") + fmt(agg.total_pnl, 0) : "—"}
             </div>
             <div className="metric-meta">
-              <span className={`delta ${dirClass(agg.totalPnl)}`}>{pct(agg.totalPnlPct)}</span>{" "}
-              <span>投入成本 {money(agg.costTotal)}</span>
+              {agg && (
+                <>
+                  <span className={`delta ${dirClass(agg.total_pnl)}`}>{pct(agg.total_pnl_pct)}</span>{" "}
+                  <span>投入成本 {money(agg.cost_total)}</span>
+                </>
+              )}
             </div>
           </div>
           <div data-od-id="home-snapshot-alerts">
@@ -147,7 +263,7 @@ export default function HomeScreen({ now }: HomeScreenProps) {
         界面导航
       </h2>
       <div className="grid g-even" id="screens" data-od-id="home-screens">
-        {SCREENS.map((s, i) => (
+        {screens.map((s, i) => (
           <Link
             key={s.name}
             className="card"
@@ -188,24 +304,33 @@ export default function HomeScreen({ now }: HomeScreenProps) {
           <div className="card-head">
             <div>
               <div className="card-title">助理最近的动作</div>
-              <div className="card-sub">盘中监控 · 盘后复盘 · 微信应答</div>
+              <div className="card-sub">盘后复盘 · 预警推送 · 留痕即事实（ok=已受理）</div>
             </div>
             <div className="head-actions">
-              <Link className="btn btn-sm" to="/wechat">接入设置</Link>
+              <Link className="btn btn-sm" to="/wechat">
+                接入设置
+              </Link>
             </div>
           </div>
           <div className="card-body">
-            <div className="tl" id="home-tl">
-              {TIMELINE.map((s, i) => (
-                <div className={`tl-item${s.read ? "" : " hot"}`} key={i}>
-                  <div className="tl-time">
-                    {s.t} · {s.who}
+            {timeline.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.7, color: "var(--muted)" }}>
+                还没有助理动作。交易日 15:05 盘后复盘自动触发并在这里留痕；
+                预警推送随微信渠道（C4 拍板后）接入。
+              </p>
+            ) : (
+              <div className="tl" id="home-tl">
+                {timeline.map((s, i) => (
+                  <div className={`tl-item${s.read ? "" : " hot"}`} key={i}>
+                    <div className="tl-time">
+                      {s.t} · {s.who}
+                    </div>
+                    <div className="tl-title">{s.text}</div>
+                    {s.reply && <div className="tl-body">{s.reply}</div>}
                   </div>
-                  <div className="tl-title">{s.text}</div>
-                  {s.reply && <div className="tl-body">{s.reply}</div>}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
@@ -213,12 +338,12 @@ export default function HomeScreen({ now }: HomeScreenProps) {
           <div className="card-head">
             <div>
               <div className="card-title">今天需要你决定</div>
-              <div className="card-sub">按紧迫度排序，只有 3 件</div>
+              <div className="card-sub">按紧迫度排序{attention.length > 0 ? `，共 ${attention.length} 件` : ""}</div>
             </div>
           </div>
           <div className="list" id="home-attention">
-            {ATTENTION.map((a, i) => (
-              <Link className="list-item" to="/holdings" data-od-id={`attention-item-${i}`} key={i}>
+            {attention.map((a, i) => (
+              <Link className="list-item" to={a.to} data-od-id={`attention-item-${i}`} key={i}>
                 <span className="li-main">
                   <span className="li-title">{a.t}</span>
                   <span className="li-desc">{a.d}</span>
@@ -235,8 +360,8 @@ export default function HomeScreen({ now }: HomeScreenProps) {
       <div className="footnote" data-od-id="home-disclaimer">
         <span style={{ color: "var(--muted)" }}>i</span>
         <span>
-          本页行情与持仓均为<b>演示样本</b>，用于验证界面与信息架构。所有「买入 / 持有 / 卖出」结论由模型基于样本数据生成，
-          <b>不构成投资建议</b>；接入真实行情后仍需你本人确认每一笔委托。
+          行情来自公开数据源（可能有延迟或错漏）；所有「买入 / 持有 / 卖出」结论由规则打分 + 模型文案生成（ADR-0007），
+          <b>不构成投资建议</b>；程序不连接券商接口、不代下单，每一笔委托仍需你本人确认。
         </span>
       </div>
     </main>

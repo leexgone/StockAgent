@@ -23,7 +23,7 @@ use common::*;
 use serde_json::{json, Value};
 use zimu_market::error::MarketError;
 use zimu_market::models::*;
-use zimu_store::{EquitySnapshotRow, NewAlert};
+use zimu_store::{EquitySnapshotRow, NewAdvice, NewAlert};
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -215,6 +215,44 @@ async fn live_responses_and_samples_pass_schema() {
             &agg,
         ))
         .unwrap();
+    // advice / push_log 样例种子（P5-T2）：1 条已回填文案的留档 + 1 条复盘受理留痕。
+    // dims 为 03 §10 固定四维 [{k,s,t}]；数字列写入后不经模型转写（ADR-0007）
+    let adv_id = store
+        .insert_advice(&NewAdvice {
+            code: "600519".into(),
+            action: "持有".into(),
+            score: 62.0,
+            conf: 55.0,
+            target_lo: Some(1580.0),
+            target_hi: Some(1720.0),
+            stop: Some(1420.0),
+            position: "当前 34.4% → 建议 30%".into(),
+            dims: serde_json::json!([
+                {"k": "技术", "s": 66.0, "t": "20 日线上行，量能温和"},
+                {"k": "基本面", "s": 70.0, "t": "业绩与现金流稳健"},
+                {"k": "资金", "s": 55.0, "t": "北向资金持平"},
+                {"k": "消息", "s": 58.0, "t": "无重大公告"}
+            ]),
+            data_version: format!("adv-v1|k=none|q={today} 10:30"),
+            generated_at: format!("{today} 10:35"),
+        })
+        .unwrap();
+    store
+        .finalize_advice(
+            adv_id,
+            "估值与趋势都在舒适区，维持持有；跌破止损 1420.00 再谈减仓。",
+            &["白酒需求波动可能压制估值".to_string()],
+        )
+        .unwrap();
+    store
+        .insert_push_log(
+            &format!("{today} 15:05"),
+            "agent",
+            "post_market_review",
+            true,
+            "复盘已注入 agent 会话（契约样例种子）",
+        )
+        .unwrap();
     let base = spawn_api(fake.clone(), store).await;
     let http = reqwest::Client::new();
 
@@ -306,6 +344,26 @@ async fn live_responses_and_samples_pass_schema() {
     let (s, b) = get(&http, &base, "/api/equity_snapshots?limit=120").await;
     assert_eq!(s, 200);
     check(&doc, "equity_snapshots", "get", "/api/equity_snapshots", 200, &b);
+
+    // ---- advice / push_log 面（P5-T2 读端点）----
+    let (s, b) = get(&http, &base, "/api/advice?limit=50").await;
+    assert_eq!(s, 200);
+    assert_eq!(b[0]["code"], json!("600519"));
+    assert_eq!(b[0]["reason"], json!("估值与趋势都在舒适区，维持持有；跌破止损 1420.00 再谈减仓。"));
+    check(&doc, "advice", "get", "/api/advice", 200, &b);
+
+    // code 过滤：命中与未命中
+    let (s, b) = get(&http, &base, "/api/advice?code=600519").await;
+    assert_eq!(s, 200);
+    assert_eq!(b.as_array().unwrap().len(), 1);
+    let (s, b) = get(&http, &base, "/api/advice?code=000001").await;
+    assert_eq!(s, 200);
+    assert_eq!(b, json!([]));
+
+    let (s, b) = get(&http, &base, "/api/push_logs?limit=50").await;
+    assert_eq!(s, 200);
+    assert_eq!(b[0]["kind"], json!("post_market_review"));
+    check(&doc, "push_logs", "get", "/api/push_logs", 200, &b);
 
     // ---- 错误契约 ----
     // 归档不存在的预警 → 404 no_alert

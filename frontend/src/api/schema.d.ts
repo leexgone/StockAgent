@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/advice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_advice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/alerts": {
         parameters: {
             query?: never;
@@ -308,6 +324,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/push_logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_push_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trades": {
         parameters: {
             query?: never;
@@ -347,6 +379,43 @@ export interface components {
             init: string;
             name: string;
             style: string;
+        };
+        /**
+         * @description 分析结论留档行。**数字归规则**（`zimu-domain::advice` 产出 → `insert_advice`
+         *     落数字列），**文字归模型**（`finalize_advice` 回填 reason/risks，ADR-0007）——
+         *     数字列一经写入不经过模型转写，留档即可回溯「当时依据什么说的」。
+         */
+        AdviceRow: {
+            /** @description 结论标签（中文展示态：加仓/买入/持有/减仓/卖出/定投，由工具自 domain 枚举映射） */
+            action: string;
+            code: string;
+            /**
+             * Format: double
+             * @description 样本内信号一致性，不是胜率（CLAUDE.md 安全边界）
+             */
+            conf: number;
+            /** @description 输入数据版本 `adv-v1|k={日线末bar|none}|q={行情as_of|none}`（B9） */
+            data_version: string;
+            /** @description 四维拆解 `[{k,s,t}]`（03 §10 固定四维；domain `AdviceDim` 序列化，坏 JSON 读回 `[]`） */
+            dims: unknown;
+            /** @description 生成时刻（上海，YYYY-MM-DD HH:MM） */
+            generated_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description 「当前 x% → 建议 y%」（工具侧拼装，03 §10 position 文案） */
+            position: string;
+            /** @description 模型结论文案；空串 = 数字已留档、文案未回填 */
+            reason: string;
+            /** @description 风险自陈（03 §10：至少一条——非空校验在工具层，存储层如实存） */
+            risks: string[];
+            /** Format: double */
+            score: number;
+            /** Format: double */
+            stop?: number | null;
+            /** Format: double */
+            target_hi?: number | null;
+            /** Format: double */
+            target_lo?: number | null;
         };
         Agg: {
             /** Format: double */
@@ -747,6 +816,22 @@ export interface components {
             /** @description 与 holdings 同序对齐（recalc 输出按输入序） */
             per: components["schemas"]["PerHolding"][];
         };
+        /**
+         * @description 推送/触发留痕行。`ok=1` 只表示请求被受理（如复盘已注入 agent 会话），
+         *     产出是否完成以会话事件与 advice_history 为准（03 §12 留档）。
+         */
+        PushLogRow: {
+            /** @description agent / wechat / qq（P6 渠道落地后扩展） */
+            channel: string;
+            detail: string;
+            /** Format: int64 */
+            id: number;
+            /** @description post_market_review / alert_push / …（封闭词汇随渠道落地扩展） */
+            kind: string;
+            ok: boolean;
+            /** @description 上海时刻 YYYY-MM-DD HH:MM */
+            ts: string;
+        };
         QuotePayload: {
             as_of: string;
             attempts?: components["schemas"]["Attempt"][];
@@ -975,6 +1060,40 @@ export interface operations {
             };
         };
     };
+    get_advice: {
+        parameters: {
+            query?: {
+                /** @description 按标的代码过滤（如 600519）；缺省 = 全部标的 */
+                code?: string;
+                /** @description 行数上限：1–500，缺省 50 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 建议留档行，新在前（generated_at DESC, id DESC）。数字列 = 规则函数产出（ADR-0007 数字不经模型转写）；reason 空串 = 文案未回填 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdviceRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     get_alerts: {
         parameters: {
             query?: {
@@ -1013,7 +1132,10 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description 预警行 id（主键）；不存在 → 404 no_alert */
+                id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1579,6 +1701,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_push_logs: {
+        parameters: {
+            query?: {
+                /** @description 行数上限：1–500，缺省 50 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 推送/触发留痕行，新在前（ts DESC, id DESC）。ok=1 只表示请求已被受理（如复盘已注入 agent 会话），产出是否完成以会话事件与 advice_history 为准（03 §12 留档语义） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushLogRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
         };

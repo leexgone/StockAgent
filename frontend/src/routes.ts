@@ -26,3 +26,23 @@ export const SCREEN_ROUTES: ScreenRoute[] = [
 export function routeFor(path: string): ScreenRoute | undefined {
   return SCREEN_ROUTES.find((r) => r.path === path);
 }
+
+/* ---------- 导航项（侧栏 + 移动底栏；path 必须在上方路由表注册） ---------- */
+
+export interface NavItem {
+  path: string; // 路由路径（上方 SCREEN_ROUTES 单一来源）
+  icon: string;
+  label: string;
+  short: string;
+  kbd?: string;
+}
+
+export const NAV: NavItem[] = [
+  { path: "/dashboard", icon: "grid", label: "总览仪表盘", short: "总览", kbd: "1" },
+  { path: "/holdings", icon: "wallet", label: "持仓管理", short: "持仓", kbd: "2" },
+  { path: "/analysis", icon: "spark", label: "AI 分析建议", short: "建议", kbd: "3" },
+  { path: "/chat", icon: "chat", label: "智能问答", short: "问答", kbd: "4" },
+  { path: "/diagnosis", icon: "shield", label: "组合诊断", short: "诊断", kbd: "5" },
+];
+
+export const WECHAT_NAV: NavItem = { path: "/wechat", icon: "wechat", label: "微信助理接入", short: "微信" };

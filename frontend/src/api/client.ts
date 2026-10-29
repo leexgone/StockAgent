@@ -14,3 +14,16 @@ import type { paths } from "./schema";
  * - 调用返回 [data, error] 元组：error 分支必须处理（降级/提示），不许裸 `!`。
  */
 export const api = createClient<paths>();
+
+/**
+ * 从 openapi-fetch 的 error 响应提取可展示消息：后端错误体统一是 `ApiError`
+ * （机器码 error + 中文 message），message 可直接给用户看；非 ApiError
+ * （网络层失败等）→ fallback。store 的 error 字段一律经这里收敛。
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === "object" && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === "string" && m.length > 0) return m;
+  }
+  return fallback;
+}

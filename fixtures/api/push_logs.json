@@ -1,0 +1,10 @@
+[
+  {
+    "channel": "agent",
+    "detail": "复盘已注入 agent 会话（契约样例种子）",
+    "id": 1,
+    "kind": "post_market_review",
+    "ok": true,
+    "ts": "2026-10-29 15:05"
+  }
+]

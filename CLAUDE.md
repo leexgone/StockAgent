@@ -14,7 +14,7 @@ backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum�
                    crates/zimu-store（存储层，P4-T1/T2/T7：SQLite schema 与迁移 + 录入事务 + 行情回写 + advice_history/alerts/equity_snapshots/push_log 读写，校验复用 zimu-domain，.db 不入库）
                    crates/zimu-market（行情适配器，P4-T4：datafetch sidecar 唯一消费入口——类型化契约/降级三分类/市场时钟/当日 bar 合成）
 skills/            Agent Skill 模板（P4-T6，robit SKILL.md 约定）：post-market-review（/review /复盘）、pre-market-watch（/watch /盘前）、generate-advice（/advice /建议）——产品文案资产，入库评审；ZIMU_SKILLS_DIR 可覆盖
-frontend/          React + TS + Vite 前端：index 工作台静态复刻（P2-T4）+ 智能问答视图（P2-T3 SSE 会话）；
+frontend/          React + TS + Vite 前端：index 工作台（P2-T4 静态复刻 → P5-T2 真实数据接线：zustand stores + /api/* 消费，mock 层 demo.ts 已删）+ 智能问答视图（P2-T3 SSE 会话）+ 占位屏（routes.ts ported 标记，T2 逐屏替换）；
                    src/domain/ 为领域纯函数 TS 共享层（P3-T4：镜像 zimu-domain，vitest 跑同一份黄金向量），令牌在 src/styles/tokens.css；
                    src/api/schema.d.ts 为 OpenAPI 契约生成的 TS 类型面（P4-T5，`npm run gen:api` 再生成，不手改）；
                    P5-T1 工程约定落地（ADR-0008）：react-router 路由表 src/routes.ts + openapi-fetch 客户端 src/api/client.ts + zustand 状态基线
