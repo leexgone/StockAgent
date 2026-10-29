@@ -13,7 +13,7 @@ import {
   qa,
   sessions,
 } from "../data/demo";
-import type { View } from "../data/demo";
+import { Link } from "react-router-dom";
 import {
   IconChat,
   IconChevronRight,
@@ -32,23 +32,22 @@ import {
 
 interface HomeScreenProps {
   now: Date;
-  onNavigate: (v: View) => void;
 }
 
-/* 界面入口卡（stat 与原型 SCREENS 的模板逐一对应） */
+/* 界面入口卡（stat 与原型 SCREENS 的模板逐一对应；path = routes.ts 路由，未移植屏进占位屏） */
 const SCREENS: {
-  view: View | null;
+  path: string;
   Icon: () => React.JSX.Element;
   name: string;
   desc: string;
   stat: string;
 }[] = [
-  { view: null, Icon: IconGrid, name: "总览仪表盘", desc: "资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。", stat: `${equity.dates.length} 日净值 · ${alerts.length} 条预警` },
-  { view: null, Icon: IconWallet, name: "持仓管理", desc: "股票 / ETF / 可转债分组明细，加减仓会实时重算摊薄成本与仓位。", stat: `${holdings.length} 只标的 · ${money(agg.cash)} 现金` },
-  { view: null, Icon: IconSpark, name: "AI 分析建议", desc: "买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。", stat: `已覆盖 ${adviceCodes.length} 只标的` },
-  { view: "chat", Icon: IconChat, name: "智能问答", desc: "用大白话问股，回答会引用你的持仓、行情与公告原文。", stat: `${qa.length} 个示例问题 · 3 段历史会话` },
-  { view: null, Icon: IconShield, name: "组合诊断", desc: "行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。", stat: `HHI ${agg.hhi.toFixed(3)} · 回撤 ${P.mdd.toFixed(1)}%` },
-  { view: null, Icon: IconWechat, name: "微信助理接入", desc: "绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。", stat: "1 个微信账号 · 6 类推送" },
+  { path: "/dashboard", Icon: IconGrid, name: "总览仪表盘", desc: "资产曲线、当日盈亏归因、待处理预警与自选行情，一屏看完今天。", stat: `${equity.dates.length} 日净值 · ${alerts.length} 条预警` },
+  { path: "/holdings", Icon: IconWallet, name: "持仓管理", desc: "股票 / ETF / 可转债分组明细，加减仓会实时重算摊薄成本与仓位。", stat: `${holdings.length} 只标的 · ${money(agg.cash)} 现金` },
+  { path: "/analysis", Icon: IconSpark, name: "AI 分析建议", desc: "买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。", stat: `已覆盖 ${adviceCodes.length} 只标的` },
+  { path: "/chat", Icon: IconChat, name: "智能问答", desc: "用大白话问股，回答会引用你的持仓、行情与公告原文。", stat: `${qa.length} 个示例问题 · 3 段历史会话` },
+  { path: "/diagnosis", Icon: IconShield, name: "组合诊断", desc: "行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。", stat: `HHI ${agg.hhi.toFixed(3)} · 回撤 ${P.mdd.toFixed(1)}%` },
+  { path: "/wechat", Icon: IconWechat, name: "微信助理接入", desc: "绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。", stat: "1 个微信账号 · 6 类推送" },
 ];
 
 /* 待决事项（与原型 ATT 数组同款；pill 用语义类：交易方向 .buy/.sell、
@@ -66,7 +65,7 @@ const TIMELINE = sessions
   ])
   .slice(0, 5);
 
-export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
+export default function HomeScreen({ now }: HomeScreenProps) {
   const clock = marketClock(now);
   const h = now.getHours();
   const hello = h < 11 ? "早上好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
@@ -83,12 +82,6 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
     `${pend.length} 条预警待处理，${byd.name} 浮亏扩大至 ${pct(byd.pnlPct)}，` +
     `组合最大单票占资产 ${maxWeight.toFixed(1)}%。`;
 
-  const goChat = (e: React.MouseEvent) => {
-    e.preventDefault();
-    onNavigate("chat");
-  };
-  const inert = (e: React.MouseEvent) => e.preventDefault();
-
   return (
     <main className="page" id="main" data-od-id="home-page">
       <div className="page-head">
@@ -98,10 +91,8 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
           <p className="page-desc" id="greet-desc">{desc}</p>
         </div>
         <div className="page-actions">
-          <a className="btn" href="#" onClick={goChat}>问一句</a>
-          <a className="btn btn-primary" href="#" onClick={inert} title="P5 移植中，暂未接入">
-            进入总览仪表盘
-          </a>
+          <Link className="btn" to="/chat">问一句</Link>
+          <Link className="btn btn-primary" to="/dashboard">进入总览仪表盘</Link>
         </div>
       </div>
 
@@ -143,9 +134,9 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
             <div className="metric-label">待处理预警</div>
             <div className="metric-value num" id="s-alerts">{pend.length}</div>
             <div className="metric-meta">
-              <a href="#" onClick={inert} title="P5 移植中，暂未接入" style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>
+              <Link to="/dashboard" style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>
                 查看清单
-              </a>
+              </Link>
             </div>
           </div>
         </div>
@@ -157,14 +148,12 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
       </h2>
       <div className="grid g-even" id="screens" data-od-id="home-screens">
         {SCREENS.map((s, i) => (
-          <a
+          <Link
             key={s.name}
             className="card"
-            href="#"
+            to={s.path}
             data-od-id={`screen-card-${i}`}
-            title={s.view ? undefined : "P5 移植中，暂未接入"}
             style={{ display: "block", padding: 18, transition: "border-color .14s, box-shadow .14s" }}
-            onClick={s.view ? goChat : inert}
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = "var(--accent-line)";
               e.currentTarget.style.boxShadow = "var(--shadow-md)";
@@ -189,7 +178,7 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
             <p className="num" style={{ marginTop: 12, fontSize: 11.5, color: "var(--fg-2)", letterSpacing: 0 }}>
               {s.stat}
             </p>
-          </a>
+          </Link>
         ))}
       </div>
 
@@ -202,9 +191,7 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
               <div className="card-sub">盘中监控 · 盘后复盘 · 微信应答</div>
             </div>
             <div className="head-actions">
-              <a className="btn btn-sm" href="#" onClick={inert} title="P5 移植中，暂未接入">
-                接入设置
-              </a>
+              <Link className="btn btn-sm" to="/wechat">接入设置</Link>
             </div>
           </div>
           <div className="card-body">
@@ -231,7 +218,7 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
           </div>
           <div className="list" id="home-attention">
             {ATTENTION.map((a, i) => (
-              <a className="list-item" href="#" onClick={inert} title="P5 移植中，暂未接入" data-od-id={`attention-item-${i}`} key={i}>
+              <Link className="list-item" to="/holdings" data-od-id={`attention-item-${i}`} key={i}>
                 <span className="li-main">
                   <span className="li-title">{a.t}</span>
                   <span className="li-desc">{a.d}</span>
@@ -239,7 +226,7 @@ export default function HomeScreen({ now, onNavigate }: HomeScreenProps) {
                 <span className="li-right">
                   <span className={`pill ${a.cls}`}>{a.pill}</span>
                 </span>
-              </a>
+              </Link>
             ))}
           </div>
         </section>

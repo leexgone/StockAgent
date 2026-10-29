@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 import Chrome from "./components/Chrome";
-import HomeScreen from "./screens/HomeScreen";
+import { SCREEN_ROUTES } from "./routes";
 import ChatView from "./screens/ChatView";
-import type { View } from "./data/demo";
+import HomeScreen from "./screens/HomeScreen";
+import PlaceholderScreen from "./screens/PlaceholderScreen";
 
 /**
- * 子木 SPA 根组件（P2-T4）：外壳 Chrome + 两个视图——
- * home = index 工作台静态复刻（对照 design/index.html），
- * chat = P2-T3 的 Agent SSE 会话（健康状态 + ChatPanel）。
- * 路由方案 P5-T1 再定，当前用视图状态切换。
+ * 子木 SPA 根组件：外壳 Chrome + react-router 路由表（P5-T1，ADR-0008）。
+ * 已移植屏：/ 工作台（P2-T4 index 静态复刻）、/chat Agent SSE 会话（P2-T3）；
+ * 其余路由渲染占位屏，P5-T2 逐屏移植后在 routes.ts 翻 ported 并在此挂真实屏。
  */
 export default function App() {
-  const [view, setView] = useState<View>("home");
   // 市场时钟与问候语随真实时间每秒重绘（对应原型 bindChrome 的 paintClock 定时器）
   const [now, setNow] = useState(() => new Date());
 
@@ -21,18 +21,19 @@ export default function App() {
   }, []);
 
   return (
-    <Chrome
-      active={view}
-      crumb={view === "chat" ? <b>智能问答</b> : <b>工作台</b>}
-      now={now}
-      onNavigate={setView}
-      onRefresh={() => setNow(new Date())}
-    >
-      {view === "home" ? (
-        <HomeScreen now={now} onNavigate={setView} />
-      ) : (
-        <ChatView onNavigate={setView} />
-      )}
+    <Chrome now={now} onRefresh={() => setNow(new Date())}>
+      <Routes>
+        <Route path="/" element={<HomeScreen now={now} />} />
+        <Route path="/chat" element={<ChatView />} />
+        {SCREEN_ROUTES.filter((r) => !r.ported).map((r) => (
+          <Route
+            key={r.path}
+            path={r.path}
+            element={<PlaceholderScreen path={r.path} crumb={r.crumb} />}
+          />
+        ))}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </Chrome>
   );
 }

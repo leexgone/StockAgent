@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel";
-import type { View } from "../data/demo";
 
 /**
  * 智能问答视图 —— P2-T3 的 SSE 链路验证入口（原最简框架首页迁到这里）。
@@ -23,7 +23,7 @@ type BackendState =
   | { kind: "online"; health: Health }
   | { kind: "offline"; reason: string };
 
-export default function ChatView({ onNavigate }: { onNavigate: (v: View) => void }) {
+export default function ChatView() {
   const [state, setState] = useState<BackendState>({ kind: "loading" });
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export default function ChatView({ onNavigate }: { onNavigate: (v: View) => void
           </p>
         </div>
         <div className="page-actions">
-          <button className="btn" onClick={() => onNavigate("home")}>返回工作台</button>
+          <Link className="btn" to="/">返回工作台</Link>
         </div>
       </div>
 

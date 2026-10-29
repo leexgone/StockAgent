@@ -329,20 +329,19 @@ export function marketClock(now: Date): Clock {
   return { state: "已收盘", dot: "closed", next: "距次日集合竞价 " + cd(at(9, 15) + 24 * 60 - mins), time: hhmm, live: false };
 }
 
-/* ---------- 导航（视图键替代原型的 href；路由 P5-T1 再定） ---------- */
-export type View = "home" | "chat";
+/* ---------- 导航（P5-T1：路由已定，path 对应 routes.ts 路由表；未移植屏渲染占位屏） ---------- */
 export interface NavItem {
-  view: View | null; // null = 尚未移植（P5），渲染为占位链接
+  path: string; // 路由路径（src/routes.ts 单一来源）
   icon: string;
   label: string;
   short: string;
   kbd?: string;
 }
 export const NAV: NavItem[] = [
-  { view: null, icon: "grid", label: "总览仪表盘", short: "总览", kbd: "1" },
-  { view: null, icon: "wallet", label: "持仓管理", short: "持仓", kbd: "2" },
-  { view: null, icon: "spark", label: "AI 分析建议", short: "建议", kbd: "3" },
-  { view: "chat", icon: "chat", label: "智能问答", short: "问答", kbd: "4" },
-  { view: null, icon: "shield", label: "组合诊断", short: "诊断", kbd: "5" },
+  { path: "/dashboard", icon: "grid", label: "总览仪表盘", short: "总览", kbd: "1" },
+  { path: "/holdings", icon: "wallet", label: "持仓管理", short: "持仓", kbd: "2" },
+  { path: "/analysis", icon: "spark", label: "AI 分析建议", short: "建议", kbd: "3" },
+  { path: "/chat", icon: "chat", label: "智能问答", short: "问答", kbd: "4" },
+  { path: "/diagnosis", icon: "shield", label: "组合诊断", short: "诊断", kbd: "5" },
 ];
-export const WECHAT_NAV: NavItem = { view: null, icon: "wechat", label: "微信助理接入", short: "微信" };
+export const WECHAT_NAV: NavItem = { path: "/wechat", icon: "wechat", label: "微信助理接入", short: "微信" };

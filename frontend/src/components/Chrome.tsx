@@ -1,55 +1,47 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { NAV, WECHAT_NAV, agg, dirClass, fmt, indices, marketClock, money } from "../data/demo";
-import type { View } from "../data/demo";
+import { routeFor } from "../routes";
 import { ICONS, IconBell, IconFilter, IconRefresh, IconSearch, IconSpark } from "./Icons";
 
 /**
  * 共享外壳 —— 复刻 design/assets/data.js 的 chrome()（侧栏 / 顶栏 / 行情条 / 移动底栏）。
+ * P5-T1：导航改 react-router 路由（单一来源 routes.ts），未移植屏渲染占位屏，
+ * 面包屑与高亮由 pathname 派生。
  * 与原型的行为差异（静态复刻边界）：
- * - 导航是 SPA 视图切换（路由 P5-T1 再定）；未移植的屏渲染为占位链接（title 提示）。
- * - 顶栏刷新只重对时钟，不做价格跳动（tickPrices 属原型演示逻辑，真实行情 P4 接入）。
+ * - 顶栏刷新只重对时钟，不做价格跳动（tickPrices 属原型演示逻辑，真实行情
+ *   随 P5-T2 接 /api/market/refresh）。
  * - 铃铛 toast、全局搜索回车、数字键/⌘K 快捷键未移植。
  */
 
 interface ChromeProps {
-  active: View;
-  crumb: React.ReactNode;
   now: Date;
-  onNavigate: (v: View) => void;
   onRefresh: () => void;
   children: React.ReactNode;
 }
 
-export default function Chrome({ active, crumb, now, onNavigate, onRefresh, children }: ChromeProps) {
+export default function Chrome({ now, onRefresh, children }: ChromeProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { pathname } = useLocation();
   const clock = marketClock(now);
-
-  const go = (v: View) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    setSidebarOpen(false);
-    onNavigate(v);
-  };
-  const inert = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setSidebarOpen(false);
-  };
+  const crumb = routeFor(pathname)?.crumb ?? "子木";
+  const close = () => setSidebarOpen(false);
 
   const navItem = (item: (typeof NAV)[number], key: string) => {
     const Icon = ICONS[item.icon];
-    const current = item.view !== null && item.view === active;
+    const current = item.path === pathname;
     return (
-      <a
+      <Link
         key={key}
         className="nav-item"
-        href="#"
+        to={item.path}
         aria-current={current ? "page" : undefined}
-        title={item.view ? undefined : "P5 移植中，暂未接入"}
-        onClick={item.view ? go(item.view) : inert}
+        onClick={close}
       >
         <Icon />
         <span>{item.label}</span>
         {item.kbd && <span className="kbd">{item.kbd}</span>}
-      </a>
+      </Link>
     );
   };
 
@@ -57,7 +49,7 @@ export default function Chrome({ active, crumb, now, onNavigate, onRefresh, chil
     <>
       <div className="shell">
         <aside className={`sidebar${sidebarOpen ? " on" : ""}`} id="sidebar">
-          <a className="brand" href="#" onClick={go("home")}>
+          <Link className="brand" to="/" onClick={close}>
             <span className="brand-mark">
               <IconSpark />
             </span>
@@ -65,16 +57,16 @@ export default function Chrome({ active, crumb, now, onNavigate, onRefresh, chil
               <span className="brand-name">子木 · 股票智能助理</span>
               <span className="brand-sub">个人投研工作台</span>
             </span>
-          </a>
+          </Link>
           <div className="nav-group">工作台</div>
           {NAV.map((n) => navItem(n, n.label))}
           {navItem(WECHAT_NAV, WECHAT_NAV.label)}
           <div className="nav-group">快捷</div>
-          <a className="nav-item" href="#" onClick={go("chat")}>
+          <Link className="nav-item" to="/chat" onClick={close}>
             <ICONS.chat />
             <span>问一句</span>
             <span className="kbd">⌘K</span>
-          </a>
+          </Link>
           <div className="side-foot">
             <div className="side-acct">
               <span className="side-acct-av">我</span>
@@ -96,7 +88,9 @@ export default function Chrome({ active, crumb, now, onNavigate, onRefresh, chil
             >
               <IconFilter />
             </button>
-            <span className="crumb">{crumb}</span>
+            <span className="crumb">
+              <b>{crumb}</b>
+            </span>
             <label className="search">
               <IconSearch />
               <input id="global-search" placeholder="搜代码 / 名称 / 问一句" autoComplete="off" />
@@ -111,7 +105,7 @@ export default function Chrome({ active, crumb, now, onNavigate, onRefresh, chil
             <button className="icon-btn" aria-label="预警" title="待处理预警汇总（toast 未移植）">
               <IconBell />
             </button>
-            <button className="icon-btn" aria-label="刷新行情" onClick={onRefresh} title="重新对时（价格跳动 P4 接真实行情后启用）">
+            <button className="icon-btn" aria-label="刷新行情" onClick={onRefresh} title="重新对时（价格跳动 P5-T2 接真实行情后启用）">
               <IconRefresh />
             </button>
           </header>
@@ -142,19 +136,18 @@ export default function Chrome({ active, crumb, now, onNavigate, onRefresh, chil
       <nav className="mtabs" id="mtabs">
         {NAV.concat([WECHAT_NAV]).map((n) => {
           const Icon = ICONS[n.icon];
-          const current = n.view !== null && n.view === active;
+          const current = n.path === pathname;
           return (
-            <a
+            <Link
               key={n.label}
               className="mtab"
-              href="#"
+              to={n.path}
               aria-current={current ? "page" : undefined}
-              title={n.view ? undefined : "P5 移植中，暂未接入"}
-              onClick={n.view ? go(n.view) : inert}
+              onClick={close}
             >
               <Icon />
               <span>{n.short}</span>
-            </a>
+            </Link>
           );
         })}
       </nav>

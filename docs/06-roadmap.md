@@ -13,7 +13,7 @@
 | P2 | 技术基座 Spike（验证 0005 每个假设） | ADR-0005 ✅ | ✅ 2026-10-27 | 2–3 天 |
 | P3 | 口径可执行化（黄金测试向量） | P2 | ✅ 2026-10-28（`price_limit` 尾巴随 P1-T2 消除，8 组 76 用例两边全绿） | 2–3 天 |
 | P4 | 数据管道与存储 | P3 ✅；C5/C8 拍板 ✅（2026-10-28，ADR-0006/0007） | ✅ 2026-10-29（T2–T7 全落地；T1 剩前端抽屉接线随 P5-T2） | 1–1.5 周 |
-| P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | ⬜ | 1–1.5 周 |
+| P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | 🔨（T1 ✅ 2026-10-29） | 1–1.5 周 |
 | P6 | MVP 垂直切片（连续 5 个交易日真实跑通） | P4+P5；C4 渠道落地 | ⬜ | ≥5 个交易日 |
 
 **并行规则**：A 轨 = P1（只动 `design/` 与 `docs/`），B 轨 = P2→P6（新目录）；两轨在 P5 之前互不阻塞。P5 完成后 `design/` 冻结为参照。
@@ -86,11 +86,11 @@
 
 **完成标准**：重启后端不丢持仓与留档；行情更新后 API 数字与 `03` 口径一致；换数据源实现不动 API 面。——✅ 2026-10-29 达成（`restart_does_not_lose_data`、API 数字与 `recalc` 逐位等价、`MarketApi` trait 注入点换实现不动端点；快照 date 主键幂等重启不重复）。唯一尾巴：T1 的前端抽屉接 API 属 P5-T2 工作面。
 
-## P5 · 前端移植
+## P5 · 前端移植 🔨
 
 | # | 任务 | 产出/验收 | 估算 | 状态 |
 |---|---|---|---|---|
-| P5-T1 | 工程约定：路由、API client（由 OpenAPI 生成类型）、状态方案、组件策略（手写组件 + 设计令牌，不引 UI 库——要引先补 ADR） | 约定写进 CLAUDE.md | 0.5d | ⬜ |
+| P5-T1 | 工程约定：路由、API client（由 OpenAPI 生成类型）、状态方案、组件策略（手写组件 + 设计令牌，不引 UI 库——要引先补 ADR） | 约定写进 CLAUDE.md | 0.5d | ✅ 2026-10-29（ADR-0008）：react-router v7 路由表 `src/routes.ts`（路径与原型文件名一致，未移植屏 = 占位屏，SPA 深链冒烟通过含 `/analysis?code=` 与未知路径回落）；openapi-fetch 客户端 `src/api/client.ts`（REST 唯一入口，SSE 例外，类型自 `gen:api`）；zustand 状态方案（派生数字后端唯一真值，抽屉试算用 domain TS 库）；组件 = 手写 + 设计令牌（不引 UI/图表库/Tailwind）。约定已写进 CLAUDE.md；npm test 113 + build 全绿 |
 | P5-T2 | 逐屏移植：index → dashboard → holdings（抽屉试算用 P3-T4 的 TS 库）→ analysis → chat（SSE 会话流）→ diagnosis → wechat（改为 PushProvider 配置管理，**gate：C4**） | 逐屏与原型对照功能对等、控制台无报错、窄屏断点通过、`data-od-id` 与免责区块保留 | 4–6d | ⬜ |
 | P5-T3 | `design/` 冻结：README 加提示指向 `frontend/`，原型保留不删 | — | 0.1d | ⬜ |
 
