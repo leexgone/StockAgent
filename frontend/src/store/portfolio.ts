@@ -9,6 +9,15 @@ import { api, apiErrorMessage } from "../api/client";
 import type { components } from "../api/schema";
 
 export type PortfolioView = components["schemas"]["PortfolioView"];
+export type TradeRequest = components["schemas"]["TradeRequest"];
+export type RecordReceipt = components["schemas"]["RecordReceipt"];
+/** 录入拒绝体：message + 特定拒绝的附加数值（涨跌停 limit_up/limit_down/decimals、现金不足 cash_after） */
+export type TradeRejection = components["schemas"]["ApiError"];
+
+/** recordTrade 结果：成功带后端收据（数字权威），失败带 ApiError（含就地高亮字段） */
+export type TradeResult =
+  | { ok: true; receipt: RecordReceipt }
+  | { ok: false; error: TradeRejection };
 
 interface PortfolioState {
   /** null = 尚未成功加载过（首屏骨架/错误态判据） */
@@ -21,9 +30,13 @@ interface PortfolioState {
   load: () => Promise<void>;
   /** 顶栏刷新：POST /api/market/refresh（拉行情 → 回写 → recalc 重算）；false = 失败（旧值保留） */
   refresh: () => Promise<boolean>;
+  /** 记一笔加减仓：POST /api/holdings/trade；成功后整表重拉（后端为唯一真值，不做乐观拼接） */
+  recordTrade: (body: TradeRequest) => Promise<TradeResult>;
+  /** 设置可用现金：POST /api/account（onboarding 注资入口，负数后端拒 400）；成功后重拉 */
+  setCash: (cash: number) => Promise<boolean>;
 }
 
-export const usePortfolio = create<PortfolioState>((set) => ({
+export const usePortfolio = create<PortfolioState>((set, get) => ({
   view: null,
   loading: true,
   error: null,
@@ -52,5 +65,26 @@ export const usePortfolio = create<PortfolioState>((set) => ({
     }
     set({ view: data.portfolio, error: null, note: notes.length ? notes.join("；") : null });
     return true;
+  },
+
+  async recordTrade(body) {
+    const { data, error } = await api.POST("/api/holdings/trade", { body });
+    if (data) {
+      // 提交后以后端返回覆盖（ADR-0008）：整表重拉拿权威 recalc 全景，收据留给调用方 toast
+      await get().load();
+      return { ok: true, receipt: data };
+    }
+    // openapi-fetch 对 4xx/5xx 把解析后的 ApiError 放进 error（含 limit_up/cash_after 等附加字段）
+    return { ok: false, error: (error ?? { message: "录入失败（网络或后端不可用）" }) as TradeRejection };
+  },
+
+  async setCash(cash) {
+    const { data, error } = await api.POST("/api/account", { body: { cash } });
+    if (data) {
+      await get().load();
+      return true;
+    }
+    set({ error: apiErrorMessage(error, "更新现金失败") });
+    return false;
   },
 }));

@@ -5,6 +5,7 @@ import App from "./App";
 import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/chat.css";
+import "./styles/holdings.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

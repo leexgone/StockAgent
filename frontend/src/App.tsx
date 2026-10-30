@@ -5,6 +5,7 @@ import ToastHost from "./components/Toast";
 import { SCREEN_ROUTES } from "./routes";
 import ChatView from "./screens/ChatView";
 import DashboardScreen from "./screens/DashboardScreen";
+import HoldingsScreen from "./screens/HoldingsScreen";
 import HomeScreen from "./screens/HomeScreen";
 import PlaceholderScreen from "./screens/PlaceholderScreen";
 import { useAdvice } from "./store/advice";
@@ -18,9 +19,9 @@ import { useUi } from "./store/ui";
 
 /**
  * 子木 SPA 根组件：外壳 Chrome + react-router 路由表（P5-T1，ADR-0008）。
- * 已移植屏：/ 工作台、/dashboard 总览仪表盘（P5-T2 真实数据）、/chat Agent SSE 会话
- * （P2-T3 spike 形态）；其余路由渲染占位屏，P5-T2 逐屏移植后在 routes.ts 翻 ported
- * 并在此挂真实屏。
+ * 已移植屏：/ 工作台、/dashboard 总览仪表盘、/holdings 持仓管理（P5-T2 真实数据，
+ * 含加减仓抽屉接 API）、/chat Agent SSE 会话（P2-T3 spike 形态）；其余路由渲染占位屏，
+ * P5-T2 逐屏移植后在 routes.ts 翻 ported 并在此挂真实屏。
  *
  * 数据接线（P5-T2）：启动时全量拉一次；此后 60s 轮询——市场时钟恒拉，
  * 盘中（clock.live，03 §9 生产口径）才拉组合/指数/预警（与后端调度器同节奏，
@@ -87,6 +88,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<HomeScreen now={now} />} />
           <Route path="/dashboard" element={<DashboardScreen now={now} />} />
+          <Route path="/holdings" element={<HoldingsScreen />} />
           <Route path="/chat" element={<ChatView />} />
           {SCREEN_ROUTES.filter((r) => !r.ported).map((r) => (
             <Route
