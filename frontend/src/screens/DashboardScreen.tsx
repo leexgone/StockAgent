@@ -7,6 +7,7 @@ import { cssVar } from "../components/charts/svg";
 import EmptyHero from "../components/EmptyHero";
 import { IconBell, IconSpark } from "../components/Icons";
 import { perf, priceDecimals } from "../domain";
+import { alignBench } from "../lib/bench";
 import { clockView, marketClock } from "../lib/clock";
 import { dirClass, fixed, fmt, money, pct, wan } from "../lib/format";
 import { KIND_LABEL, symbolOf } from "../lib/kind";
@@ -136,34 +137,11 @@ export default function DashboardScreen({ now }: { now: Date }) {
   const navSeries = useMemo(() => navRows.map((r) => r.total_assets), [navRows]);
   const navDates = useMemo(() => navRows.map((r) => r.date), [navRows]);
 
-  /**
-   * 基准对齐：快照日 → 该日（或此前最近一根）指数收盘价，carry-forward；
-   * 起点缺日线 → 整条基准不画（不伪装）。对齐后归一到区间净值起点
-   * （03 §7 perf 的 bench 输入形态：已归一到同一起点）。
-   */
-  const benchSeries = useMemo((): number[] | null => {
-    if (!benchBars || benchBars.length === 0 || navDates.length < 2) return null;
-    const closes: [string, number][] = [];
-    for (const b of benchBars) {
-      if (b.close !== null && b.close !== undefined && b.close > 0) closes.push([b.date, b.close]);
-    }
-    if (closes.length === 0) return null;
-    const aligned: number[] = [];
-    let j = 0;
-    let last: number | null = null;
-    for (const d of navDates) {
-      while (j < closes.length && closes[j][0] <= d) {
-        last = closes[j][1];
-        j++;
-      }
-      if (last === null) return null; // 区间起点早于日线窗口——基准整段不可对齐
-      aligned.push(last);
-    }
-    const base = aligned[0];
-    const nav0 = navSeries[0];
-    if (!(base > 0) || !(nav0 > 0)) return null;
-    return aligned.map((v) => (v / base) * nav0);
-  }, [benchBars, navRows]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 基准对齐（carry-forward + 归一到区间起点）抽到 lib/bench，dashboard/diagnosis 共用
+  const benchSeries = useMemo(
+    (): number[] | null => alignBench(navDates, benchBars, navSeries[0] ?? 0),
+    [benchBars, navRows], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const perfM = useMemo(
     () => (navSeries.length >= 2 ? perf({ nav: navSeries, bench: benchSeries ?? [] }) : null),

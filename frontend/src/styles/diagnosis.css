@@ -1,0 +1,23 @@
+/* 组合诊断页专属样式（迁移自 design/diagnosis.html <style>，P5-T2）。
+   通用类（card/tbl/seg/pill/progress/bar-line…）走 ui.css；本文件只留本页小件：
+   KPI 格 kpi、再平衡清单 fix、行业堆叠条 stack、堆叠图例 legend-dots。 */
+
+.kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+.kpi > div { background: var(--surface); padding: 14px 16px; }
+.kpi .k { font-size: 11.5px; color: var(--muted); letter-spacing: .02em; display: flex; align-items: center; gap: 5px; }
+.kpi .v { font-family: var(--font-display); font-size: 24px; font-weight: 590; letter-spacing: -.025em; margin-top: 7px; font-variant-numeric: tabular-nums; }
+.kpi .s { font-size: 11.5px; color: var(--muted); margin-top: 4px; font-family: var(--font-mono); }
+
+.fix { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--border); align-items: start; }
+.fix:last-child { border-bottom: 0; }
+.fix .no { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; background: var(--surface-2); color: var(--fg-2); border: 1px solid var(--border); }
+.fix.p1 .no { background: var(--danger); color: #fff; border-color: var(--danger); }
+.fix.p2 .no { background: var(--warn); color: #fff; border-color: var(--warn); }
+.fix h4 { font-size: 13.5px; font-family: var(--font-ui); font-weight: 550; letter-spacing: 0; }
+.fix p { font-size: 12.5px; color: var(--fg-2); line-height: 1.65; margin-top: 5px; max-width: 64ch; }
+.fix .calc { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+
+.stack { display: flex; height: 12px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); }
+.stack > i { display: block; height: 100%; }
+.legend-dots { display: flex; flex-wrap: wrap; gap: 5px 14px; font-size: 11.5px; color: var(--muted); margin-top: 11px; }
+.legend-dots i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }

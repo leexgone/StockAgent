@@ -7,6 +7,7 @@ import "./styles/ui.css";
 import "./styles/chat.css";
 import "./styles/holdings.css";
 import "./styles/analysis.css";
+import "./styles/diagnosis.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
