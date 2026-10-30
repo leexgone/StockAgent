@@ -10,7 +10,7 @@ import {
 } from "../components/Icons";
 import { perf } from "../domain";
 import { clockView, marketClock } from "../lib/clock";
-import { dirClass, fmt, money, pct } from "../lib/format";
+import { dirClass, fixed, fmt, money, pct } from "../lib/format";
 import { coveredCount, useAdvice } from "../store/advice";
 import { useAlerts } from "../store/alerts";
 import { useEquity } from "../store/equity";
@@ -133,7 +133,7 @@ export default function HomeScreen({ now }: HomeScreenProps) {
     {
       path: "/diagnosis", Icon: IconShield, name: "组合诊断",
       desc: "行业集中度、波动率、最大回撤，以及和沪深 300 的滚动对比与再平衡清单。",
-      stat: mdd !== null && agg ? `HHI ${agg.hhi.toFixed(3)} · 回撤 ${mdd.toFixed(1)}%` : "待净值积累 · 每交易日 15:05 快照",
+      stat: mdd !== null && agg ? `HHI ${agg.hhi.toFixed(3)} · 回撤 ${fixed(mdd, 1)}%` : "待净值积累 · 每交易日 15:05 快照",
     },
     {
       path: "/wechat", Icon: IconWechat, name: "微信助理接入",

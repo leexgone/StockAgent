@@ -10,12 +10,18 @@ interface UiState {
   toast: string | null;
   pushToast: (msg: string) => void;
   clearToast: () => void;
+  /** 顶栏手动刷新计数：屏幕级数据（kline/自选行情）以此为 effect 依赖强制重取 */
+  refreshTick: number;
+  bumpRefresh: () => void;
 }
 
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 export const useUi = create<UiState>((set) => ({
   toast: null,
+  refreshTick: 0,
+
+  bumpRefresh: () => set((s) => ({ refreshTick: s.refreshTick + 1 })),
 
   pushToast(msg) {
     if (timer) clearTimeout(timer);

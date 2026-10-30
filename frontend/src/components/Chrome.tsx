@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { clockView, marketClock } from "../lib/clock";
-import { dirClass, fmt, money } from "../lib/format";
+import { dirClass, fixed, fmt, money } from "../lib/format";
 import { NAV, WECHAT_NAV, routeFor } from "../routes";
 import { pending, useAlerts } from "../store/alerts";
 import { INDEX_SYMBOLS, useMarket } from "../store/market";
@@ -155,7 +155,7 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
                   </span>
                   {chg !== null && (
                     <span className={`delta ${dirClass(chg)}`}>
-                      {(chg > 0 ? "+" : "") + chg.toFixed(2)}%
+                      {(chg > 0 ? "+" : "") + fixed(chg, 2)}%
                     </span>
                   )}
                 </span>

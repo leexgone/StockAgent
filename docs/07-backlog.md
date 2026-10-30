@@ -23,9 +23,9 @@ P3-T1 fixture 设计时发现（2026-10-27）：① `data.js:177` 的 `benchVol`
 `03` §1 表格写股票「可卖数量 = 整数股」（A 股卖出允许奇零股、须一次性卖出），但原型买卖一律按 `qty % lot === 0` 拦截（`holdings.html:342`），且「全部清仓」按钮对奇零股持仓（如送股后 150 股）填入 `held` 后会被自己的校验拒绝。fixture 暂按原型行为编码（`lot.json` case `vq-sell-odd-lot`）；定稿后同步改 §1、原型与用例。关联 P4-T2（schema 要能存奇零股持仓）。
 **进展（2026-10-28，P4-T2）**：存储侧已就绪——`zimu-store` v1 schema 的 `holdings.shares` 为普通整数（仅 `> 0` 约束），奇零股存得下；后端录入校验沿用 `zimu-domain` 现行整手口径（与原型/fixture 一致）。卖出奇零股的业务口径仍待 B12 定稿，届时按 P3 流程先改 `03` 与 fixtures 再改两侧实现。
 
-### B13 · 自选（watchlist）预警无生产侧载体 ✅ 已拍板 + 后端落地（2026-10-29）
+### B13 · 自选（watchlist）预警无生产侧载体 ✅ 已解（2026-10-29 后端落地，10-30 前端收口）
 
-原缺口：P4-T7 预警引擎只覆盖 `holdings` 持仓，原型 dashboard 的 `watchlist-card` 在生产侧无存储载体。**用户拍板：建 watchlist 表（schema v2 迁移）+ `03` §12 判定范围扩到自选。** 落地（当日）：§12 正文修订——自选按「无持仓形态」判定（cost/stop/target_hi 不喂 → 序 3/4/5 不参与；序 1/2/6/7/8 同款；判定函数**零改动**，既有 fixture `al-limit-up` 等本就是无持仓形态锚点）；`zimu-store` v2 迁移（watchlist 表 + upsert/remove/list，含 v1→v2 合成老库迁移测试）；调度器扩展（自选行情单独合并拉取**不回写库**、与持仓重叠代码只判持仓形态一次、cb_list 拉取条件扩为持仓或自选含转债，scheduler 测试 7→9 项）；API `GET/POST/DELETE /api/watchlist`（契约 23 路径/42 schema/25 样例）。关联项 `push_log` 读端点已随 index 屏落地（`GET /api/push_logs`）。**余前端半边**：dashboard 自选卡消费 + 维护入口（增删表单）随 P5-T2 dashboard 屏。
+原缺口：P4-T7 预警引擎只覆盖 `holdings` 持仓，原型 dashboard 的 `watchlist-card` 在生产侧无存储载体。**用户拍板：建 watchlist 表（schema v2 迁移）+ `03` §12 判定范围扩到自选。** 落地（当日）：§12 正文修订——自选按「无持仓形态」判定（cost/stop/target_hi 不喂 → 序 3/4/5 不参与；序 1/2/6/7/8 同款；判定函数**零改动**，既有 fixture `al-limit-up` 等本就是无持仓形态锚点）；`zimu-store` v2 迁移（watchlist 表 + upsert/remove/list，含 v1→v2 合成老库迁移测试）；调度器扩展（自选行情单独合并拉取**不回写库**、与持仓重叠代码只判持仓形态一次、cb_list 拉取条件扩为持仓或自选含转债，scheduler 测试 7→9 项）；API `GET/POST/DELETE /api/watchlist`（契约 23 路径/42 schema/25 样例）。关联项 `push_log` 读端点已随 index 屏落地（`GET /api/push_logs`）。**前端半边已收口（2026-10-30，随 P5-T2 dashboard 屏）**：自选卡消费 `GET /api/watchlist` + 展示行情单独 quote 合并（`store/watchlist.ts`，永不回写库）；维护入口 = 卡内增删表单（upsert 幂等提示、ETF 涨跌停 % 显式可填——03 §2 数据层配置语义、与持仓行业重叠标注）。B13 全链闭合。
 
 ### B14 · 中证转债指数（sh000832）spot 行情无数据 ✅ 已解（2026-10-29）
 
