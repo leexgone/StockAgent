@@ -1,11 +1,12 @@
 /**
  * 净值与风险指标（03 §7）：日收益取相邻差比；sd 为总体标准差（除以 n）；年化常数 244。
- * bench_vol / beta / 相关系数不在本模块：未收入 03 §7 且原型两处实现不一致，
- * 口径待定稿（07-backlog B11）。
+ * B11 已定稿（2026-10-30）：bench_vol（全序列 sd，原型 RMS 变体废除）/ beta / corr
+ * （配对前缀 m 项；sd ≤ THRESHOLD_EPS 守卫——恒定序列在 f64 下带 ~1e-18 噪声，
+ * 纯零判定会放出天文 beta）。
  * 镜像 `backend/crates/zimu-domain/src/perf.rs`。
  */
 
-import { SHARPE_EPS, TRADING_DAYS } from "./common";
+import { SHARPE_EPS, THRESHOLD_EPS, TRADING_DAYS } from "./common";
 
 export type PerfInput = {
   /** 组合净值序列 */
@@ -27,6 +28,12 @@ export type PerfMetrics = {
   sharpe: number;
   /** 跑赢基准的天数占比 % */
   win_rate: number;
+  /** 基准年化波动 % = sd(rb) × √244 × 100（与 ann_vol 同算法，B11 定稿） */
+  bench_vol: number;
+  /** cov / var_rb'（配对前缀 m 项；sd_rb' ≤ 1e−9 → 0） */
+  beta: number;
+  /** cov / (sd_r' × sd_rb')（任一 sd ≤ 1e−9 → 0） */
+  corr: number;
 };
 
 const zeroMetrics = (): PerfMetrics => ({
@@ -37,6 +44,9 @@ const zeroMetrics = (): PerfMetrics => ({
   bench_mdd: 0,
   sharpe: 0,
   win_rate: 0,
+  bench_vol: 0,
+  beta: 0,
+  corr: 0,
 });
 
 function returns(series: number[]): number[] {
@@ -87,6 +97,40 @@ export function perf(inp: PerfInput): PerfMetrics {
     if (r[i] > rb[i]) wins++;
   }
 
+  // B11：bench_vol = 基准全序列总体 sd × √244 × 100（与 ann_vol 同算法）
+  let benchVol = 0;
+  if (rb.length > 0) {
+    const mb = rb.reduce((s, x) => s + x, 0) / rb.length;
+    const vb = rb.reduce((s, x) => s + (x - mb) * (x - mb), 0) / rb.length;
+    benchVol = Math.sqrt(vb) * sqrtDays * 100;
+  }
+
+  // B11：beta / corr 按配对前缀 m；均值/标准差取前缀 m 项（等长时 = 全样本）。
+  // ε 守卫是口径的一部分：恒定序列的 f64 噪声不得放大成天文 beta（03 §7）
+  const m = Math.min(r.length, rb.length);
+  let beta = 0;
+  let corr = 0;
+  if (m > 0) {
+    const rp = r.slice(0, m);
+    const rbp = rb.slice(0, m);
+    const mr = rp.reduce((s, x) => s + x, 0) / m;
+    const mrb = rbp.reduce((s, x) => s + x, 0) / m;
+    let cov = 0;
+    let varB = 0;
+    let sumR = 0;
+    for (let i = 0; i < m; i++) {
+      cov += (rp[i] - mr) * (rbp[i] - mrb);
+      varB += (rbp[i] - mrb) * (rbp[i] - mrb);
+      sumR += (rp[i] - mr) * (rp[i] - mr);
+    }
+    cov /= m;
+    varB /= m;
+    const sdR = Math.sqrt(sumR / m);
+    const sdB = Math.sqrt(varB);
+    if (sdB > THRESHOLD_EPS) beta = cov / varB;
+    if (sdR > THRESHOLD_EPS && sdB > THRESHOLD_EPS) corr = cov / (sdR * sdB);
+  }
+
   return {
     cum: cumPct(inp.nav),
     bench_cum: cumPct(inp.bench),
@@ -95,5 +139,8 @@ export function perf(inp: PerfInput): PerfMetrics {
     bench_mdd: maxDrawdownPct(inp.bench),
     sharpe: (mean * TRADING_DAYS) / (sd * sqrtDays + SHARPE_EPS),
     win_rate: (wins / n) * 100,
+    bench_vol: benchVol,
+    beta,
+    corr,
   };
 }

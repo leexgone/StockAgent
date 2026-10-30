@@ -5,7 +5,7 @@
   "schema_version": 1,
   "status": "active",
   "tolerance": 1e-9,
-  "notes": "错误文案不进 fixture，只断言 reason 枚举码（not_lot_multiple / exceeds_held），文案是界面层职责。奇零股卖出与 §1「可卖整数股」的冲突待 B12 定稿，vq-sell-odd-lot 暂按原型行为编码。",
+  "notes": "错误文案不进 fixture，只断言 reason 枚举码（not_lot_multiple / exceeds_held），文案是界面层职责。B12 已定稿（2026-10-30）：卖出 qty == held 豁免整手校验（A 股奇零股须一次性卖出），部分卖出仍须整手倍数；判定顺序 ①qty<0 ②qty==0 未填写 ③清仓豁免 ④整手 ⑤超持仓。",
   "cases": [
     {
       "id": "lot-stock",
@@ -98,10 +98,42 @@
     {
       "id": "vq-sell-odd-lot",
       "fn": "validate_qty",
-      "desc": "卖 150 股（奇零股，150 % 100 ≠ 0）：原型买卖一律按整手倍数拦截；与 §1「可卖整数股」及 A 股奇零股规则的冲突记 B12，定稿后更新本用例",
+      "desc": "卖 150 股（奇零股）且 = held：清仓豁免整手校验 → 合法（B12 定稿 2026-10-30，A 股奇零股须一次性卖出；送股后 150 股可整笔清仓）",
       "tags": ["boundary"],
       "input": { "kind": "stock", "side": "sell", "qty": 150, "held": 150 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vq-sell-odd-partial",
+      "fn": "validate_qty",
+      "desc": "持 150 股卖 50：既非整手倍数也非清仓（豁免只认 qty == held）→ 拒绝，奇零股不可拆着卖",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "sell", "qty": 50, "held": 150 },
       "expect": { "valid": false, "reason": "not_lot_multiple" }
+    },
+    {
+      "id": "vq-sell-lot-leaves-odd",
+      "fn": "validate_qty",
+      "desc": "持 150 股卖 100（整手倍数、≤ held）→ 合法；剩余 50 股奇零留待下次一次性清仓",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "sell", "qty": 100, "held": 150 },
+      "expect": { "valid": true, "reason": null }
+    },
+    {
+      "id": "vq-sell-over-odd",
+      "fn": "validate_qty",
+      "desc": "持 150 股卖 250：非清仓（250 ≠ 150）且 250 % 100 ≠ 0 → 整手校验（序④）先于超持仓校验（序⑤）报 not_lot_multiple——判定顺序本身是口径的一部分",
+      "tags": ["boundary"],
+      "input": { "kind": "stock", "side": "sell", "qty": 250, "held": 150 },
+      "expect": { "valid": false, "reason": "not_lot_multiple" }
+    },
+    {
+      "id": "vq-cb-sell-odd-full",
+      "fn": "validate_qty",
+      "desc": "转债奇零 15 张全部卖出（15 % 10 ≠ 0 但 = held）→ 清仓豁免合法（豁免按 kind 无差别适用）",
+      "tags": ["boundary"],
+      "input": { "kind": "cb", "side": "sell", "qty": 15, "held": 15 },
+      "expect": { "valid": true, "reason": null }
     },
     {
       "id": "qt-held-normal",

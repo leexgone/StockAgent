@@ -41,14 +41,15 @@ export type QtyVerdict = { valid: boolean; reason: QtyReason | null };
 export type ValidateQtyInput = { kind: Kind; side: Side; qty: number; held: number };
 
 /**
- * 数量校验（原型 `holdings.html:342`）：先整手倍数、后卖出不得超持仓。
- * `qty == 0` 视为「未填写」返回 valid（提交闸门另行要求 qty > 0，与原型 `qty &&` 短路一致）；
- * 负数按非法输入拒绝。奇零股卖出与 §1「可卖整数股」的冲突待 B12 定稿。
- * qty / held 为整数语义（Rust 侧 i64）。
+ * 数量校验（03 §1，B12 定稿 2026-10-30）：判定顺序 ①负数拒绝 ②零 = 未填写合法
+ * （提交闸门另行要求 qty > 0）③卖出且 qty === held 清仓豁免（A 股奇零股须一次性
+ * 卖出）④整手倍数 ⑤卖出不得超持仓。qty / held 为整数语义（Rust 侧 i64）。
  */
 export function validateQty(kind: Kind, side: Side, qty: number, held: number): QtyVerdict {
   if (qty < 0) return { valid: false, reason: "not_lot_multiple" };
   if (qty === 0) return { valid: true, reason: null };
+  // 奇零股清仓豁免：全部卖出（qty === held）不受整手约束，部分卖出仍须整手倍数
+  if (side === "sell" && qty === held) return { valid: true, reason: null };
   const lot = lotSize(kind);
   if (qty % lot !== 0) return { valid: false, reason: "not_lot_multiple" };
   if (side === "sell" && qty > held) return { valid: false, reason: "exceeds_held" };

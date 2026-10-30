@@ -270,7 +270,13 @@ export default function TradeDrawer({
             </div>
             <div className="err" id="err-qty" style={errQty ? { display: "block" } : undefined}>{errQty || "请填写有效数量"}</div>
             <div className="hint" id="lot-hint">
-              {cur ? `${KIND_LABEL[cur.kind]}最小单位 1 手 = ${meta?.lot} ${unit}，数量需为 ${meta?.lot} 的整数倍` : "—"}
+              {cur
+                ? `${KIND_LABEL[cur.kind]}最小单位 1 手 = ${meta?.lot} ${unit}，数量需为 ${meta?.lot} 的整数倍` +
+                  // B12 定稿：奇零股持仓提示一次性清仓豁免
+                  (held > 0 && meta && held % meta.lot !== 0
+                    ? `；持仓含奇零（${fmt(held, 0)} ${unit}），全部清仓可一次性卖出`
+                    : "")
+                : "—"}
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }} id="qty-quick">
               {tiers.slice(0, 3).map((q, i) => (

@@ -6,13 +6,17 @@
 
 | `kind` | 名称 | 1 手 | 可卖数量 | 报价小数位 |
 |---|---|---|---|---|
-| `stock` | A 股普通股 | 100 股 | 整数股（买入按手） | 2 |
-| `etf` | 场内 ETF | 100 份 | 整数份 | 3 |
-| `cb` | 可转债 | 10 张 | 整数张 | 3 |
+| `stock` | A 股普通股 | 100 股 | 整数股（买入按手；奇零股一次性全部卖出） | 2 |
+| `etf` | 场内 ETF | 100 份 | 整数份（规则同股票） | 3 |
+| `cb` | 可转债 | 10 张 | 整数张（规则同股票） | 3 |
 
-- 数量校验：`qty % lot === 0`，否则报「数量需为 N 的整数倍」（`holdings.html:342`）。
-- 卖出不得超过当前持仓：`qty > held` 时报「最多可卖 X」（`holdings.html:343`）。
-- 快捷档位：按当前持仓（无持仓时按 10 手）的 10% / 25% / 50% 向下取整到手，卖出额外给「全部清仓」（`holdings.html:334`）。
+- 数量校验（`validate_qty`，**B12 定稿 2026-10-30**）按序判定：
+  1. `qty < 0` → 拒绝（`not_lot_multiple`）；
+  2. `qty == 0` → 视为「未填写」合法（提交闸门另行要求 `qty > 0`）；
+  3. **卖出且 `qty == held` → 合法（奇零股清仓豁免整手校验）**——A 股不足一手的持仓须一次性卖出（如送股后 150 股：可整笔清仓，不可拆成 50 + 100 分笔卖）；
+  4. `qty % lot !== 0` → 拒绝「数量需为 N 的整数倍」（`not_lot_multiple`）——买入恒按整手，卖出部分减仓也须整手（150 股里卖 100 合法，剩 50 股奇零下次一次性清）；
+  5. 卖出且 `qty > held` → 拒绝「最多可卖 X」（`exceeds_held`）。
+- 快捷档位：按当前持仓（无持仓时按 10 手）的 10% / 25% / 50% 向下取整到手，卖出额外给「全部清仓」= `held`（奇零股持仓经上款豁免天然合法）。
 - 报价小数位按 `kind` 决定（本表），唯一出处是 `data.js` 的 `priceDec(kind)`（P1-T3 起，B4 已修）：抽屉、成交流水、持仓表、dashboard、分析页、问答引用、微信卡片与诊断建议全部同精度，转债一律 3 位（`126.720`）。
 
 ## 2. 价格合法性（涨跌停校验）
@@ -151,7 +155,7 @@ sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price
 输入：`equity.nav`（组合净值序列）与 `equity.bench`（基准，已归一到同一起点），日收益取相邻差比。
 
 ```
-日收益      r[i] = nav[i]/nav[i−1] − 1
+日收益      r[i] = nav[i]/nav[i−1] − 1                     # rb 同理取自 bench
 均值       mean = Σr / n
 标准差        sd = √(Σ(r−mean)² / n)          # 总体标准差，非样本
 年化波动   annVol = sd × √244 × 100            # 244 个交易日
@@ -163,7 +167,24 @@ sellTo(code, target%) = max(lot, ceil((mv − totalAssets × target/100) / price
 前三行业合计  top3Sector = Σ w(前 3)
 ```
 
-实现：`data.js:161`。基准为**沪深 300 全收益**，指数点位归一。
+**基准侧指标（B11 定稿 2026-10-30）**——`rb` = bench 的相邻差比收益，`nb` = len(rb)：
+
+```
+基准波动   benchVol = sd(rb) × √244 × 100      # 与 annVol 同算法（总体标准差、全序列）；
+                                              # 原型 data.js 的 RMS 变体废除，两处实现统一到本式
+配对前缀        m = min(n, nb)                   # 长度不等时按前 m 对配对（与 winRate 的 zip 语义一致）
+协方差      cov = Σ_{i<m} (r[i]−mean_r') × (rb[i]−mean_rb') / m    # mean' 均取配对前缀 m 项
+Beta       beta = cov / var_rb'                 # var_rb' = Σ(rb[i]−mean_rb')²/m；sd_rb' ≤ 1e−9 → 0
+相关系数      corr = cov / (sd_r' × sd_rb')          # sd' 为配对前缀总体标准差；sd_r' 或 sd_rb' ≤ 1e−9 → 0
+区间超额     excess = cum − benchCum              # 算术差（百分点），展示层直接相减，不进 perf 输出
+```
+
+- **ε 守卫（1e−9，复用 `THRESHOLD_EPS`）是口径的一部分，不是纯零判定**：常数收益序列在 f64 下带 ~1e−18 噪声（如 `[−0.02, 96.04/98−1]` 两个「相等」值差 1 ulp），纯零判定会放出 `beta ≈ 4×10¹⁴` 的天文数字；恒定基准/恒定净值无 beta 与相关系数可言，一律取 0。
+- 除零一律取 0（`ratio` 守卫语义），不产生 NaN/Inf；`bench` 为空序列时 `benchVol / beta / corr` 全为 0（前端「基准不可用」形态）。
+- 等长序列（生产常态：bench 与 nav 按快照日对齐）下 `m = n`，前缀均值/标准差与全序列一致。
+- 原型 `diagnosis.html` 夏普缺 ε 守卫的问题随定稿消除：生产实现只认本节的 `+1e−9` 原式（两侧 domain 已带）。
+
+实现：`data.js:161`（原型，冻结参照）。生产基准数据 = **sh000300 价格指数**日线点位归一到区间起点（P5-T2 dashboard/diagnosis）；§7 理想口径为沪深 300 **全收益**，价格指数未含分红的差异在前端图下与免责区如实标注，全收益数据源列后续增强。
 
 ## 8. 波动合成假设（再平衡清单的调整前后对比）
 
@@ -385,7 +406,7 @@ position/dims + `generated_at` + `data_version`），返回 `advice_id`；模型
 | `dilution.json` | `apply_trade` | §4 | `kind,side,qty,price,held,cost,cash,others_mv` → 摊薄成本 / 已实现 / 现金 / 调整后仓位与超限判定 |
 | `recalc.json` | `recalc` | §5 | `cash,holdings[]` → `per[]` 逐笔派生 + `agg` 组合汇总 |
 | `discipline.json` | `check` / `sell_to` | §6 | 纪律四条 `{value,threshold,pass}` / 降仓卖出数量 |
-| `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate` |
+| `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate,bench_vol,beta,corr`（B11 定稿后十字段） |
 | `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
 | `price_limit.json` | `limit_pct` / `limit_prices` / `validate_price` | §2 | `kind,code,st` → 涨跌幅比例（ETF/北交所 null）/ `kind,prev,pct` → 涨停与跌停价（整数单元 half-up）/ `price,limit_up,limit_down` → `{valid,reason}` |
 | `advice.json` | `score_advice` | §10 生产口径 | `kind,closes[],volumes[],price,held,weight,cash_reserve_pass` → `action,horizon,score,conf,dims[4]{k,s},target_lo/hi,stop,position{current,suggested,mode},stats`（观察文字 `dims[].t` 是展示层，fixture 不校验） |
@@ -399,7 +420,7 @@ position/dims + `generated_at` + `data_version`），返回 `advice_id`；模型
 4. **纪律压线**：恰好等于阈值算安全（见比对规则第 5 条）。
 5. **费用输出不舍入**：§3 公式结果保留原始精度（估算口径）；分位舍入是展示层与券商结算的事，领域库不做。
 
-### 已知缝隙（已记 `07-backlog.md`，fixture 暂不校验对应字段）
+### 已知缝隙（历史存档；两条均已定稿并入正文与 fixtures）
 
-- **B11**：基准侧风险指标口径未定——`benchVol`（RMS vs 标准差两处实现不一致）、`sharpe` ε 守卫缺失（diagnosis 页）、beta / 相关系数 / 超额收益未收入 §7。`perf.json` 因此只校验上表列出的 7 个字段。
-- **B12**：奇零股卖出——§1「可卖整数股」与原型「买卖一律整手拦截」冲突，`lot.json` 暂按原型行为编码（case `vq-sell-odd-lot`）。
+- **B11** ✅ 定稿（2026-10-30，§7「基准侧指标」）：`benchVol` 统一为总体标准差（RMS 变体废除）、`beta`/`corr` 按配对前缀 + `1e−9` ε 守卫（恒定序列的 f64 噪声不得放大成天文 beta）、`区间超额` = 算术差（展示层相减，不进 perf 输出）、`sharpe` ε 守卫两侧 domain 本已带（原型 diagnosis 页缺守卫随冻结作废）。`perf.json` 十字段全校验（新增 `pf-beta-corr` 锚点）。
+- **B12** ✅ 定稿（2026-10-30，§1 判定顺序 ①–⑤）：卖出 `qty == held` 清仓豁免整手校验（A 股奇零股须一次性卖出），部分卖出仍须整手倍数、买入恒整手。`lot.json` 的 `vq-sell-odd-lot` 翻为合法，另加部分奇零/留奇零/超持仓顺序/转债奇零四例。

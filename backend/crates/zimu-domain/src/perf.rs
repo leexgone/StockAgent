@@ -1,9 +1,11 @@
 //! 净值与风险指标（03 §7）：日收益取相邻差比；sd 为总体标准差（除以 n）；年化常数 244。
-//! bench_vol / beta / 相关系数不在本模块：未收入 03 §7 且原型两处实现不一致，口径待定稿（07-backlog B11）。
+//! B11 已定稿（2026-10-30）：bench_vol（全序列 sd，原型 RMS 变体废除）/ beta / corr
+//! （配对前缀 m 项；sd ≤ THRESHOLD_EPS 守卫——恒定序列在 f64 下带 ~1e-18 噪声，
+//! 纯零判定会放出天文 beta，见 perf.json pf-downtrend desc）。
 
 use serde::{Deserialize, Serialize};
 
-use crate::{SHARPE_EPS, TRADING_DAYS};
+use crate::{SHARPE_EPS, THRESHOLD_EPS, TRADING_DAYS};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PerfInput {
@@ -27,6 +29,12 @@ pub struct PerfMetrics {
     pub sharpe: f64,
     /// 跑赢基准的天数占比 %
     pub win_rate: f64,
+    /// 基准年化波动 % = sd(rb) × √244 × 100（与 ann_vol 同算法，B11 定稿）
+    pub bench_vol: f64,
+    /// cov / var_rb'（配对前缀 m 项；sd_rb' ≤ 1e−9 → 0）
+    pub beta: f64,
+    /// cov / (sd_r' × sd_rb')（任一 sd ≤ 1e−9 → 0）
+    pub corr: f64,
 }
 
 fn returns(series: &[f64]) -> Vec<f64> {
@@ -83,6 +91,44 @@ pub fn perf(inp: &PerfInput) -> PerfMetrics {
         .filter(|(a, b)| *a > *b)
         .count() as f64;
 
+    // B11：bench_vol = 基准全序列总体 sd × √244 × 100（与 ann_vol 同算法）
+    let bench_vol = if rb.is_empty() {
+        0.0
+    } else {
+        let nb = rb.len() as f64;
+        let mean_b = rb.iter().sum::<f64>() / nb;
+        let var_b = rb.iter().map(|x| (x - mean_b) * (x - mean_b)).sum::<f64>() / nb;
+        var_b.sqrt() * sqrt_days * 100.0
+    };
+
+    // B11：beta / corr 按配对前缀 m = min(n, nb)；均值/标准差取前缀 m 项（等长时 = 全样本）。
+    // ε 守卫是口径的一部分：恒定序列的 f64 噪声（~1e-18）不得放大成天文 beta（03 §7）。
+    let m = r.len().min(rb.len());
+    let (beta, corr) = if m == 0 {
+        (0.0, 0.0)
+    } else {
+        let mf = m as f64;
+        let (rp, rbp) = (&r[..m], &rb[..m]);
+        let mean_r = rp.iter().sum::<f64>() / mf;
+        let mean_rb = rbp.iter().sum::<f64>() / mf;
+        let cov = rp
+            .iter()
+            .zip(rbp.iter())
+            .map(|(a, b)| (a - mean_r) * (b - mean_rb))
+            .sum::<f64>()
+            / mf;
+        let var_rb = rbp.iter().map(|b| (b - mean_rb) * (b - mean_rb)).sum::<f64>() / mf;
+        let sd_r = (rp.iter().map(|a| (a - mean_r) * (a - mean_r)).sum::<f64>() / mf).sqrt();
+        let sd_rb = var_rb.sqrt();
+        let beta = if sd_rb > THRESHOLD_EPS { cov / var_rb } else { 0.0 };
+        let corr = if sd_r > THRESHOLD_EPS && sd_rb > THRESHOLD_EPS {
+            cov / (sd_r * sd_rb)
+        } else {
+            0.0
+        };
+        (beta, corr)
+    };
+
     PerfMetrics {
         cum: cum_pct(&inp.nav),
         bench_cum: cum_pct(&inp.bench),
@@ -91,6 +137,9 @@ pub fn perf(inp: &PerfInput) -> PerfMetrics {
         bench_mdd: max_drawdown_pct(&inp.bench),
         sharpe: (mean * TRADING_DAYS) / (sd * sqrt_days + SHARPE_EPS),
         win_rate: wins / n * 100.0,
+        bench_vol,
+        beta,
+        corr,
     }
 }
 
@@ -116,5 +165,28 @@ mod tests {
         });
         assert_eq!(m.cum, 0.0);
         assert_eq!(m.win_rate, 0.0);
+    }
+
+    #[test]
+    fn empty_bench_new_metrics_are_zero() {
+        // bench 为空（前端「基准不可用」形态）：bench_vol/beta/corr 全 0，无 NaN
+        let m = perf(&PerfInput {
+            nav: vec![100.0, 101.0, 102.0],
+            bench: vec![],
+        });
+        assert_eq!((m.bench_vol, m.beta, m.corr), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn constant_bench_eps_guard_kills_astronomic_beta() {
+        // B11 ε 守卫：rb = [−0.02, 96.04/98−1] 两值 f64 差 ~1 ulp（非纯零），
+        // 纯零判定会放出 beta ≈ 4×10^14；sd ≤ 1e-9 守卫必须归 0
+        let m = perf(&PerfInput {
+            nav: vec![100.0, 90.0, 85.0],
+            bench: vec![100.0, 98.0, 96.04],
+        });
+        assert_eq!(m.beta, 0.0);
+        assert_eq!(m.corr, 0.0);
+        assert!(m.bench_vol.abs() < 1e-5);
     }
 }

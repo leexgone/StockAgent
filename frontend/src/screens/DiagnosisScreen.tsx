@@ -25,11 +25,9 @@ import { useUi } from "../store/ui";
 
 /**
  * 组合诊断（diagnosis 屏，P5-T2 真实数据移植）—— 对照基准 design/diagnosis.html。
- * 纪律（ADR-0008 + B11）：KPI 与分区间表只用黄金向量测过的 perf 七字段
- * （cum/bench_cum/ann_vol/mdd/bench_mdd/sharpe/win_rate）+ 后端 agg 原值（hhi/sectors）；
- * **B11 未定稿项（beta / 相关系数 / 基准侧波动）一律不臆造**——原型那几格删掉，
- * 基准波动标「口径待定」。domain perf() 的 sharpe 已带 ε 守卫（顺带修掉 B11 记的
- * 原型 diagnosis sharpe 缺守卫）。再平衡清单的「调整前后波动」走 volSynth（03 §8
+ * 纪律（ADR-0008）：KPI 与分区间表只用黄金向量校验的 perf 字段（B11 定稿
+ * 2026-10-30 后含 bench_vol/beta/corr，恒定基准 ε 守卫 → 0）+ 后端 agg 原值
+ * （hhi/sectors），不在前端重算。再平衡清单的「调整前后波动」走 volSynth（03 §8
  * 黄金向量：ρ 同标的 1 / 同行业 0.62 / 跨行业 0.35，σᵢ = 各标的近 30 日真实日线收益
  * 标准差），降仓数量走 sellTo（03 §6）；数字全部取后端 recalc 原值，清单是客户端
  * 模板骨架。基准 = sh000300 价格指数归一（未含分红，非 §7「全收益」，B11 如实标注）。
@@ -225,13 +223,14 @@ export default function DiagnosisScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, agg, holdings, klineSeries]);
 
-  /* ---------- KPI（只用 perf 七字段 + agg 原值；B11 项不臆造） ---------- */
+  /* ---------- KPI（perf 全字段——B11 已定稿 2026-10-30，bench_vol/beta/corr 入 §7 + fixtures） ---------- */
   const kpiCells: [string, string, string, string][] = perfWin
     ? [
         ["区间收益", pct(perfWin.cum), `基准 ${pct(perfWin.bench_cum)}`, dirClass(perfWin.cum)],
         ["超额收益", pct(perfWin.cum - perfWin.bench_cum), perfWin.cum - perfWin.bench_cum >= 0 ? "跑赢基准（收益差）" : "跑输基准（收益差）", dirClass(perfWin.cum - perfWin.bench_cum)],
-        ["年化波动率", fixed(perfWin.ann_vol, 1) + "%", "基准波动口径待定（B11）", ""],
+        ["年化波动率", fixed(perfWin.ann_vol, 1) + "%", `基准 ${fixed(perfWin.bench_vol, 1)}%`, perfWin.ann_vol > perfWin.bench_vol ? "danger" : "ok"],
         ["最大回撤", fixed(perfWin.mdd, 1) + "%", `基准 ${fixed(perfWin.bench_mdd, 1)}%`, perfWin.mdd < perfWin.bench_mdd ? "danger" : "ok"],
+        ["与基准相关系数", fixed(perfWin.corr, 2), `Beta ${fixed(perfWin.beta, 2)}`, ""],
         ["夏普比率", fixed(perfWin.sharpe, 2), "样本内 · 无风险利率按 0", ""],
         ["日度跑赢频率", fixed(perfWin.win_rate, 0) + "%", `${Math.max(0, navWin.length - 1)} 个交易日`, ""],
       ]
@@ -320,7 +319,7 @@ export default function DiagnosisScreen() {
             </div>
           ))
         ) : (
-          ["区间收益", "超额收益", "年化波动率", "最大回撤", "夏普比率", "日度跑赢频率"].map((k, i) => (
+          ["区间收益", "超额收益", "年化波动率", "最大回撤", "与基准相关系数", "夏普比率", "日度跑赢频率"].map((k, i) => (
             <div data-od-id={`kpi-empty-${i}`} key={k}>
               <div className="k">{k}</div>
               <div className="v">—</div>
@@ -511,7 +510,7 @@ export default function DiagnosisScreen() {
                 <table className="tbl" id="wtable">
                   <thead>
                     <tr>
-                      <th className="txt">区间</th><th>组合</th><th>沪深300</th><th>超额</th><th>最大回撤</th>
+                      <th className="txt">区间</th><th>组合</th><th>沪深300</th><th>超额</th><th>最大回撤</th><th>相关系数</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -523,10 +522,11 @@ export default function DiagnosisScreen() {
                           <td className={`num ${r.p && r.hasBench ? dirClass(r.p.bench_cum) : ""}`}>{r.p && r.hasBench ? pct(r.p.bench_cum) : "—"}</td>
                           <td className={`num ${r.p && r.hasBench ? dirClass(r.p.cum - r.p.bench_cum) : ""}`}>{r.p && r.hasBench ? pct(r.p.cum - r.p.bench_cum) : "—"}</td>
                           <td className="num down">{r.p ? fixed(r.p.mdd, 1) : "—"}%</td>
+                          <td className="num">{r.p && r.hasBench ? fixed(r.p.corr, 2) : "—"}</td>
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={5}><div className="empty">暂无可对比的区间样本</div></td></tr>
+                      <tr><td colSpan={6}><div className="empty">暂无可对比的区间样本</div></td></tr>
                     )}
                   </tbody>
                 </table>
@@ -539,8 +539,8 @@ export default function DiagnosisScreen() {
       <div className="footnote" data-od-id="diag-disclaimer">
         <span style={{ color: "var(--muted)" }}>i</span>
         <span>
-          区间收益/波动/回撤/夏普/胜率由 <code>perf</code>（黄金向量校验）算出；再平衡「调整前后波动」按 <code>volSynth</code>（03 §8：各标的近 30 日真实日线收益标准差 + 相关系数假设 0.35/0.62）合成，为<b>样本内测算</b>、非绝对风险预测。
-          基准为沪深 300 <b>价格指数</b>点位归一（未含分红，非 §7「全收益」；beta / 相关系数 / 基准侧波动口径待定，B11，本页不展示）。回测不预示未来表现，本页<b>不构成投资建议</b>。
+          区间收益/波动/回撤/夏普/胜率/beta/相关系数由 <code>perf</code>（黄金向量校验）算出；再平衡「调整前后波动」按 <code>volSynth</code>（03 §8：各标的近 30 日真实日线收益标准差 + 相关系数假设 0.35/0.62）合成，为<b>样本内测算</b>、非绝对风险预测。
+          基准为沪深 300 <b>价格指数</b>点位归一（未含分红，非 §7「全收益」理想口径，图下如实标注）；基准侧指标按 §7 B11 定稿口径（恒定基准 ε 守卫 → 0）。回测不预示未来表现，本页<b>不构成投资建议</b>。
         </span>
       </div>
     </main>

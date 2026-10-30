@@ -40,7 +40,7 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 | `frontend/` | React + TS + Vite 前端：index 工作台 + dashboard 总览仪表盘 + holdings 持仓管理 + analysis AI 分析建议（P5-T2 真实数据接线，mock 层已删；dashboard 含手写 SVG 图表 `components/charts/*`——折线/迷你走势/环形/蜡烛/得分弧，kline 与 watchlist store，自选增删维护入口 = B13 前端半边；holdings 含加减仓抽屉 `TradeDrawer`——实时试算走 `src/domain` 纯函数、提交 `POST /api/holdings/trade` 以后端收据覆盖 = P4-T1 收口，trades store；analysis 读 `/api/advice` 留档原值 + 真实 kline 蜡烛，绝不伪造建议、无留档走诚实空态；chat 智能问答功能对等——真实 Agent SSE 线程 `ChatPanel` + 上下文/边界/最近会话三卡；diagnosis 组合诊断——`perf` 七字段 + `volSynth` 再平衡测算，B11 未定稿项不臆造）+ 占位屏（P5-T2 逐屏替换，余 wechat gate C4）；`src/domain/` 为 TS 领域共享层（镜像 `zimu-domain`），`src/api/schema.d.ts` 为 OpenAPI 契约生成的类型面（P4-T5），设计令牌在 `src/styles/tokens.css`；P5-T1 工程约定落地（ADR-0008）——react-router 路由表 `src/routes.ts`（未移植屏 = 占位屏）+ openapi-fetch 客户端 `src/api/client.ts` + zustand 状态基线 |
 | `datafetch/` | Python 行情 sidecar（uv + FastAPI + akshare/baostock）：P4-T3 正式化——`/quote` `/kline` `/cb_list` `/calendar` + 兜底链/熔断/限频/缓存/错误契约，主源故障降级不崩；由 `backend/crates/zimu-market` 唯一消费（P4-T4 已接线） |
 | `design/` | 界面原型（**P5-T3 已冻结 2026-10-30**：设计参照与像素/交互验收基准，生产实现在 `frontend/`，原型只保留不再新增功能）——7 个页面 + 共享样式/数据/图表层，说明见 `design/README.md` |
-| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（10 组 103 用例，含 advice 打分与 alerts 预警组），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
+| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（10 组 108 用例，含 advice 打分与 alerts 预警组；B11/B12 定稿随 2026-10-30 扩 5 例），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
 | `fixtures/api/` | API 响应样例（P4-T5）：每端点一份提交样例，契约测试对其过 OpenAPI schema 校验；前端移植可直接当 mock |
 | `docs/` | 产品规格与工程规范：范围、界面、业务口径、数据契约、设计系统、路线图、待办；`docs/api/openapi.json` 为机器可读 API 契约（由代码生成，见 `04` 附录 C） |
 | `docs/decisions/` | 决策记录（ADR）—— 每个「为什么这样做」都留档 |

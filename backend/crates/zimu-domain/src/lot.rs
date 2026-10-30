@@ -59,9 +59,8 @@ pub struct ValidateQtyInput {
     pub held: i64,
 }
 
-/// 数量校验（原型 `holdings.html:342`）：先整手倍数、后卖出不得超持仓。
-/// `qty == 0` 视为「未填写」返回 valid（提交闸门另行要求 qty > 0，与原型 `qty &&` 短路一致）；
-/// 负数按非法输入拒绝。奇零股卖出与 §1「可卖整数股」的冲突待 B12 定稿。
+/// 数量校验（03 §1，B12 定稿 2026-10-30）：判定顺序 ①负数拒绝 ②零 = 未填写合法
+/// ③卖出且 qty == held 清仓豁免（A 股奇零股须一次性卖出）④整手倍数 ⑤卖出不得超持仓。
 pub fn validate_qty(kind: Kind, side: Side, qty: i64, held: i64) -> QtyVerdict {
     let invalid = |reason| QtyVerdict {
         valid: false,
@@ -71,6 +70,13 @@ pub fn validate_qty(kind: Kind, side: Side, qty: i64, held: i64) -> QtyVerdict {
         return invalid(QtyReason::NotLotMultiple);
     }
     if qty == 0 {
+        return QtyVerdict {
+            valid: true,
+            reason: None,
+        };
+    }
+    // 奇零股清仓豁免：全部卖出（qty == held）不受整手约束，部分卖出仍须整手倍数
+    if side == Side::Sell && qty == held {
         return QtyVerdict {
             valid: true,
             reason: None,
@@ -131,5 +137,17 @@ mod tests {
     fn zero_qty_is_unfilled_not_invalid() {
         let v = validate_qty(Kind::Stock, Side::Buy, 0, 0);
         assert!(v.valid && v.reason.is_none());
+    }
+
+    #[test]
+    fn odd_lot_full_sell_is_exempt() {
+        // B12 定稿：奇零股一次性清仓豁免整手；部分奇零卖出仍拒
+        let v = validate_qty(Kind::Stock, Side::Sell, 150, 150);
+        assert!(v.valid && v.reason.is_none());
+        let v = validate_qty(Kind::Stock, Side::Sell, 50, 150);
+        assert!(!v.valid && v.reason == Some(QtyReason::NotLotMultiple));
+        // 买入无豁免
+        let v = validate_qty(Kind::Stock, Side::Buy, 150, 0);
+        assert!(!v.valid && v.reason == Some(QtyReason::NotLotMultiple));
     }
 }

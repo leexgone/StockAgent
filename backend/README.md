@@ -339,7 +339,7 @@ P4-T6 起 CLI 与 server 是**同一份工具面与 Skill**（`zimu-agent::tools
 `fixtures/golden/*.json` 键一一对应。测试即验收：
 
 ```powershell
-cargo test -p zimu-domain   # 26 个单测 + 黄金向量 runner（10 组 103 用例；pending 组自动跳过，现全部 active）
+cargo test -p zimu-domain   # 29 个单测 + 黄金向量 runner（10 组 108 用例；pending 组自动跳过，现全部 active）
 ```
 
 改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层
@@ -384,7 +384,7 @@ crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill
                             └─ tests/            tools.rs 10 项（黄金向量端到端/留档/降级/Skill 完整性）· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
-                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 103 用例）
+                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 108 用例）
 crates/zimu-store/          存储层（P4-T1/T2/T7 + B13）：SQLite 七表（v2 增 watchlist）+ user_version 迁移 + 录入事务 + 行情回写（apply_quotes）+ 建议留档（insert/finalize/list_advice，P4-T6）+ 预警/快照/推送日志（insert_alert/alert_exists_on 去重/mark_alert_done、upsert_equity_snapshot 幂等/from_agg、insert_push_log，P4-T7）+ 自选 CRUD（add/remove/watchlist，upsert 幂等）
                             └─ tests/store.rs      28 项集成测试（含重启不丢数据、COALESCE 回写、留档数字不可经文案回填改写、预警同日去重与归档、快照 upsert 幂等、watchlist upsert/校验、v1→v2 迁移）
 crates/zimu-market/         行情适配器（P4-T4）：sidecar 唯一消费入口
