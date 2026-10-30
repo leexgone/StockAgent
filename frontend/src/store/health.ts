@@ -1,6 +1,6 @@
 /**
  * 服务健康 store（P5-T2）：GET /api/health——agent_online 驱动 index 问答卡
- * 统计行；chat 屏正式移植时（T2 后段）替换 ChatView 里的局部 fetch。
+ * 统计行与 chat 屏的 Agent 在线状态（已接线，ChatView 局部 fetch 已删）。
  */
 
 import { create } from "zustand";

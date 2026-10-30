@@ -1,5 +1,6 @@
-/* 会话面板（P2-T3 spike 级样式；P5 chat 屏按 design/chat.html 重做）
-   按钮/卡片等通用类走 ui.css（P2-T4 起）；本文件只留会话专属样式 + 末尾的 spike 小件 */
+/* 会话面板与 chat 屏样式（P2-T3 起，P5-T2 随 chat 屏功能对等收敛）
+   按钮/卡片等通用类走 ui.css；本文件只留会话专属样式（线程/工具条目 + chat 屏
+   布局 chat-layout 与右栏小件）+ 末尾的 spike 小件 */
 
 .chat {
   display: grid;

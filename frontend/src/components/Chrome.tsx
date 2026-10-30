@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { clockView, marketClock } from "../lib/clock";
 import { dirClass, fixed, fmt, money } from "../lib/format";
 import { NAV, WECHAT_NAV, routeFor } from "../routes";
@@ -7,6 +7,7 @@ import { pending, useAlerts } from "../store/alerts";
 import { INDEX_SYMBOLS, useMarket } from "../store/market";
 import { usePortfolio } from "../store/portfolio";
 import { useUi } from "../store/ui";
+import { useWatchlist } from "../store/watchlist";
 import { ICONS, IconBell, IconFilter, IconRefresh, IconSearch, IconSpark } from "./Icons";
 
 /**
@@ -18,7 +19,9 @@ import { ICONS, IconBell, IconFilter, IconRefresh, IconSearch, IconSpark } from 
  *   总资产/今日盈亏 = 组合 store 的 recalc 汇总（后端唯一真值）。
  * - 铃铛 = toast 汇总待处理预警（原型同款）；刷新按钮触发 onRefresh（App 接线
  *   POST /api/market/refresh + 指数/时钟/预警重拉）。
- * 未移植：全局搜索回车、数字键/⌘K 快捷键（T2 后段）。
+ * - 全局导航（docs/02 表，P5-T2 收尾补齐）：搜索回车命中持仓/自选 → /analysis?code=，
+ *   否则 → /chat?q=（规格查持仓+自选，比原型只查持仓更完整）；数字键 1–6 切页
+ *   （输入框内不拦截）；⌘K / Ctrl+K 聚焦搜索。
  */
 
 interface ChromeProps {
@@ -29,6 +32,9 @@ interface ChromeProps {
 
 export default function Chrome({ now, onRefresh, children }: ChromeProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   const status = useMarket((s) => s.status);
   const quotes = useMarket((s) => s.quotes);
@@ -39,6 +45,46 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
   const agg = view?.agg;
   const account = view?.account;
   const close = () => setSidebarOpen(false);
+
+  // 全局搜索需要自选池（命中「持仓/自选」跳分析，docs/02）——外壳兜底拉一次，
+  // 用户直接落在任何屏都能搜；已在其它屏加载过则跳过（loaded 标记）
+  useEffect(() => {
+    if (!useWatchlist.getState().loaded) void useWatchlist.getState().load();
+  }, []);
+
+  // 快捷键（原型 bindChrome 同款）：⌘K/Ctrl+K 聚焦搜索；数字 1–6 切页（输入框内不拦截）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      // 原型只守卫 INPUT/TEXTAREA；补 SELECT——加减仓抽屉里操作下拉时数字键不应切页
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      const k = parseInt(e.key, 10);
+      if (k >= 1 && k <= 6) navigate(k <= 5 ? NAV[k - 1].path : WECHAT_NAV.path);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navigate]);
+
+  /** 搜索回车：命中持仓/自选（代码全等或名称包含）→ 分析页；否则带着问题去问答 */
+  const onSearchEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const q = searchQuery.trim();
+    if (!q) return;
+    const held = usePortfolio.getState().view?.holdings ?? [];
+    const watch = useWatchlist.getState().rows;
+    const hit =
+      held.find((h) => h.code === q || h.name.includes(q)) ??
+      watch.find((w) => w.code === q || w.name.includes(q));
+    setSearchQuery("");
+    searchRef.current?.blur();
+    if (hit) navigate(`/analysis?code=${hit.code}`);
+    else navigate(`/chat?q=${encodeURIComponent(q)}`);
+  };
 
   const bellToast = () => {
     const pend = pending(useAlerts.getState());
@@ -117,7 +163,15 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
             </span>
             <label className="search">
               <IconSearch />
-              <input id="global-search" placeholder="搜代码 / 名称 / 问一句" autoComplete="off" />
+              <input
+                id="global-search"
+                ref={searchRef}
+                placeholder="搜代码 / 名称 / 问一句"
+                autoComplete="off"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={onSearchEnter}
+              />
               <span className="kbd">⌘K</span>
             </label>
             <div className="mkt" id="mkt-clock" title={quotesError ?? undefined}>

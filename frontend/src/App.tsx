@@ -99,7 +99,18 @@ export default function App() {
             <Route
               key={r.path}
               path={r.path}
-              element={<PlaceholderScreen path={r.path} crumb={r.crumb} />}
+              element={
+                r.path === "/wechat" ? (
+                  <PlaceholderScreen
+                    path={r.path}
+                    crumb={r.crumb}
+                    eyebrow="决策闸门 C4 · 微信渠道待拍板"
+                    note="微信渠道方案待拍板（docs/07 C4：① 能否双向会话 ② 是否需公网入站；QQ 侧 robit-qq 出站网关现成、不受此困）。拍板后本屏按 PushProvider 配置管理落地；密钥类字段（AppID/Token/Webhook）届时仅存本机浏览器、永不入库。定时任务留痕已可在「智能问答」的最近会话卡查看。"
+                  />
+                ) : (
+                  <PlaceholderScreen path={r.path} crumb={r.crumb} />
+                )
+              }
             />
           ))}
           <Route path="*" element={<Navigate to="/" replace />} />

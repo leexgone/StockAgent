@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * 子木会话面板 —— P2-T3 SSE 链路验证（docs/06-roadmap.md）。
- *
- * 这是 spike 级 UI：验证「POST /api/chat → Agent → SSE 流式回推」在浏览器里
- * 端到端成立，不是 P5 的 chat 屏（正式形态届时按 design/chat.html 重做）。
+ * 子木会话面板 —— 真实 Agent SSE 线程（P2-T3 验证链路；P5-T2 起即 chat 屏的
+ * 会话线程本体，布局与右栏上下文/边界/会话三卡见 screens/ChatView.tsx）。
+ * 流式回答 + 工具调用/结果 + 确认请求 + skill 触发如实展示——「依据来源」就是
+ * Agent 实调的行情/持仓工具，不伪造引用。会话可持久化（persistKey，docs/02）。
  * 事件形状与后端 SseEvent 对齐（backend/crates/zimu-server/src/agent_bridge.rs）。
  */
 
