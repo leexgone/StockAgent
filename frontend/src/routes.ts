@@ -17,7 +17,7 @@ export const SCREEN_ROUTES: ScreenRoute[] = [
   { path: "/", crumb: "工作台", ported: true },
   { path: "/dashboard", crumb: "总览仪表盘", ported: true },
   { path: "/holdings", crumb: "持仓管理", ported: true },
-  { path: "/analysis", crumb: "AI 分析建议", ported: false },
+  { path: "/analysis", crumb: "AI 分析建议", ported: true },
   { path: "/chat", crumb: "智能问答", ported: true },
   { path: "/diagnosis", crumb: "组合诊断", ported: false },
   { path: "/wechat", crumb: "微信助理接入", ported: false },

@@ -6,6 +6,7 @@ import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/chat.css";
 import "./styles/holdings.css";
+import "./styles/analysis.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
