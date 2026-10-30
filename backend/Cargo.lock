@@ -2072,7 +2072,8 @@ dependencies = [
 [[package]]
 name = "robit-agent"
 version = "0.1.26"
-source = "git+file:///E:/Github/robit?tag=v0.1.26#36b014951ab558b3bd054f4054d8eb47f4bfd312"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae9317fe5184d01604c2ada312e7dc43f3a1bda5463a1891cf5ffed334643757"
 dependencies = [
  "async-openai",
  "async-trait",
@@ -2101,7 +2102,8 @@ dependencies = [
 [[package]]
 name = "robit-ai"
 version = "0.1.26"
-source = "git+file:///E:/Github/robit?tag=v0.1.26#36b014951ab558b3bd054f4054d8eb47f4bfd312"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faf73d52dbe282026ac51b5a41f734e1ddb72aeebfbd4636bb04814b3bec267a"
 dependencies = [
  "async-openai",
  "dirs",
@@ -2118,7 +2120,8 @@ dependencies = [
 [[package]]
 name = "robit-web"
 version = "0.1.26"
-source = "git+file:///E:/Github/robit?tag=v0.1.26#36b014951ab558b3bd054f4054d8eb47f4bfd312"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92754d126be006ff27fd9d6dd69f74fc42d5d4d720d96d92f790848fe711c901"
 dependencies = [
  "async-trait",
  "robit-agent",

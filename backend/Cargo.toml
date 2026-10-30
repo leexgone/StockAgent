@@ -6,14 +6,14 @@ resolver = "2"
 version = "0.0.1"
 edition = "2021"
 
-# 共同演进（P2-T5 演练，见 docs/06-roadmap.md）：robit 全家 pin 到 v0.1.26 tag
-# （robit-web 随该版首发；升级 pin 前先想 robit 那边的节奏，约定见 CLAUDE.md）。
-# tag 尚未推送远端/crates.io，暂以 file:// 指向本地 robit 仓库完成回路验证；
-# 正式发布后换回 crates.io 写法：robit-ai = "0.1.26" 等。
+# 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版
+# （v0.1.26 于 2026-10-30 发布，robit-web 随该版首发；git pin → registry 的切换
+# 即 R1 尾巴的收口）。升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；
+# 开发期可临时改回 git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = { git = "file:///E:/Github/robit", tag = "v0.1.26" }
-robit-agent = { git = "file:///E:/Github/robit", tag = "v0.1.26" }
-robit-web = { git = "file:///E:/Github/robit", tag = "v0.1.26" }
+robit-ai = "0.1.26"
+robit-agent = "0.1.26"
+robit-web = "0.1.26"
 tokio = { version = "1.53", features = [
     "rt-multi-thread",
     "macros",
