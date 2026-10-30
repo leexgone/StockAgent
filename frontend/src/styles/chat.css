@@ -140,3 +140,19 @@ code {
 .dot-ok  { background: var(--ok); }
 .dot-bad { background: var(--danger); }
 .dot-wait{ background: var(--warn); }
+
+/* ---------- chat 屏布局（P5-T2，迁移自 design/chat.html <style> 的相关小件） ----------
+   线程列（ChatPanel）+ 右栏 rail（上下文 / 边界 / 最近会话）。 */
+.chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 16px; align-items: start; }
+
+/* 上下文卡：标签 + 右对齐等宽值（.rail 作用域，避免与全局 .row 冲突） */
+.rail .ctx-row { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.rail .ctx-row:last-child { border-bottom: 0; }
+.rail .ctx-row .v { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+
+/* 建议问题 chips（预填输入，不自动发送） */
+.suggest { display: flex; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
+.suggest button { flex: none; font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px dashed var(--border-2); background: transparent; color: var(--muted); transition: color .14s, border-color .14s; }
+.suggest button:hover { color: var(--fg); border-color: var(--accent-line); }
+
+@media (max-width: 1100px) { .chat-layout { grid-template-columns: minmax(0, 1fr); } }

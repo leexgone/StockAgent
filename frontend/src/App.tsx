@@ -91,7 +91,7 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardScreen now={now} />} />
           <Route path="/holdings" element={<HoldingsScreen />} />
           <Route path="/analysis" element={<AnalysisScreen />} />
-          <Route path="/chat" element={<ChatView />} />
+          <Route path="/chat" element={<ChatView now={now} />} />
           {SCREEN_ROUTES.filter((r) => !r.ported).map((r) => (
             <Route
               key={r.path}

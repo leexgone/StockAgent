@@ -42,13 +42,69 @@ function briefArgs(raw: string): string {
   }
 }
 
-export default function ChatPanel({ agentOnline }: { agentOnline: boolean }) {
-  const [entries, setEntries] = useState<Entry[]>([]);
+export interface ChatPanelProps {
+  agentOnline: boolean;
+  /** 预填输入框（suggest chips / ?q= 深链）；nonce 变化即写入并聚焦，不自动发送 */
+  prefill?: { text: string; nonce: number };
+  /** 递增即清空会话（含 localStorage）；0/undefined = 不触发 */
+  clearNonce?: number;
+  /** 设置则把会话持久化到 localStorage[key]（上限 30 条，docs/02 chat 约定） */
+  persistKey?: string;
+}
+
+/** 从 localStorage 读回历史（坏数据 → 空）；流式未完成段归一为 done */
+function loadPersisted(key: string): Entry[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as Entry[];
+    return arr.map((e) => (e.kind === "assistant" ? { ...e, done: true } : e));
+  } catch {
+    return [];
+  }
+}
+
+export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey }: ChatPanelProps) {
+  const [entries, setEntries] = useState<Entry[]>(() => (persistKey ? loadPersisted(persistKey) : []));
   const [conn, setConn] = useState<Conn>("connecting");
   const [pending, setPending] = useState<Pending>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 持久化（上限 30 条）
+  useEffect(() => {
+    if (!persistKey) return;
+    try {
+      localStorage.setItem(persistKey, JSON.stringify(entries.slice(-30)));
+    } catch {
+      /* 隐私模式/配额满：静默，不影响会话 */
+    }
+  }, [entries, persistKey]);
+
+  // 预填（chips / 深链）：写输入框并聚焦，交由用户确认后发送
+  useEffect(() => {
+    if (prefill && prefill.nonce > 0) {
+      setInput(prefill.text);
+      inputRef.current?.focus();
+    }
+  }, [prefill]);
+
+  // 清空会话
+  useEffect(() => {
+    if (clearNonce && clearNonce > 0) {
+      setEntries([]);
+      setPending(null);
+      if (persistKey) {
+        try {
+          localStorage.removeItem(persistKey);
+        } catch {
+          /* 忽略 */
+        }
+      }
+    }
+  }, [clearNonce, persistKey]);
 
   useEffect(() => {
     if (!agentOnline) return;
@@ -118,7 +174,7 @@ export default function ChatPanel({ agentOnline }: { agentOnline: boolean }) {
     <section className="card chat" data-od-id="home-chat">
       <h2 className="chat-title">
         子木会话
-        <span className="chat-sub">P2-T3 · SSE 链路验证</span>
+        <span className="chat-sub">实时 Agent · 流式回答 · 工具调用可见</span>
         <span className="row chat-conn">
           <span
             className={`dot ${conn === "open" ? "dot-ok" : conn === "error" ? "dot-bad" : "dot-wait"}`}
@@ -165,6 +221,7 @@ export default function ChatPanel({ agentOnline }: { agentOnline: boolean }) {
           <form className="chat-input-row" onSubmit={send} data-od-id="home-chat-input">
             <input
               type="text"
+              ref={inputRef}
               value={input}
               placeholder={busy ? "等待本轮回复…" : "对子木说点什么…"}
               onChange={(e) => setInput(e.target.value)}
