@@ -38,8 +38,12 @@ pub use advice::{CalcAdviceTool, FinalizeAdviceTool};
 pub use market::{GetQuoteTool, MarketStatusTool, RefreshQuotesTool};
 pub use portfolio::{CalcDisciplineTool, GetHoldingsTool, SimulateTradeTool};
 
-/// 存储调用早退助手：anyhow 错误 → `ToolResult::error`（execute 里不能直接 `?`——
-/// `AgentError` 是 robit 的类型，本 crate 不该为它实现 From，孤儿规则也不允许）
+/// 存储调用早退助手：anyhow 错误 → 脱敏 `ToolResult::error`。
+/// R5 决策记录（robit 0.1.27 起已有 `AgentError::External(#[from] anyhow::Error)`
+/// 与 `From<anyhow::Error> for ToolResult`，子木仍走本宏）：官方 From 会把整条
+/// anyhow cause 链（可能含 SQL 原文/路径）喂给模型；子木的存储错误策略是
+/// **细节进 tracing 日志、模型只见固定话术**——正是 robit R5 文档认可的第二种
+/// 推荐形态（sanitize what the model sees），见 docs/07-backlog.md R5。
 macro_rules! store_try {
     ($e:expr) => {
         match $e {

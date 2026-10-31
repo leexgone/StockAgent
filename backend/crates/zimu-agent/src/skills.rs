@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 
-use robit_agent::skill::{load_skills, SkillLoadError};
+use robit_agent::skill::{load_skills_from_dirs, SkillLoadError};
 use robit_agent::Skill;
 
 /// Skill 模板目录（`ZIMU_SKILLS_DIR` 覆盖；默认仓库根 `skills/`）
@@ -22,9 +22,11 @@ pub fn skills_dir() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../skills"))
 }
 
-/// 加载全部子木 Skill（项目目录单源，不叠 `~/.robit/skills` 全局目录——
-/// 产品模板以仓库为准，个人全局模板不进服务）。错误非致命：坏的 SKILL.md
-/// 逐条上报，其余照常加载。
+/// 加载全部子木 Skill。robit 0.1.27 起走官方「额外技能目录」入口
+/// `load_skills_from_dirs`（R4：目录清单语义，技能随仓库版本化的宿主不再
+/// 借道 `load_skills(global, project)` 双目录约定）——单源传入仓库 `skills/`，
+/// 不叠 `~/.robit/skills` 全局目录（产品模板以仓库为准，个人全局模板不进服务）。
+/// 错误非致命：坏的 SKILL.md 逐条上报，其余照常加载。
 pub fn load_zimu_skills() -> (Vec<Skill>, Vec<SkillLoadError>) {
-    load_skills(None, Some(skills_dir()))
+    load_skills_from_dirs(std::slice::from_ref(&skills_dir()))
 }

@@ -67,7 +67,9 @@ use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer as _;
 
 #[derive(Clone)]
 struct AppState {
@@ -211,39 +213,28 @@ async fn main() -> anyhow::Result<()> {
     let working_dir =
         std::fs::canonicalize(std::env::current_dir().context("无法读取当前工作目录")?)?;
 
-    // 日志二选一：robit 的 init_logging 会独占全局 subscriber（宿主无法叠加自己的
-    // fmt 层——R 系列痛点，见 docs/07-backlog.md）。有 robit 配置就交给它
-    //（附带 <cwd>/.robit/logs 文件日志），没有则回落服务自己的 tracing_subscriber。
+    // 日志（robit 0.1.27 起走 R3 可组合原语，单一初始化路径）：宿主 fmt 层 +
+    // robit 文件日志层（log_file 未启用/打开失败返回 None，Option 自身实现 Layer
+    // 可直接 with）+ build_log_filter 声明宿主 workspace crate 清单——zimu_agent
+    // （调度器/工具）与 zimu_market（适配器）不再靠 additional_directives 手拼
+    // "{crate}={level}" 字符串放行（旧 R3 痛点：不显式放行就被静默吞掉）。
+    // 无 robit 配置（load_config Err）时 app_config = None：filter 退 info 默认、
+    // 文件层为 None——服务照常起，不再需要「二选一」分支。
     // 配置加载与 Agent 启动拆开（P4-T6）：store/market 先于 Agent 装配——
     // 领域工具与 HTTP API 共用同一份句柄，spawn_agent 需要它们。
     let robit_config = robit_ai::load_config(None);
-    match &robit_config {
-        Ok(config) => {
-            // robit 的过滤器只放行 target_crate（zimu_server）与 robit 系 crate，
-            // 其余 target 落在默认底线（error）——宿主 workspace 其他 crate
-            // （zimu_agent 调度器/工具、zimu_market 适配器）的日志要作为附加
-            // directive 显式放行，级别跟随配置的 log_level
-            let level = config
-                .app
-                .as_ref()
-                .and_then(|a| a.log_level.clone())
-                .unwrap_or_else(|| "info".to_string());
-            let agent_dir = format!("zimu_agent={level}");
-            let market_dir = format!("zimu_market={level}");
-            robit_ai::init_logging(
-                config.app.as_ref(),
-                "zimu_server",
-                &working_dir,
-                &["tower_http=debug", &agent_dir, &market_dir],
-            )
-        }
-        Err(_) => tracing_subscriber::fmt()
-            .with_env_filter(
-                EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "info,tower_http=debug".into()),
-            )
-            .init(),
-    }
+    let app_config = robit_config.as_ref().ok().and_then(|c| c.app.as_ref());
+    let filter = robit_ai::build_log_filter(
+        app_config,
+        &["zimu_server", "zimu_agent", "zimu_market"],
+        &["tower_http=debug"],
+    );
+    let file_layer = robit_ai::log_file_layer(app_config, &working_dir, filter.clone());
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .with(file_layer)
+        .init();
+    robit_ai::install_panic_hook();
 
     let static_dir = resolve_static_dir();
     if !static_dir.join("index.html").exists() {

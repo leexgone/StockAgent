@@ -24,8 +24,11 @@ use robit_agent::{
     resolve_memory_settings, Agent, AgentEvent, Frontend, FrontendMessage, SkillRegistry,
     ToolCallInfo,
 };
-use robit_ai::{init_logging, load_config, LlmClient};
+use robit_ai::{build_log_filter, install_panic_hook, load_config, log_file_layer, LlmClient};
 use serde_json::Value;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer as _;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use zimu_agent::skills::load_zimu_skills;
@@ -44,7 +47,20 @@ fn main() -> anyhow::Result<()> {
 
     let config = load_config(None)
         .context("加载 robit 配置失败：需要 <cwd>/.robit/config.toml 或 ~/.robit/config.toml")?;
-    init_logging(config.app.as_ref(), "zimu_agent", &working_dir, &[]);
+    // robit 0.1.27 R3 可组合原语（与 zimu-server 同款单一初始化路径）。
+    // host_targets 顺带修正旧写法：原来只传 "zimu_agent"，CLI 自身 crate
+    // （zimu_agent_cli）的日志反而没被放行。
+    let filter = build_log_filter(
+        config.app.as_ref(),
+        &["zimu_agent_cli", "zimu_agent", "zimu_market"],
+        &[],
+    );
+    let file_layer = log_file_layer(config.app.as_ref(), &working_dir, filter.clone());
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .with(file_layer)
+        .init();
+    install_panic_hook();
 
     let auto_approve = config
         .app

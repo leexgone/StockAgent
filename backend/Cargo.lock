@@ -2071,10 +2071,11 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae9317fe5184d01604c2ada312e7dc43f3a1bda5463a1891cf5ffed334643757"
+checksum = "3cc161253ca6af5aaeb2f30e38c76941a1a2ac9696497295c634b3f05776715e"
 dependencies = [
+ "anyhow",
  "async-openai",
  "async-trait",
  "base64 0.23.1",
@@ -2101,9 +2102,9 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faf73d52dbe282026ac51b5a41f734e1ddb72aeebfbd4636bb04814b3bec267a"
+checksum = "71080daa71443a7032d882791e173cab5507e8c1360aacb3f43ef9972df9b15c"
 dependencies = [
  "async-openai",
  "dirs",
@@ -2119,9 +2120,9 @@ dependencies = [
 
 [[package]]
 name = "robit-web"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92754d126be006ff27fd9d6dd69f74fc42d5d4d720d96d92f790848fe711c901"
+checksum = "8f061c1729b3ecd2889086024adef68d56344747da23329167d771816d8fd0b1"
 dependencies = [
  "async-trait",
  "robit-agent",
@@ -3461,6 +3462,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "zimu-agent",
  "zimu-market",
  "zimu-store",

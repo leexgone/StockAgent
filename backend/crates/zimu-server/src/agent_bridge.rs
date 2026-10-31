@@ -80,7 +80,12 @@ pub fn spawn_agent(
         .unwrap_or(false);
 
     // 领域工具面（zimu-agent 公共 crate；不走 robit bootstrap()——通用工具
-    // read/bash 等一律不注册，子木的工具面就是领域面）
+    // read/bash 等一律不注册，子木的工具面就是领域面）。
+    // R2 决策记录（robit 0.1.27 起 bootstrap_with 已可组合，子木仍手搓）：
+    // bootstrap_with 的系统工具（read/load_skill/search_history/query_task）
+    // 始终注册、不受白名单控制——server 工作目录可能存在 .env（密钥），把 read
+    // 暴露给 LLM 是安全面，故工具面维持纯领域装配（见 docs/07-backlog.md R2）。
+    // Skill 触发不依赖 load_skill 工具（触发词命中由 robit-agent 内部注入正文）。
     let deps = AgentDeps::new(store, market);
     let registry = build_registry(deps);
     let mut tool_names: Vec<String> = registry.tool_names().iter().map(|s| s.to_string()).collect();

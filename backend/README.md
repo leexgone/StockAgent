@@ -303,14 +303,18 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.1.26`（含首发的 `robit-web`）——P2-T5 共同演进
-回路的正式形态：robit `feat/web-bridge` 已合并推送 `main`、tag `v0.1.26` 已推送、
-crates.io 已发布（2026-10-30），`backend/Cargo.toml` 随之从 git pin（演练期
-`file://` 指向本地仓库）切换为 registry 写法（`robit-ai = "0.1.26"` 等），
-`cargo build` + 全量测试在 registry 源下全绿（Cargo.lock source =
-`registry+crates.io-index`）。后续升级版本前先对齐 robit 发布节奏（约定见
-CLAUDE.md）；开发期可临时改回 `git = "https://github.com/leexgone/robit", tag/rev = …`
-消费未发布改动。
+robit 全家消费 crates.io 正式版 `0.1.27`（2026-10-31，共同演进回路第二轮：子木
+R2–R5 宿主形态需求 → robit `feat/host-ergonomics-r2-r5` 落地发布）。子木切换情况：
+**R3 日志可组合原语已消费**——`build_log_filter(host_targets)` + `log_file_layer` +
+`install_panic_hook`，server/cli 单一初始化路径（删「有无 robit 配置」二选一分支，
+宿主 workspace 全 crate 日志可见，CLI 顺带修正自身 crate 未被放行的旧 bug）；
+**R4 额外技能目录已消费**——`load_zimu_skills` 内部切 `load_skills_from_dirs`；
+**R2/R5 有意不消费**（`bootstrap_with` 的系统工具含 `read`——server 工作目录可能
+有 `.env`，工具面维持纯领域装配；存储错误维持脱敏话术不用 cause 链直传——决策
+记录见 `docs/07-backlog.md` R 系列与代码注释）。第一轮回路（R1/robit-web，
+v0.1.26，2026-10-30）：git pin → registry 切换收口。后续升级版本前先对齐 robit
+发布节奏（约定见 CLAUDE.md）；开发期可临时改回
+`git = "https://github.com/leexgone/robit", tag/rev = …` 消费未发布改动。
 
 前置：`~/.robit/config.toml` 已配置 OpenAI 兼容 provider（本机为阿里云网关
 DashScope compatible-mode 的 qwen），api_key 可写 `${ENV_VAR}` 并从
@@ -367,7 +371,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.26 正式版，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.27 正式版，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

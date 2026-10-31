@@ -6,14 +6,18 @@ resolver = "2"
 version = "0.0.1"
 edition = "2021"
 
-# 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版
-# （v0.1.26 于 2026-10-30 发布，robit-web 随该版首发；git pin → registry 的切换
-# 即 R1 尾巴的收口）。升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；
-# 开发期可临时改回 git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
+# 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.1.27（2026-10-31）= 子木 R2–R5 消费反馈的宿主形态适配版：bootstrap_with 组合
+# 装配 / build_log_filter+log_file_layer 日志可组合原语 / load_skills_from_dirs
+# 额外技能目录 / anyhow 互操作。子木实际切换 R3+R4；R2（系统工具 read 强制注册，
+# server 工作目录含 .env 的安全面）与 R5（存储错误要脱敏话术，不用 cause 链直传）
+# 有意保持现形态，决策记录见 docs/07-backlog.md R 系列。
+# 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
+# git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.1.26"
-robit-agent = "0.1.26"
-robit-web = "0.1.26"
+robit-ai = "0.1.27"
+robit-agent = "0.1.27"
+robit-web = "0.1.27"
 tokio = { version = "1.53", features = [
     "rt-multi-thread",
     "macros",
