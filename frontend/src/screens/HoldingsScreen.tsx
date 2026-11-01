@@ -103,10 +103,12 @@ export default function HoldingsScreen() {
     return [...held, ...watch];
   }, [view, watchRows, watchQuotes]);
 
-  /* ---------- 深链开抽屉（?add=1 / ?code=&side=&qty=），候选就绪后消费一次 ---------- */
+  /* ---------- 深链开抽屉（?add=1 / ?code=&side=&qty=），组合快照就绪后消费一次 ---------- */
   const deepLinked = useRef(false);
   useEffect(() => {
-    if (deepLinked.current || candidates.length === 0) return;
+    // B15：闸门从「候选池非空」改为「组合快照已加载」——空白账户（持仓+自选皆空）
+    // 此前会静默不开抽屉；现在池空也开，code=null 落到抽屉的新标的手工输入兜底。
+    if (deepLinked.current || !view) return;
     const code = params.get("code");
     const add = params.get("add");
     if (code && candidates.some((c) => c.code === code)) {
@@ -115,12 +117,13 @@ export default function HoldingsScreen() {
       setDrawer({ open: true, code, side: params.get("side") === "sell" ? "sell" : "buy", qty: q ? parseInt(q, 10) : null });
     } else if (add) {
       deepLinked.current = true;
-      setDrawer({ open: true, code: candidates[0].code, side: "buy", qty: null });
+      setDrawer({ open: true, code: candidates[0]?.code ?? null, side: "buy", qty: null });
     }
-  }, [candidates, params]);
+  }, [view, candidates, params]);
 
   const closeDrawer = () => {
     setDrawer((d) => ({ ...d, open: false }));
+    deepLinked.current = false; // 允许空态引导 CTA 再次点开（否则第二次 ?add=1 被 ref 挡掉）
     // 清掉深链参数，避免刷新重开
     if (params.get("add") || params.get("code")) {
       const next = new URLSearchParams(params);
@@ -128,7 +131,7 @@ export default function HoldingsScreen() {
       setParams(next, { replace: true });
     }
   };
-  const openTrade = (code: string, side: Side) => setDrawer({ open: true, code, side, qty: null });
+  const openTrade = (code: string | null, side: Side) => setDrawer({ open: true, code, side, qty: null });
 
   /* ---------- 表格排序 / 筛选 ---------- */
   const rows = useMemo(() => {
@@ -234,7 +237,7 @@ export default function HoldingsScreen() {
         ? "正在读取组合与行情…"
         : "尚未连接后端。"
     : isEmpty
-      ? "账户里还没有持仓。点右上角「录入第一笔」手工逐笔加仓：填数量与价格，整手、涨跌停与摊薄成本即时校验和试算。"
+      ? "账户里还没有持仓。先在汇总条「可用现金 · 调整」设入实际资金，再点右上角「录入第一笔」：标的可从自选挑，也可在抽屉里手工输入新标的；整手、涨跌停与摊薄成本即时校验和试算。"
       : agg && per.length
         ? `组合里最大的一只占总资产 ${fixed(maxWeight, 1)}%，前三大合计 ${fixed(agg.top3_sector, 1)}%（行业口径）。点「加减仓」试算一笔委托，摊薄成本与占比会即时重算。`
         : "正在读取组合快照…";
@@ -267,11 +270,8 @@ export default function HoldingsScreen() {
           <button className="btn" id="export-btn" onClick={exportCsv}>导出明细</button>
           <button
             className="btn btn-primary" id="trade-btn"
-            onClick={() => {
-              const first = holdings.length ? holdings[0].code : candidates[0]?.code;
-              if (first) openTrade(first, "buy");
-              else toast("没有可用候选标的 · 先在自选里添加，或等后端持仓加载");
-            }}
+            // B15：候选池为空不再是死路——code=null 时抽屉落到「新标的（手工输入）」
+            onClick={() => openTrade(holdings[0]?.code ?? candidates[0]?.code ?? null, "buy")}
           >
             {isEmpty ? "＋ 录入第一笔" : "＋ 记一笔加减仓"}
           </button>
@@ -422,7 +422,7 @@ export default function HoldingsScreen() {
                       <EmptyHero
                         od="h-table-empty"
                         title="还没有持仓"
-                        desc="录入第一笔后，市值、成本、涨跌与仓位占比立刻现算。候选标的可先从自选里挑（在总览仪表盘的自选卡添加）。"
+                        desc="录入第一笔后，市值、成本、涨跌与仓位占比立刻现算。标的可从自选挑（总览仪表盘的自选卡添加），也可直接在录入抽屉里手工输入新标的。"
                       />
                     </td>
                   </tr>

@@ -13,7 +13,7 @@ import {
   type TradeOutcome,
 } from "../domain";
 import { dirClass, fixed, fmt, money, pct } from "../lib/format";
-import { KIND_LABEL } from "../lib/kind";
+import { KIND_LABEL, symbolOf } from "../lib/kind";
 import type { RecordReceipt, TradeRequest } from "../store/portfolio";
 import { usePortfolio } from "../store/portfolio";
 
@@ -54,6 +54,12 @@ export interface Candidate {
 
 const UNIT: Record<Kind, string> = { stock: "股", etf: "份", cb: "张" };
 
+/** 候选下拉的「新标的（手工输入）」哨兵值——6 位数字代码不可能与之相撞 */
+const NEW_CODE = "__new__";
+
+/** 新标的手工表单初值（字段口径 = 仪表盘自选卡表单，B7：mkt 显式不猜） */
+const EMPTY_MANUAL = { code: "", name: "", mkt: "SH", kind: "stock" as Kind, sector: "", limitPct: "" };
+
 interface Props {
   open: boolean;
   candidates: Candidate[];
@@ -86,15 +92,32 @@ export default function TradeDrawer({
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // 新标的手工输入（B15：空白账户候选池为空的兜底路径）
+  const [manual, setManual] = useState(EMPTY_MANUAL);
 
-  const cur = candidates.find((c) => c.code === code) ?? null;
+  /** 手工表单合法 → 合成未持有候选（price/prev 无行情 → 价格手填、跳过区间拦截，后端仍是裁判） */
+  const manualCandidate = useMemo<Candidate | null>(() => {
+    if (code !== NEW_CODE) return null;
+    const c = manual.code.trim();
+    const n = manual.name.trim();
+    if (!symbolOf(manual.mkt, c) || !n) return null;
+    const lp = manual.limitPct.trim() === "" ? NaN : Number(manual.limitPct);
+    return {
+      code: c, name: n, kind: manual.kind, mkt: manual.mkt, sector: manual.sector.trim(),
+      shares: 0, cost: 0, mv: 0, weight: 0,
+      limit_pct: Number.isFinite(lp) && lp > 0 ? lp : null,
+      price: null, prev: null, held: false,
+    };
+  }, [code, manual]);
 
-  // 打开时按 initialCode 预选（无则第一个候选），重置全部输入
+  const cur = code === NEW_CODE ? manualCandidate : (candidates.find((c) => c.code === code) ?? null);
+
+  // 打开时按 initialCode 预选（无则第一个候选；候选池为空 → 落到新标的手工输入），重置全部输入
   useEffect(() => {
     if (!open) return;
     const first = initialCode && candidates.some((c) => c.code === initialCode)
       ? initialCode
-      : (candidates[0]?.code ?? "");
+      : (candidates[0]?.code ?? NEW_CODE);
     setCode(first);
     setSide(initialSide);
     setQtyStr(initialQty != null ? String(initialQty) : "");
@@ -102,6 +125,7 @@ export default function TradeDrawer({
     setConfirmed(false);
     setSubmitError(null);
     setSubmitting(false);
+    setManual(EMPTY_MANUAL);
     const c = candidates.find((x) => x.code === first);
     setPriceStr(c?.price != null ? fixed(c.price, priceDecimals(c.kind)) : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -249,14 +273,59 @@ export default function TradeDrawer({
                   {c.name} {c.code} · {c.held ? KIND_LABEL[c.kind] : "自选未持有"}
                 </option>
               ))}
+              <option value={NEW_CODE}>＋ 新标的（手工输入）</option>
             </select>
-            <div className="hint" id="code-hint">
-              {cur
-                ? held > 0
-                  ? `当前持有 ${fmt(held, 0)} ${unit} · 成本 ${fmt(cost, dec)} · 现价 ${cur.price != null ? fmt(cur.price, dec) : "—"}`
-                  : "尚未持有，买入后将新建持仓。"
-                : "—"}
-            </div>
+            {code === NEW_CODE ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 92px", gap: 10, marginTop: 10 }} id="manual-form">
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label htmlFor="m-code">代码（6 位数字）</label>
+                    <input className="input num" id="m-code" inputMode="numeric" placeholder="例如 600519" maxLength={6}
+                      value={manual.code} onChange={(e) => setManual((m) => ({ ...m, code: e.target.value.replace(/\D/g, "").slice(0, 6) }))} />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label htmlFor="m-mkt">市场</label>
+                    <select className="select" id="m-mkt" value={manual.mkt} onChange={(e) => setManual((m) => ({ ...m, mkt: e.target.value }))}>
+                      {["SH", "SZ", "BJ"].map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div className="field" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+                    <label htmlFor="m-name">名称</label>
+                    <input className="input" id="m-name" placeholder="例如 贵州茅台"
+                      value={manual.name} onChange={(e) => setManual((m) => ({ ...m, name: e.target.value }))} />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label htmlFor="m-kind">类型</label>
+                    <select className="select" id="m-kind" value={manual.kind} onChange={(e) => setManual((m) => ({ ...m, kind: e.target.value as Kind }))}>
+                      {(Object.keys(KIND_LABEL) as Kind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+                    </select>
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label htmlFor="m-limit">涨跌停 %（可选）</label>
+                    <input className="input num" id="m-limit" inputMode="decimal" placeholder="留空按 §2 推断"
+                      value={manual.limitPct} onChange={(e) => setManual((m) => ({ ...m, limitPct: e.target.value }))} />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+                    <label htmlFor="m-sector">行业（可选，纪律集中度用）</label>
+                    <input className="input" id="m-sector" placeholder="例如 白酒"
+                      value={manual.sector} onChange={(e) => setManual((m) => ({ ...m, sector: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="hint" id="code-hint">
+                  {manualCandidate
+                    ? "新标的：买入后将新建持仓。无行情参考价——委托价格请手填；未填昨收则跳过涨跌停拦截（后端仍是最终裁判）。"
+                    : "填写 6 位代码与名称后即可录入数量与价格（市场/类型必选，涨跌停 % 留空按 03 §2 推断）。"}
+                </div>
+              </>
+            ) : (
+              <div className="hint" id="code-hint">
+                {cur
+                  ? held > 0
+                    ? `当前持有 ${fmt(held, 0)} ${unit} · 成本 ${fmt(cost, dec)} · 现价 ${cur.price != null ? fmt(cur.price, dec) : "—"}`
+                    : "尚未持有，买入后将新建持仓。"
+                  : "—"}
+              </div>
+            )}
           </div>
 
           <div className={`field${errQty ? " invalid" : ""}`} id="f-qty">
@@ -366,6 +435,12 @@ export default function TradeDrawer({
               </div>
             )}
           </div>
+
+          {outcome?.insufficient_cash && side === "buy" && (
+            <div className="hint" id="cash-hint" style={{ marginTop: 10, color: "var(--warn)" }}>
+              可用现金不足——新账户先在持仓页汇总条「可用现金 · 调整」设入实际资金，再录入第一笔。
+            </div>
+          )}
 
           {submitError && (
             <div className="err" style={{ display: "block", marginTop: 12 }}>提交被拒：{submitError}</div>
