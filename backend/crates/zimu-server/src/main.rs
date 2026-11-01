@@ -30,6 +30,9 @@
 //! 集成测试用同一函数拉起 API 面。
 //!
 //! 启动（在 `backend/` 下）：`cargo run -p zimu-server`
+//! 停止：**Ctrl+C 优雅关闭**——中止调度器 → 翻 watch 通知断开全部 SSE 长连接
+//! → axum 等在途请求完成 → 退出（SQLite 连接与 Agent 会话随进程释放；
+//! SSE 流永不自然结束，不主动断开的话 graceful shutdown 会一直等它）。
 //! 数据库位置：`ZIMU_DB_PATH` 覆盖；默认 `<cwd>/zimu.db`（*.db 已在 .gitignore，永不入库）。
 //! 行情 sidecar：`ZIMU_MARKET_URL` 覆盖（默认 http://127.0.0.1:8300），
 //! `ZIMU_MARKET_TIMEOUT_MS` 覆盖超时（默认 10000）；sidecar 不在也能启动。
@@ -46,6 +49,7 @@ mod agent_bridge;
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 
 use agent_bridge::{spawn_agent, AgentBridge};
 use anyhow::Context;
@@ -61,8 +65,10 @@ use axum::routing::{get, post};
 use axum::{extract::State, Json, Router};
 use serde::Serialize;
 use serde_json::json;
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::{BroadcastStream, WatchStream};
+use tokio_stream::{Stream, StreamExt};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
@@ -78,6 +84,8 @@ struct AppState {
     agent: Option<Arc<AgentBridge>>,
     /// 行情 sidecar 基地址（health 诊断透出；在线状态看 /api/market/status）
     market_url: String,
+    /// 优雅关闭通知：Ctrl+C 后翻 true，SSE 长连接随之终止（见 shutdown_signal）
+    shutdown_rx: watch::Receiver<bool>,
     // 持仓存储（P4-T1）与行情路由（P4-T4）不从这里走：api_router 用独立状态 merge 进来
 }
 
@@ -114,16 +122,44 @@ async fn chat_stream(State(state): State<AppState>) -> Result<Response, StatusCo
         "skills": agent.skills,
     });
     let rx = agent.web.subscribe();
-    let stream = tokio_stream::iter(vec![sse_json(&hello)]).chain(BroadcastStream::new(rx).map(
+    let events = tokio_stream::iter(vec![sse_json(&hello)]).chain(BroadcastStream::new(rx).map(
         |res| match res {
             Ok(event) => sse_json(&event),
             // 消费端太慢丢帧：告知前端而不是断流
             Err(lagged) => Ok(Event::default().comment(format!("stream lagged: {lagged}"))),
         },
     ));
+    // 优雅关闭时终止长连接：axum 的 graceful shutdown 会等在途响应全部完成，
+    // 而 broadcast 流永不自然结束——Ctrl+C 后 watch 翻 true，信号流让响应收尾。
+    let stream = TakeUntilSignal {
+        inner: events,
+        signal: WatchStream::from_changes(state.shutdown_rx.clone()),
+    };
     Ok(Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response())
+}
+
+/// 带终止信号的流适配器：等价 futures-util 的 `take_until_other`
+///（tokio-stream 的 StreamExt 没有该组合子；不为一个组合子引入 futures-util 直接依赖）。
+/// 信号流产出任意一项即终止输出；两条流都要求 Unpin（tokio-stream 适配器均满足）。
+struct TakeUntilSignal<S, U> {
+    inner: S,
+    signal: U,
+}
+
+impl<S: Stream + Unpin, U: Stream + Unpin> Stream for TakeUntilSignal<S, U> {
+    type Item = S::Item;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if std::pin::Pin::new(&mut self.signal).poll_next(cx).is_ready() {
+            return Poll::Ready(None); // 关闭信号已到：SSE 响应就此收尾
+        }
+        std::pin::Pin::new(&mut self.inner).poll_next(cx)
+    }
 }
 
 fn sse_json(event: &impl Serialize) -> Result<Event, Infallible> {
@@ -204,6 +240,25 @@ fn resolve_static_dir() -> PathBuf {
         }
     }
     out
+}
+
+/// Ctrl+C 优雅关闭序列：先中止调度器（停止盘中轮询/盘后链的后台写入），
+/// 再翻 watch 断开全部 SSE 长连接，让 axum 等在途请求完成后退出。
+/// 注意：信号已被 tokio 接管，连按第二次 Ctrl+C 不会强杀进程——等排空即可；
+/// 真卡死就用系统手段（任务管理器 / `taskkill`）。
+async fn shutdown_signal(scheduler: Option<JoinHandle<()>>, sse: watch::Sender<bool>) {
+    if let Err(e) = tokio::signal::ctrl_c().await {
+        // 监听失败（极罕见）：服务继续运行，但 Ctrl+C 已被 tokio 接管、无人响应，
+        // 如实报错并挂起，避免误触发关闭。
+        tracing::error!("Ctrl+C 信号监听失败：{e}——优雅关闭不可用，需系统手段停止进程");
+        std::future::pending::<()>().await;
+    }
+    tracing::info!("收到 Ctrl+C：停止调度器、断开 SSE 长连接、等待在途请求完成…");
+    if let Some(h) = scheduler {
+        h.abort();
+    }
+    // 无接收者（从未有 SSE 客户端连过）时 send 返回 Err，属正常情况
+    let _ = sse.send(true);
 }
 
 #[tokio::main]
@@ -291,28 +346,37 @@ async fn main() -> anyhow::Result<()> {
     // agent 会话，push_log 留痕）。复盘回调接 WebBridge；agent 离线传 None——
     // 快照照写，push_log 如实记未触发。ZIMU_SCHEDULER_DISABLE=1 整体停用
     // （开发/测试用；手动 refresh 与 agent 工具不受影响）。
-    if std::env::var("ZIMU_SCHEDULER_DISABLE").is_err() {
-        use std::future::Future;
-        use std::pin::Pin;
-        use zimu_agent::scheduler::{ReviewTrigger, POLL_INTERVAL};
+    // 调度器句柄留给 shutdown_signal：Ctrl+C 时 abort（后台任务先停，再排空 HTTP）
+    let scheduler_handle: Option<JoinHandle<()>> =
+        if std::env::var("ZIMU_SCHEDULER_DISABLE").is_err() {
+            use std::future::Future;
+            use std::pin::Pin;
+            use zimu_agent::scheduler::{ReviewTrigger, POLL_INTERVAL};
 
-        let review: Option<ReviewTrigger> = agent.as_ref().map(|bridge| {
-            let bridge = bridge.clone();
-            Arc::new(move |text: String| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+            let review: Option<ReviewTrigger> = agent.as_ref().map(|bridge| {
                 let bridge = bridge.clone();
-                Box::pin(async move { bridge.web.send_user_text(text).await.is_ok() })
-            }) as ReviewTrigger
-        });
-        let core = zimu_agent::scheduler::SchedulerCore::new(
-            // 独立 AgentDeps（自己的 CalendarCache）：调度与工具面/HTTP 侧解耦，
-            // 多一个 1h TTL 缓存实例无害（与 agent_bridge 同款取舍）
-            zimu_agent::AgentDeps::new(store.clone(), market_client.clone()),
-            review,
-        );
-        tokio::spawn(zimu_agent::scheduler::run(core, POLL_INTERVAL));
-    } else {
-        tracing::warn!("ZIMU_SCHEDULER_DISABLE 已设：预警调度器停用（03 §12 调度口径）");
-    }
+                Arc::new(move |text: String| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                    let bridge = bridge.clone();
+                    Box::pin(async move { bridge.web.send_user_text(text).await.is_ok() })
+                }) as ReviewTrigger
+            });
+            let core = zimu_agent::scheduler::SchedulerCore::new(
+                // 独立 AgentDeps（自己的 CalendarCache）：调度与工具面/HTTP 侧解耦，
+                // 多一个 1h TTL 缓存实例无害（与 agent_bridge 同款取舍）
+                zimu_agent::AgentDeps::new(store.clone(), market_client.clone()),
+                review,
+            );
+            Some(tokio::spawn(zimu_agent::scheduler::run(
+                core,
+                POLL_INTERVAL,
+            )))
+        } else {
+            tracing::warn!("ZIMU_SCHEDULER_DISABLE 已设：预警调度器停用（03 §12 调度口径）");
+            None
+        };
+
+    // SSE 优雅关闭通道：Ctrl+C 后 shutdown_signal 翻 true，chat_stream 的 take_until 收尾
+    let (sse_shutdown_tx, sse_shutdown_rx) = watch::channel(false);
 
     let app = Router::new()
         .route("/api/health", get(health))
@@ -324,6 +388,7 @@ async fn main() -> anyhow::Result<()> {
             static_dir: static_dir.clone(),
             agent,
             market_url,
+            shutdown_rx: sse_shutdown_rx,
         })
         // 业务路由（持仓 P4-T1 + 行情 P4-T4）在库目标装配，各自带独立状态
         .merge(api_router(store, market))
@@ -345,7 +410,15 @@ async fn main() -> anyhow::Result<()> {
         static_dir.display()
     );
 
-    axum::serve(listener, app).await.context("服务异常退出")?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(scheduler_handle, sse_shutdown_tx))
+        .await
+        .context("服务异常退出")?;
+
+    // serve 返回 = 监听已关、在途请求已排空、SSE 已断开；AppState 随 Router 释放
+    // → WebBridge drop → Agent 消息通道关闭、运行循环自然退出；SQLite 连接随
+    // Arc 释放关闭。运行时退出会中止残余任务，这里无需逐个点名。
+    tracing::info!("子木服务已停止，再见");
     Ok(())
 }
 

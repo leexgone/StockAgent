@@ -37,6 +37,9 @@ cd ..\frontend; npm run dev            # 前端 :5173，/api 已反代到 :8080
 浏览器访问 `http://127.0.0.1:5173`（开发）或 `http://127.0.0.1:8080`（生产形态）。
 workspace 里有多个 bin，`cargo run` 必须带 `-p` 指明。
 
+停止服务：控制台按 **Ctrl+C** 即优雅关闭——先中止预警调度器，再断开全部 SSE
+长连接，等在途请求完成后退出（数据库连接与 Agent 会话随进程释放）。
+
 ## 会话端点（P2-T3 SSE 桥）
 
 Agent 随服务启动装配（与 zimu-agent-cli 同一链路，`CliFrontend` 换成 robit-web
