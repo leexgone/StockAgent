@@ -286,7 +286,9 @@ export default function TradeDrawer({
                   <div className="field" style={{ marginBottom: 0 }}>
                     <label htmlFor="m-mkt">市场</label>
                     <select className="select" id="m-mkt" value={manual.mkt} onChange={(e) => setManual((m) => ({ ...m, mkt: e.target.value }))}>
-                      {["SH", "SZ", "BJ"].map((m) => <option key={m} value={m}>{m}</option>)}
+                      {/* 全系统市场码口径 = SH/SZ（DB CHECK + 后端 meta 校验）；北交所不在当前范围 */}
+                      <option value="SH">SH · 沪</option>
+                      <option value="SZ">SZ · 深</option>
                     </select>
                   </div>
                   <div className="field" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>

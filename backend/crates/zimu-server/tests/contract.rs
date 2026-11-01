@@ -154,6 +154,12 @@ async fn post(http: &reqwest::Client, base: &str, path: &str, body: Value) -> (u
     (status, r.json::<Value>().await.unwrap())
 }
 
+async fn put(http: &reqwest::Client, base: &str, path: &str, body: Value) -> (u16, Value) {
+    let r = http.put(format!("{base}{path}")).json(&body).send().await.unwrap();
+    let status = r.status().as_u16();
+    (status, r.json::<Value>().await.unwrap())
+}
+
 async fn delete(http: &reqwest::Client, base: &str, path: &str) -> (u16, Value) {
     let r = http.delete(format!("{base}{path}")).send().await.unwrap();
     let status = r.status().as_u16();
@@ -422,6 +428,82 @@ async fn live_responses_and_samples_pass_schema() {
         &base,
         "/api/watchlist",
         json!({"code": "000001", "name": "测试", "mkt": "BJ", "kind": "stock"}),
+    )
+    .await;
+    assert_eq!(s, 400);
+    assert_eq!(b["error"], json!("bad_input"));
+
+    // ---- 持仓直接维护面（ADR-0009 / 03 §13：快照校正）----
+    // upsert 新建：奇零股 150（lot 校验只约束委托路径）；响应 = 维护后组合全景
+    let (s, b) = put(
+        &http,
+        &base,
+        "/api/holdings/601899",
+        json!({"name": "紫金矿业", "mkt": "SH", "kind": "stock", "sector": "有色金属",
+               "shares": 150, "cost": 17.35, "limit_pct": 10, "note": "初始化映射（券商存量）"}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let row = b["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["code"] == "601899")
+        .expect("601899 已写入持仓");
+    assert_eq!(row["shares"], json!(150));
+    check(&doc, "holding_upsert", "put", "/api/holdings/{code}", 200, &b);
+
+    // 校正：改数量/成本（limit_pct 缺省 = 保留原值；不动现金/trades 的断言在 zimu-store 单测）
+    let (s, b) = put(
+        &http,
+        &base,
+        "/api/holdings/601899",
+        json!({"name": "紫金矿业", "mkt": "SH", "kind": "stock", "sector": "有色金属",
+               "shares": 300, "cost": 16.8}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let row = b["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["code"] == "601899")
+        .unwrap();
+    assert_eq!(row["shares"], json!(300));
+    assert_eq!(row["limit_pct"], json!(10), "limit_pct 缺省保留原值");
+
+    // 维护留痕：create + update 两条，最新在前
+    let (s, b) = get(&http, &base, "/api/holding_edits?limit=50").await;
+    assert_eq!(s, 200);
+    assert_eq!(b.as_array().unwrap().len(), 2);
+    assert_eq!(b[0]["op"], json!("update"));
+    assert_eq!(b[0]["before"]["shares"], json!(150));
+    assert_eq!(b[0]["after"]["shares"], json!(300));
+    assert_eq!(b[1]["op"], json!("create"));
+    assert!(b[1]["before"].is_null());
+    check(&doc, "holding_edits", "get", "/api/holding_edits", 200, &b);
+
+    // 删除：响应 = 删除后组合全景（trades 历史保留的断言在 zimu-store 单测）
+    let (s, b) = delete(&http, &base, "/api/holdings/601899").await;
+    assert_eq!(s, 200);
+    assert!(b["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|h| h["code"] != "601899"));
+    check(&doc, "holding_deleted", "delete", "/api/holdings/{code}", 200, &b);
+
+    // 404：删除不存在的持仓（与交易卖出同款错误码 no_holding）
+    let (s, b) = delete(&http, &base, "/api/holdings/999999").await;
+    assert_eq!(s, 404);
+    assert_eq!(b["error"], json!("no_holding"));
+
+    // 400：代码非 6 位数字
+    let (s, b) = put(
+        &http,
+        &base,
+        "/api/holdings/60051",
+        json!({"name": "测试", "mkt": "SH", "kind": "stock", "shares": 100, "cost": 10.0}),
     )
     .await;
     assert_eq!(s, 400);

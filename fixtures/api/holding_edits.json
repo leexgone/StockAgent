@@ -1,0 +1,49 @@
+[
+  {
+    "after": {
+      "code": "601899",
+      "cost": 16.8,
+      "kind": "stock",
+      "limit_pct": 10,
+      "mkt": "SH",
+      "name": "紫金矿业",
+      "sector": "有色金属",
+      "shares": 300
+    },
+    "before": {
+      "code": "601899",
+      "cost": 17.35,
+      "kind": "stock",
+      "limit_pct": 10,
+      "mkt": "SH",
+      "name": "紫金矿业",
+      "sector": "有色金属",
+      "shares": 150
+    },
+    "code": "601899",
+    "id": 2,
+    "name": "紫金矿业",
+    "note": "",
+    "op": "update",
+    "ts": "2026-11-01 23:42"
+  },
+  {
+    "after": {
+      "code": "601899",
+      "cost": 17.35,
+      "kind": "stock",
+      "limit_pct": 10,
+      "mkt": "SH",
+      "name": "紫金矿业",
+      "sector": "有色金属",
+      "shares": 150
+    },
+    "before": null,
+    "code": "601899",
+    "id": 1,
+    "name": "紫金矿业",
+    "note": "初始化映射（券商存量）",
+    "op": "create",
+    "ts": "2026-11-01 23:42"
+  }
+]

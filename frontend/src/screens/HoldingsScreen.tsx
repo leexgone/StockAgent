@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import EmptyHero from "../components/EmptyHero";
+import HoldingFormDrawer from "../components/HoldingFormDrawer";
 import { IconSearch, IconShield } from "../components/Icons";
 import TradeDrawer, { receiptToast, type Candidate } from "../components/TradeDrawer";
 import {
@@ -14,6 +15,7 @@ import {
 } from "../domain";
 import { dirClass, fixed, fmt, money, pct, wan } from "../lib/format";
 import { KIND_LABEL, symbolOf } from "../lib/kind";
+import { useHoldingEdits, type HoldingEditRow, type HoldingSnapshot } from "../store/holdingEdits";
 import { usePortfolio, type PortfolioView } from "../store/portfolio";
 import { useTrades } from "../store/trades";
 import { useUi } from "../store/ui";
@@ -39,6 +41,29 @@ const SORT_LABEL: Record<SortKey, string> = {
 
 const moneyShort = (v: number): string => (Math.abs(v) >= 10000 ? wan(v) : fmt(v, 0));
 
+/* ---------- 维护记录渲染助手（ADR-0009「维护记录」卡） ---------- */
+const OP_LABEL: Record<string, string> = { create: "新增", update: "调整", delete: "删除" };
+const OP_PILL: Record<string, string> = { create: "ok", update: "", delete: "danger" };
+
+const snapSummary = (s: HoldingSnapshot): string =>
+  `份额 ${fmt(s.shares, 0)} · 成本 ${fmt(s.cost, priceDecimals(s.kind))}`;
+
+/** 留痕行变化摘要：create/delete 显示快照值，update 逐差异字段列 before→after */
+const editSummary = (e: HoldingEditRow): string => {
+  if (e.op === "create") return e.after ? `${snapSummary(e.after)}（新建持仓）` : "—";
+  if (e.op === "delete") return e.before ? `${snapSummary(e.before)}（移除行，流水保留）` : "—";
+  const b = e.before, a = e.after;
+  if (!b || !a) return "—";
+  const parts: string[] = [];
+  if (b.shares !== a.shares) parts.push(`份额 ${fmt(b.shares, 0)}→${fmt(a.shares, 0)}`);
+  if (b.cost !== a.cost) parts.push(`成本 ${fmt(b.cost, priceDecimals(b.kind))}→${fmt(a.cost, priceDecimals(a.kind))}`);
+  if (b.name !== a.name) parts.push(`名称 ${b.name}→${a.name}`);
+  if (b.sector !== a.sector) parts.push(`行业 ${b.sector || "—"}→${a.sector || "—"}`);
+  if (b.kind !== a.kind) parts.push(`类型 ${KIND_LABEL[b.kind]}→${KIND_LABEL[a.kind]}`);
+  if ((b.limit_pct ?? null) !== (a.limit_pct ?? null)) parts.push(`涨跌停 % ${b.limit_pct ?? "—"}→${a.limit_pct ?? "—"}`);
+  return parts.length ? parts.join(" · ") : "元信息调整";
+};
+
 export default function HoldingsScreen() {
   const [params, setParams] = useSearchParams();
   const view = usePortfolio((s) => s.view);
@@ -48,6 +73,7 @@ export default function HoldingsScreen() {
   const tradesError = useTrades((s) => s.error);
   const watchRows = useWatchlist((s) => s.rows);
   const watchQuotes = useWatchlist((s) => s.quotes);
+  const edits = useHoldingEdits((s) => s.rows);
 
   const [sortKey, setSortKey] = useState<SortKey>("mv");
   const [sortDir, setSortDir] = useState(-1);
@@ -59,6 +85,9 @@ export default function HoldingsScreen() {
   const [drawer, setDrawer] = useState<{ open: boolean; code: string | null; side: Side; qty: number | null }>({
     open: false, code: null, side: "buy", qty: null,
   });
+  // 直接维护（ADR-0009）：表单抽屉（null = 新增）+ 行内两步删除确认
+  const [form, setForm] = useState<{ open: boolean; initial: HRow | null }>({ open: false, initial: null });
+  const [deletingCode, setDeletingCode] = useState<string | null>(null);
 
   const toast = (m: string) => useUi.getState().pushToast(m);
   const agg = view?.agg;
@@ -66,12 +95,25 @@ export default function HoldingsScreen() {
   const per = view?.per ?? [];
   const isEmpty = view !== null && holdings.length === 0;
 
-  /* ---------- 进屏拉流水 + 自选（候选池 & 新建持仓来源） ---------- */
+  /* ---------- 进屏拉流水 + 自选（候选池 & 新建持仓来源）+ 维护留痕 ---------- */
   useEffect(() => {
     void useTrades.getState().load();
+    void useHoldingEdits.getState().load();
     const st = useWatchlist.getState();
     void st.load().then(() => useWatchlist.getState().loadQuotes());
   }, []);
+
+  /* ---------- 直接维护动作（ADR-0009：保存/删除后重拉留痕，全景由 store 覆盖） ---------- */
+  const doDelete = async (code: string, name: string) => {
+    setDeletingCode(null);
+    const ok = await usePortfolio.getState().removeHolding(code);
+    toast(
+      ok
+        ? `已删除 ${name} ${code} · 流水保留、现金不动（快照校正）`
+        : (usePortfolio.getState().error ?? "删除失败"),
+    );
+    if (ok) void useHoldingEdits.getState().load();
+  };
 
   /* ---------- 候选池：持仓（held）+ 自选（未持有，买入即新建持仓） ---------- */
   const candidates = useMemo<Candidate[]>(() => {
@@ -268,6 +310,8 @@ export default function HoldingsScreen() {
         </div>
         <div className="page-actions">
           <button className="btn" id="export-btn" onClick={exportCsv}>导出明细</button>
+          {/* 直接维护入口（ADR-0009）：快照校正——初始化映射 / 纠错 / 场外变动 */}
+          <button className="btn" id="direct-entry-btn" onClick={() => setForm({ open: true, initial: null })}>直接录入</button>
           <button
             className="btn btn-primary" id="trade-btn"
             // B15：候选池为空不再是死路——code=null 时抽屉落到「新标的（手工输入）」
@@ -405,11 +449,22 @@ export default function HoldingsScreen() {
                           )}
                         </td>
                         <td>
-                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                            <button className="btn btn-sm" onClick={() => openTrade(h.code, "buy")}>加仓</button>
-                            <button className="btn btn-sm" onClick={() => openTrade(h.code, "sell")}>减仓</button>
-                            <Link className="btn btn-sm" to={`/analysis?code=${h.code}`}>分析</Link>
-                          </div>
+                          {deletingCode === h.code ? (
+                            // 两步确认（行内，不引入弹窗组件）：删除是快照校正，流水保留
+                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                              <button className="btn btn-sm" style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+                                onClick={() => void doDelete(h.code, h.name)}>确认删除</button>
+                              <button className="btn btn-sm" onClick={() => setDeletingCode(null)}>取消</button>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                              <button className="btn btn-sm" onClick={() => openTrade(h.code, "buy")}>加仓</button>
+                              <button className="btn btn-sm" onClick={() => openTrade(h.code, "sell")}>减仓</button>
+                              <button className="btn btn-sm" onClick={() => setForm({ open: true, initial: h })}>编辑</button>
+                              <button className="btn btn-sm" onClick={() => setDeletingCode(h.code)}>删除</button>
+                              <Link className="btn btn-sm" to={`/analysis?code=${h.code}`}>分析</Link>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -522,11 +577,38 @@ export default function HoldingsScreen() {
         </section>
       </div>
 
+      {/* 维护记录（ADR-0009）：直接维护留痕——交易录入走上方流水，两本账各自审计 */}
+      <section className="card" data-od-id="holding-edits-card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">维护记录</div>
+            <div className="card-sub">直接维护（快照校正）留痕：不生成流水、不动现金——初始化映射 / 纠错 / 场外变动（03 §13）</div>
+          </div>
+        </div>
+        <div className="card-body tight">
+          {edits.length ? (
+            edits.map((e) => (
+              <div data-od-id={`edit-row-${e.id}`} key={e.id}
+                style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span className="num" style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, color: "var(--muted)", flex: "none" }}>{e.ts}</span>
+                <span className={`pill ${OP_PILL[e.op] ?? ""}`} style={{ flex: "none" }}>{OP_LABEL[e.op] ?? e.op}</span>
+                <span style={{ flex: "none" }}><b>{e.name}</b> <span className="code">{e.code}</span></span>
+                <span className="num" style={{ color: "var(--fg-2)" }}>{editSummary(e)}</span>
+                {e.note && <span className="hint" style={{ margin: 0, marginLeft: "auto", flex: "none" }}>{e.note}</span>}
+              </div>
+            ))
+          ) : (
+            <div className="empty">暂无维护留痕 · 「直接录入」、行内「编辑 / 删除」会在这里留档；买卖录入走上方委托 / 成交流水</div>
+          )}
+        </div>
+      </section>
+
       <div className="footnote" data-od-id="h-disclaimer">
         <span style={{ color: "var(--muted)" }}>i</span>
         <span>
           费用按「佣金万 2.5（单笔最低 5 元）+ 卖出印花税 0.05% + 过户费 0.001%（沪深两市均收）」估算，可转债与 ETF 免印花税，实际以券商结算为准。
           试算数字与后端 <code>zimu-domain</code> 同源（黄金向量校验），但<b>试算 ≠ 下单</b>——程序不连接券商、不代下单，每笔委托仍需你本人确认。
+          直接维护（编辑 / 删除 / 直接录入）是<b>快照校正</b>：不生成流水、不动现金，删除后历史流水保留、累计已实现盈亏不回滚（ADR-0009）。
         </span>
       </div>
 
@@ -542,6 +624,17 @@ export default function HoldingsScreen() {
         onSubmitted={(receipt) => {
           toast(receiptToast(receipt));
           void useTrades.getState().load();
+        }}
+      />
+
+      {/* 直接维护表单（ADR-0009）：新增 = 页头「直接录入」，编辑 = 行内「编辑」 */}
+      <HoldingFormDrawer
+        open={form.open}
+        initial={form.initial}
+        onClose={() => setForm({ open: false, initial: null })}
+        onSaved={(msg) => {
+          toast(msg);
+          void useHoldingEdits.getState().load();
         }}
       />
     </main>

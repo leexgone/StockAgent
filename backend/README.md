@@ -187,6 +187,9 @@ cargo test -p zimu-agent --test scheduler   # 9 项（全离线，FakeApi + 注�
 |---|---|
 | `GET /api/holdings` | 组合全景：存储行 + `recalc()` 的逐笔派生（`per`）与汇总（`agg`）、账户现金 |
 | `POST /api/holdings/trade` | `{"code","side":"buy\|sell","qty","price","note","meta":{...}}` → 201 收据（trade 行 + 变动后持仓 + 试算预览 + warnings）；卖出与已有标的加仓可不带 `meta` |
+| `PUT /api/holdings/{code}` | **直接维护 upsert**（ADR-0009 / 03 §13 快照校正）：`{"name","mkt","kind","sector","shares","cost","limit_pct"?,"note"?}` → 200 维护后组合全景。整行覆盖、允许奇零股、跳过 lot/涨跌停（校正不是委托）；**不动现金、不写 trades**，留痕进 `holding_edits`；与现有行逐位一致 = 幂等 no-op；代码非 6 位/市场码非法/shares<1/cost<0 → 400 |
+| `DELETE /api/holdings/{code}` | **直接删除**：→ 200 删除后组合全景。trades 历史保留、累计已实现不回滚、现金不动；不存在 → 404 `no_holding` |
+| `GET /api/holding_edits?limit=N` | 维护留痕（最新在前，默认 50 上限 200）：op = create/update/delete + before/after 行快照 + note（「维护记录」卡数据源；交易录入不产生本表记录） |
 | `GET /api/trades?limit=N` | 委托/成交流水，最新在前（默认 50，上限 500） |
 | `POST /api/account` | 首次配置/调整账户：`{"cash":200000}` 即可（缺失字段保持原值）；现金为负拒绝 |
 
@@ -282,6 +285,9 @@ SQLite 单文件（C9 已决：rusqlite bundled，备份 = 拷文件；`.db` 在
 **v2（B13 定稿 2026-10-29）**：`watchlist` 自选表——观察标的静态属性
 （holdings 静态列同款 + `note`，无 shares/cost；code 主键 upsert 幂等），
 03 §12 预警判定范围扩到自选；七表读写齐备。
+**v3（ADR-0009 定稿 2026-11-01）**：`holding_edits` 持仓维护留痕表——直接维护
+（快照校正）的审计痕（op = create/update/delete + before/after 可编辑字段快照 JSON +
+note）；纯增表，v2 老库自动前进、旧数据无损（`watchlist_migrates_v1_db_to_v2` 覆盖）；八表齐备。
 
 迁移机制：`PRAGMA user_version` 逐版前进，每版一个事务；已发布版本的 SQL 永不修改，
 新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.40）——
@@ -375,17 +381,17 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 
 ```text
 Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.27 正式版，其余依赖版本与 robit workspace 对齐）
-crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约
+crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
                             ├─ agent_bridge.rs   Agent 装配（工具面/Skill 来自 zimu-agent；WebBridge 接线）
-                            ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1，错误→状态码映射；utoipa::path 契约标注）
+                            ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1）+ 直接维护 PUT/DELETE + /api/holding_edits 留痕读取（ADR-0009）；错误→状态码映射，utoipa::path 契约标注
                             ├─ market_api.rs     /api/market/*（P4-T4：status/quote/kline/cb_list/calendar；refresh 处理器 P4-T6 起薄壳调 zimu-agent::service）
                             ├─ alerts_api.rs     /api/alerts* /api/equity_snapshots /api/push_logs（P4-T7 + P5-T2：调度引擎落库内容的读取与归档，不生成不改写）
                             ├─ advice_api.rs     /api/advice（P5-T2：建议留档读取；写入在 agent 工具链，ADR-0007）
                             ├─ watchlist_api.rs  /api/watchlist*（P5-T2，B13：自选 CRUD，upsert 幂等；行情不回写自选表）
                             ├─ openapi.rs        OpenAPI 3.1 汇编（P4-T5：ApiDoc + ApiError/Health 等共享契约类型 + 再生成入口）
-                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/25 份样例过 schema）· common/ 共享装置（FakeApi/seed）
+                            └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/28 份样例过 schema）· common/ 共享装置（FakeApi/seed）
 crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill 加载 + 应用服务 + 调度预警引擎（server/CLI 共用）
                             ├─ lib.rs            AgentDeps（store + market + 日历缓存）与 crate 边界说明
                             ├─ tools/            8 领域工具 + echo（mod.rs 注册器；market/portfolio/advice 三组）
@@ -396,8 +402,8 @@ crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
                             └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 108 用例）
-crates/zimu-store/          存储层（P4-T1/T2/T7 + B13）：SQLite 七表（v2 增 watchlist）+ user_version 迁移 + 录入事务 + 行情回写（apply_quotes）+ 建议留档（insert/finalize/list_advice，P4-T6）+ 预警/快照/推送日志（insert_alert/alert_exists_on 去重/mark_alert_done、upsert_equity_snapshot 幂等/from_agg、insert_push_log，P4-T7）+ 自选 CRUD（add/remove/watchlist，upsert 幂等）
-                            └─ tests/store.rs      28 项集成测试（含重启不丢数据、COALESCE 回写、留档数字不可经文案回填改写、预警同日去重与归档、快照 upsert 幂等、watchlist upsert/校验、v1→v2 迁移）
+crates/zimu-store/          存储层（P4-T1/T2/T7 + B13 + ADR-0009）：SQLite 八表（v2 增 watchlist，v3 增 holding_edits 维护留痕）+ user_version 迁移 + 录入事务 + 直接维护（upsert_holding/remove_holding/holding_edits——快照校正：不动现金、不写 trades、留痕同事务、幂等 no-op）+ 行情回写（apply_quotes）+ 建议留档（insert/finalize/list_advice，P4-T6）+ 预警/快照/推送日志（insert_alert/alert_exists_on 去重/mark_alert_done、upsert_equity_snapshot 幂等/from_agg、insert_push_log，P4-T7）+ 自选 CRUD（add/remove/watchlist，upsert 幂等）
+                            └─ tests/store.rs      34 项集成测试（含重启不丢数据、COALESCE 回写、留档数字不可经文案回填改写、预警同日去重与归档、快照 upsert 幂等、watchlist upsert/校验、直接维护六项（奇零股/幂等/行情字段保留/三不动/删除留痕/坏输入）、v1→v3 迁移）
 crates/zimu-market/         行情适配器（P4-T4）：sidecar 唯一消费入口
                             ├─ client.rs         MarketApi trait（注入点）+ HttpMarketClient（错误三分类映射）
                             ├─ models.rs         类型化契约（quote/kline/cb_list/calendar/healthz/错误体）

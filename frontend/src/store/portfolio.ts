@@ -11,6 +11,8 @@ import type { components } from "../api/schema";
 export type PortfolioView = components["schemas"]["PortfolioView"];
 export type TradeRequest = components["schemas"]["TradeRequest"];
 export type RecordReceipt = components["schemas"]["RecordReceipt"];
+/** 直接维护请求体（ADR-0009 / 03 §13：快照校正，code 走路径参数） */
+export type HoldingEditRequest = components["schemas"]["HoldingEditRequest"];
 /** 录入拒绝体：message + 特定拒绝的附加数值（涨跌停 limit_up/limit_down/decimals、现金不足 cash_after） */
 export type TradeRejection = components["schemas"]["ApiError"];
 
@@ -34,6 +36,10 @@ interface PortfolioState {
   recordTrade: (body: TradeRequest) => Promise<TradeResult>;
   /** 设置可用现金：POST /api/account（onboarding 注资入口，负数后端拒 400）；成功后重拉 */
   setCash: (cash: number) => Promise<boolean>;
+  /** 直接维护 upsert（ADR-0009）：PUT /api/holdings/{code}，响应 = 维护后组合全景，直接覆盖 */
+  upsertHolding: (code: string, body: HoldingEditRequest) => Promise<boolean>;
+  /** 直接删除（ADR-0009）：DELETE /api/holdings/{code}——流水保留、现金不动（03 §13） */
+  removeHolding: (code: string) => Promise<boolean>;
 }
 
 export const usePortfolio = create<PortfolioState>((set, get) => ({
@@ -85,6 +91,32 @@ export const usePortfolio = create<PortfolioState>((set, get) => ({
       return true;
     }
     set({ error: apiErrorMessage(error, "更新现金失败") });
+    return false;
+  },
+
+  async upsertHolding(code, body) {
+    const { data, error } = await api.PUT("/api/holdings/{code}", {
+      params: { path: { code } },
+      body,
+    });
+    if (data) {
+      // 响应就是维护后的权威全景（后端 recalc 现算），直接覆盖，不再二次拉取
+      set({ view: data, error: null });
+      return true;
+    }
+    set({ error: apiErrorMessage(error, "保存持仓维护失败") });
+    return false;
+  },
+
+  async removeHolding(code) {
+    const { data, error } = await api.DELETE("/api/holdings/{code}", {
+      params: { path: { code } },
+    });
+    if (data) {
+      set({ view: data, error: null });
+      return true;
+    }
+    set({ error: apiErrorMessage(error, "删除持仓失败") });
     return false;
   },
 }));

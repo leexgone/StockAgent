@@ -5,8 +5,8 @@
 use zimu_domain::Kind;
 use zimu_domain::Side;
 use zimu_store::{
-    AccountRow, EquitySnapshotRow, NewAdvice, NewAlert, NewHoldingMeta, NewWatchlist, RecordError,
-    Store, TradeRequest, WatchlistError,
+    AccountRow, EditOp, EquitySnapshotRow, HoldingEditError, HoldingUpsert, NewAdvice, NewAlert,
+    NewHoldingMeta, NewWatchlist, RecordError, Store, TradeRequest, WatchlistError,
 };
 
 fn meta(code_name: (&str, &str), kind: Kind, prev: Option<f64>, pct: Option<i64>) -> NewHoldingMeta {
@@ -631,8 +631,8 @@ fn watchlist_upsert_remove_and_validation() {
 
 #[test]
 fn watchlist_migrates_v1_db_to_v2() {
-    // 合成 v1 老库：先建当前版库 → 手工降回 v1（删 watchlist + 版本号回拨），
-    // Store::open 应自动前进到 v2（迁移只前进，P4-T2 机制），且旧表数据不丢。
+    // 合成 v1 老库：先建当前版库 → 手工降回 v1（删 v1 之后新增的表 + 版本号回拨），
+    // Store::open 应自动前进到当前版（迁移只前进，P4-T2 机制），且旧表数据不丢。
     let dir = std::env::temp_dir().join(format!("zimu-store-mig-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("mig-v1.db");
@@ -644,12 +644,170 @@ fn watchlist_migrates_v1_db_to_v2() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE watchlist; PRAGMA user_version = 1;").unwrap();
+        // v2 的 watchlist 与 v3 的 holding_edits 都要删掉：迁移重放是 CREATE TABLE，
+        // 表还在会撞「already exists」
+        conn.execute_batch(
+            "DROP TABLE watchlist; DROP TABLE holding_edits; PRAGMA user_version = 1;",
+        )
+        .unwrap();
     }
     let s = Store::open(path_s).unwrap();
-    // 旧数据不丢（v1 表原样），新表可用（v2 迁移已前进）
+    // 旧数据不丢（v1 表原样），新表可用（v2/v3 迁移已前进）
+    assert_eq!(s.version().unwrap(), zimu_store::CURRENT_VERSION);
     assert!((s.portfolio().unwrap().account.cash - 12345.0).abs() < 1e-9);
     s.add_watchlist(&watch("601899", "紫金矿业", "SH"), "2026-10-29 11:00").unwrap();
     assert_eq!(s.watchlist().unwrap().len(), 1);
+    s.upsert_holding(&up("600519", "贵州茅台", 100, 1400.0), "2026-11-01 10:00").unwrap();
+    assert_eq!(s.holding_edits(10).unwrap().len(), 1);
     let _ = std::fs::remove_file(&path);
+}
+
+// ============================================================================
+// 持仓直接维护（ADR-0009 / 03 §13：快照校正——不动现金、不写 trades、留编辑痕）
+// ============================================================================
+
+fn up(code: &str, name: &str, shares: i64, cost: f64) -> HoldingUpsert {
+    HoldingUpsert {
+        code: code.into(),
+        name: name.into(),
+        mkt: "SH".into(),
+        kind: Kind::Stock,
+        sector: "测试".into(),
+        shares,
+        cost,
+        limit_pct: None,
+        note: String::new(),
+    }
+}
+
+#[test]
+fn upsert_creates_odd_lot_holding_with_edit_trail() {
+    let s = seed_store(100_000.0);
+    // 奇零股 150 直接录入（红利零股真实存在；lot 校验只约束委托路径，03 §13）
+    let (row, changed) = s.upsert_holding(&up("600519", "贵州茅台", 150, 1400.5), "2026-11-01 10:00").unwrap();
+    assert!(changed);
+    assert_eq!(row.shares, 150);
+    assert!((row.cost - 1400.5).abs() < 1e-9);
+    assert!(row.price.is_none() && row.prev.is_none() && row.limit_pct.is_none());
+
+    // 快照校正三不动：现金、trades、已实现盈亏
+    assert!((s.account().unwrap().cash - 100_000.0).abs() < 1e-9);
+    assert_eq!(s.trades(10).unwrap().len(), 0);
+
+    // 编辑痕：create，before 空、after 是行快照
+    let edits = s.holding_edits(10).unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].op, EditOp::Create);
+    assert!(edits[0].before.is_none());
+    let after = edits[0].after.as_ref().unwrap();
+    assert_eq!(after.shares, 150);
+    assert!((after.cost - 1400.5).abs() < 1e-9);
+    assert_eq!(edits[0].ts, "2026-11-01 10:00");
+}
+
+#[test]
+fn upsert_idempotent_same_fields_writes_nothing() {
+    let s = seed_store(0.0);
+    s.upsert_holding(&up("600519", "贵州茅台", 100, 1400.0), "2026-11-01 10:00").unwrap();
+    // 同一表单原样重提交 → no-op（不写库、不留痕、不报错）
+    let (row, changed) = s.upsert_holding(&up("600519", "贵州茅台", 100, 1400.0), "2026-11-01 10:05").unwrap();
+    assert!(!changed);
+    assert_eq!(row.updated_at, "2026-11-01 10:00", "幂等路径不刷新 updated_at");
+    assert_eq!(s.holding_edits(10).unwrap().len(), 1);
+}
+
+#[test]
+fn upsert_update_preserves_quotes_and_keeps_cash_out() {
+    let s = seed_store(100_000.0);
+    let mut req = up("600519", "贵州茅台", 100, 1400.0);
+    req.limit_pct = Some(10);
+    s.upsert_holding(&req, "2026-11-01 10:00").unwrap();
+    // 刷新链回写行情（price/prev 归它管）
+    s.apply_quotes(&[QuoteUpdate {
+        code: "600519".into(),
+        price: Some(1437.0),
+        prev: Some(1421.0),
+        name: None,
+        limit_pct: None,
+        ts: "2026-11-01 10:30".into(),
+    }]).unwrap();
+
+    // 校正：改 shares/cost，limit_pct 留空 = 保留原值（03 §13）
+    let (row, changed) = s.upsert_holding(&up("600519", "贵州茅台", 200, 1350.0), "2026-11-01 11:00").unwrap();
+    assert!(changed);
+    assert_eq!(row.shares, 200);
+    assert!((row.cost - 1350.0).abs() < 1e-9);
+    assert_eq!(row.price, Some(1437.0), "price 是行情字段，校正不得清空");
+    assert_eq!(row.prev, Some(1421.0));
+    assert_eq!(row.limit_pct, Some(10), "limit_pct 留空保留原值");
+    assert!((s.account().unwrap().cash - 100_000.0).abs() < 1e-9);
+    assert_eq!(s.trades(10).unwrap().len(), 0, "校正不伪造流水");
+
+    let edits = s.holding_edits(10).unwrap();
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[0].op, EditOp::Update);
+    let (b, a) = (edits[0].before.as_ref().unwrap(), edits[0].after.as_ref().unwrap());
+    assert_eq!((b.shares, a.shares), (100, 200));
+    assert!((b.cost - 1400.0).abs() < 1e-9 && (a.cost - 1350.0).abs() < 1e-9);
+}
+
+#[test]
+fn upsert_bad_inputs_rejected() {
+    let s = seed_store(0.0);
+    let cases: Vec<HoldingUpsert> = vec![
+        up("60051", "五位代码", 100, 10.0),                    // 代码非 6 位
+        up("60051a", "含字母", 100, 10.0),                      // 非数字
+        { let mut r = up("600519", "北交所", 100, 10.0); r.mkt = "BJ".into(); r },
+        up("600519", "  ", 100, 10.0),                          // 名称空
+        up("600519", "零股数", 0, 10.0),                        // shares < 1
+        up("600519", "负成本", 100, -1.0),                      // cost < 0
+        up("600519", "NaN 成本", 100, f64::NAN),                // NaN 守卫
+        { let mut r = up("600519", "零比例", 100, 10.0); r.limit_pct = Some(0); r },
+    ];
+    for req in cases {
+        assert!(
+            matches!(s.upsert_holding(&req, "x"), Err(HoldingEditError::BadInput(_))),
+            "应拒：{} {}", req.code, req.name
+        );
+    }
+    assert_eq!(s.holdings().unwrap().len(), 0, "拒绝路径不写库");
+    assert_eq!(s.holding_edits(10).unwrap().len(), 0, "拒绝路径不留痕");
+}
+
+#[test]
+fn remove_holding_keeps_trades_and_logs_delete() {
+    let s = seed_store(200_000.0); // 100 股 @1400 = 14 万，现金要够
+    // 走交易路径建仓（产生流水），再直接删除（场外变动语义）
+    s.record_trade(&buy("600519", 100, 1400.0, meta(("600519", "贵州茅台"), Kind::Stock, None, Some(10)))).unwrap();
+    let cash_before = s.account().unwrap().cash;
+
+    let removed = s.remove_holding("600519", "2026-11-01 12:00").unwrap();
+    assert!(removed.is_some());
+    assert_eq!(s.holdings().unwrap().len(), 0);
+    // 流水保留、现金不动、已实现不回滚（03 §13 删除语义）
+    assert_eq!(s.trades(10).unwrap().len(), 1);
+    assert!((s.account().unwrap().cash - cash_before).abs() < 1e-9);
+
+    // 重复删 → None（HTTP 404），不再留痕
+    assert!(s.remove_holding("600519", "2026-11-01 12:01").unwrap().is_none());
+    let edits = s.holding_edits(10).unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].op, EditOp::Delete);
+    assert!(edits[0].after.is_none());
+    let before = edits[0].before.as_ref().unwrap();
+    assert_eq!(before.shares, 100);
+    assert_eq!(edits[0].name, "贵州茅台", "留痕带操作时刻名称，删行后仍可展示");
+}
+
+#[test]
+fn holding_edits_newest_first_with_limit() {
+    let s = seed_store(0.0);
+    for i in 0..5 {
+        s.upsert_holding(&up(&format!("60051{i}"), "测试", 100 + i, 10.0), "ts").unwrap();
+    }
+    let edits = s.holding_edits(3).unwrap();
+    assert_eq!(edits.len(), 3);
+    // id 降序 = 最近在前
+    assert!(edits[0].id > edits[1].id && edits[1].id > edits[2].id);
+    assert_eq!(edits[0].code, "600514");
 }

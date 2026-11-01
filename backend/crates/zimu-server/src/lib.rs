@@ -25,14 +25,20 @@ pub mod market_api;
 pub mod openapi;
 pub mod watchlist_api;
 
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 
-/// 持仓 API 路由（P4-T1）
+/// 持仓 API 路由（P4-T1 交易录入 + ADR-0009 直接维护）
 pub fn holdings_router(store: holdings_api::SharedStore) -> Router {
     Router::new()
         .route("/api/holdings", get(holdings_api::get_holdings))
         .route("/api/holdings/trade", post(holdings_api::record_trade))
+        // 直接维护（03 §13 快照校正）：upsert + 删除；留痕读取供「维护记录」卡
+        .route(
+            "/api/holdings/{code}",
+            put(holdings_api::upsert_holding).delete(holdings_api::delete_holding),
+        )
+        .route("/api/holding_edits", get(holdings_api::get_holding_edits))
         .route("/api/trades", get(holdings_api::get_trades))
         .route("/api/account", post(holdings_api::update_account))
         .with_state(store)

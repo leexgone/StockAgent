@@ -25,7 +25,7 @@ use utoipa::{OpenApi, ToSchema};
 
 // schemas() 宏只接受裸标识符/完整路径，不认 `{…}` 分组——统一 import 后引用。
 // （这些 import 全部被 ApiDoc derive 的展开消费，不是死代码。）
-use crate::holdings_api::AccountPatch;
+use crate::holdings_api::{AccountPatch, HoldingEditRequest};
 use crate::market_api::{
     CalendarStatus, KlineResponse, MarketStatusResponse, RefreshResponse, SidecarStatus, SkippedRow,
 };
@@ -39,8 +39,9 @@ use zimu_market::models::{
     QuoteStatus,
 };
 use zimu_store::{
-    AccountRow, AdviceRow, AlertRow, EquitySnapshotRow, HoldingRow, NewHoldingMeta, NewWatchlist,
-    PortfolioView, PushLogRow, RecordReceipt, SimPreview, TradeRequest, TradeRow, WatchlistRow,
+    AccountRow, AdviceRow, AlertRow, EditOp, EquitySnapshotRow, HoldingEditRow, HoldingRow,
+    HoldingSnapshot, NewHoldingMeta, NewWatchlist, PortfolioView, PushLogRow, RecordReceipt,
+    SimPreview, TradeRequest, TradeRow, WatchlistRow,
 };
 
 // ============================================================================
@@ -205,7 +206,7 @@ fn chat_cancel_doc() {}
     ),
     tags(
         (name = "system", description = "健康检查、契约文档与 Agent SSE 会话"),
-        (name = "holdings", description = "持仓与录入（P4-T1，ADR-0006 手工逐笔先行；校验与派生全部走 zimu-domain）"),
+        (name = "holdings", description = "持仓与录入（P4-T1，ADR-0006 手工逐笔先行；校验与派生全部走 zimu-domain）+ 直接维护（ADR-0009 快照校正，03 §13：整行覆盖 upsert / 删除 / holding_edits 留痕——不动现金、不写 trades）"),
         (name = "market", description = "行情（P4-T4，经 zimu-market 适配器——sidecar 唯一消费入口；错误三分类见 04 附录 B）"),
         (name = "alerts", description = "预警、净值快照与推送留痕（P4-T7 + P5-T2）：内容由调度引擎判定落库（口径 03 §12，判定函数在 zimu-domain::alert），端点只读取与归档"),
         (name = "advice", description = "建议留档（P5-T2 读端点；写入在 agent 工具链，ADR-0007——数字归规则、文字归模型）"),
@@ -216,6 +217,9 @@ fn chat_cancel_doc() {}
         openapi_doc,
         crate::holdings_api::get_holdings,
         crate::holdings_api::record_trade,
+        crate::holdings_api::upsert_holding,
+        crate::holdings_api::delete_holding,
+        crate::holdings_api::get_holding_edits,
         crate::holdings_api::get_trades,
         crate::holdings_api::update_account,
         crate::market_api::status,
@@ -243,6 +247,7 @@ fn chat_cancel_doc() {}
         Agg, PerHolding, SectorAgg,
         AccountRow, HoldingRow, NewHoldingMeta, PortfolioView, RecordReceipt,
         SimPreview, TradeRequest, TradeRow,
+        HoldingEditRequest, HoldingEditRow, HoldingSnapshot, EditOp,
         AlertRow, EquitySnapshotRow, AdviceRow, PushLogRow,
         WatchlistRow, NewWatchlist,
         MarketClock,

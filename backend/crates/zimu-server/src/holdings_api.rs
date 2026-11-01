@@ -1,10 +1,14 @@
-//! 持仓与录入 API（P4-T1：手工逐笔录入流程，ADR-0006）。
+//! 持仓与录入 API（P4-T1：手工逐笔录入流程，ADR-0006；直接维护 ADR-0009）。
 //!
 //! 端点：
-//! - `GET  /api/holdings`        组合全景（存储行 + zimu-domain recalc 派生与汇总）
-//! - `POST /api/holdings/trade`  记一笔买入/卖出：校验→试算→事务落库，返回收据
-//! - `GET  /api/trades?limit=N`  委托/成交流水（最新在前）
-//! - `POST /api/account`         首次配置/调整账户
+//! - `GET    /api/holdings`          组合全景（存储行 + zimu-domain recalc 派生与汇总）
+//! - `POST   /api/holdings/trade`    记一笔买入/卖出：校验→试算→事务落库，返回收据
+//! - `PUT    /api/holdings/{code}`   直接维护 upsert（快照校正，03 §13：整行覆盖、
+//!                                   不动现金、不写 trades、holding_edits 留痕）
+//! - `DELETE /api/holdings/{code}`   直接删除持仓行（流水保留，累计已实现不回滚）
+//! - `GET    /api/holding_edits`     维护留痕（「维护记录」卡数据源，最新在前）
+//! - `GET    /api/trades?limit=N`    委托/成交流水（最新在前）
+//! - `POST   /api/account`           首次配置/调整账户
 //!
 //! 边界：
 //! - 校验口径全部在 zimu-store/zimu-domain，本模块只做 HTTP 接线与错误→状态码映射；
@@ -16,12 +20,16 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use utoipa::{IntoParams, ToSchema};
-use zimu_store::{AccountRow, PortfolioView, RecordError, RecordReceipt, Store, TradeRequest, TradeRow};
+use zimu_domain::Kind;
+use zimu_store::{
+    AccountRow, HoldingEditError, HoldingEditRow, HoldingUpsert, PortfolioView, RecordError,
+    RecordReceipt, Store, TradeRequest, TradeRow,
+};
 
 use crate::openapi::ApiError;
 
@@ -195,5 +203,161 @@ pub async fn update_account(
     match updated {
         Ok(acc) => Json(acc).into_response(),
         Err(e) => record_error_response(e),
+    }
+}
+
+// ============================================================================
+// 持仓直接维护（ADR-0009 / 03 §13：快照校正——初始化映射 / 纠错 / 场外变动）
+// ============================================================================
+
+/// 维护留痕与校正写入的 ts 用上海时刻（与 watchlist/alerts 同口径）
+fn now_sh() -> String {
+    zimu_market::clock::now_shanghai()
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
+}
+
+/// HoldingEditError → HTTP：输入问题 400、存储内部错误 500（watchlist 同款分层）
+fn holding_edit_error_response(e: HoldingEditError) -> Response {
+    match e {
+        HoldingEditError::BadInput(m) => {
+            (StatusCode::BAD_REQUEST, Json(ApiError::new("bad_input", m))).into_response()
+        }
+        HoldingEditError::Store(m) => {
+            tracing::error!("持仓维护存储错误：{m}");
+            store_error()
+        }
+    }
+}
+
+/// 直接维护请求体（PUT /api/holdings/{code}）。code 以路径为准（body 不带）；
+/// 整行覆盖语义——「看到什么抄什么」（03 §13），price/prev 是行情字段不可编辑。
+#[derive(serde::Deserialize, ToSchema)]
+pub struct HoldingEditRequest {
+    pub name: String,
+    /// 'SH' | 'SZ'（显式字段，B7；北交所不在当前范围）
+    pub mkt: String,
+    pub kind: Kind,
+    #[serde(default)]
+    pub sector: String,
+    /// ≥ 1 任意整数——允许奇零股（红利零股真实存在；lot 校验只约束委托路径）
+    pub shares: i64,
+    /// 券商摊薄成本口径（03 §4），≥ 0；调整不产生已实现盈亏
+    pub cost: f64,
+    /// 缺省 = 新建 NULL、更新保留原值（03 §2 配置语义）
+    #[serde(default)]
+    pub limit_pct: Option<i64>,
+    /// 维护备注（只进 holding_edits 留痕）
+    #[serde(default)]
+    pub note: String,
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/holdings/{code}",
+    tag = "holdings",
+    request_body = HoldingEditRequest,
+    params(
+        ("code" = String, Path, description = "标的代码（6 位数字）"),
+    ),
+    responses(
+        (status = 200, description = "维护后的组合全景（与 GET /api/holdings 同形，前端直接以后端返回覆盖）。快照校正三不动：现金、trades 流水、已实现盈亏（03 §13）；幂等——与现有行逐位一致时不写库不留痕", body = PortfolioView),
+        (status = 400, description = "输入问题（bad_input）：代码非 6 位数字、市场码非法、名称空、shares < 1、cost 为负", body = ApiError),
+        (status = 500, description = "存储层内部错误", body = ApiError),
+    )
+)]
+pub async fn upsert_holding(
+    State(store): State<SharedStore>,
+    Path(code): Path<String>,
+    Json(req): Json<HoldingEditRequest>,
+) -> Response {
+    let s = lock(&store);
+    let upsert = HoldingUpsert {
+        code,
+        name: req.name,
+        mkt: req.mkt,
+        kind: req.kind,
+        sector: req.sector,
+        shares: req.shares,
+        cost: req.cost,
+        limit_pct: req.limit_pct,
+        note: req.note,
+    };
+    if let Err(e) = s.upsert_holding(&upsert, &now_sh()) {
+        return holding_edit_error_response(e);
+    }
+    // 校正后返回权威全景（recalc 从 holdings 现值现算，ADR-0008 后端唯一真值）
+    match s.portfolio() {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => {
+            tracing::error!("portfolio 读取失败：{e:#}");
+            store_error()
+        }
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/holdings/{code}",
+    tag = "holdings",
+    params(
+        ("code" = String, Path, description = "标的代码（6 位）"),
+    ),
+    responses(
+        (status = 200, description = "删除后的组合全景。trades 历史保留（holding_code 非外键）、累计已实现盈亏不回滚、现金不动——流水与持仓的连续性自校正点断开（03 §13）", body = PortfolioView),
+        (status = 404, description = "持仓里没有该标的（no_holding）", body = ApiError),
+        (status = 500, description = "存储层内部错误", body = ApiError),
+    )
+)]
+pub async fn delete_holding(
+    State(store): State<SharedStore>,
+    Path(code): Path<String>,
+) -> Response {
+    let s = lock(&store);
+    match s.remove_holding(&code, &now_sh()) {
+        Ok(Some(_)) => match s.portfolio() {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => {
+                tracing::error!("portfolio 读取失败：{e:#}");
+                store_error()
+            }
+        },
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiError::new(
+                "no_holding",
+                format!("持仓中没有 {code}"),
+            )),
+        )
+            .into_response(),
+        Err(e) => holding_edit_error_response(e),
+    }
+}
+
+#[derive(serde::Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct EditsQuery {
+    /// 行数上限：1–200，缺省 50（维护记录卡只展示最近若干条）
+    limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/holding_edits",
+    tag = "holdings",
+    params(EditsQuery),
+    responses(
+        (status = 200, description = "直接维护留痕（最新在前）：op = create/update/delete；before/after 为持仓行可编辑字段快照（create → before null，delete → after null）；交易录入不产生本表记录（走 trades 流水）", body = Vec<HoldingEditRow>),
+        (status = 500, description = "存储层内部错误", body = ApiError),
+    )
+)]
+pub async fn get_holding_edits(
+    State(store): State<SharedStore>,
+    Query(q): Query<EditsQuery>,
+) -> Response {
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    match lock(&store).holding_edits(limit) {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => holding_edit_error_response(e),
     }
 }

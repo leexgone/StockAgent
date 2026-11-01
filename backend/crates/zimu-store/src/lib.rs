@@ -27,7 +27,7 @@ use zimu_domain::{Kind, Side};
 
 /// schema 版本（PRAGMA user_version）。新增迁移在 `MIGRATIONS` 尾部追加，
 /// 永不修改已发布版本的 SQL——迁移只前进（P4-T2 迁移机制约定）。
-pub const CURRENT_VERSION: i64 = 2;
+pub const CURRENT_VERSION: i64 = 3;
 
 const MIGRATIONS: &[(i64, &str)] = &[(
     1,
@@ -142,6 +142,25 @@ CREATE TABLE watchlist (
   sector     TEXT NOT NULL DEFAULT '',
   note       TEXT NOT NULL DEFAULT '',
   added_at   TEXT NOT NULL
+);
+"#,
+    ),
+    (
+        3,
+        r#"
+-- ADR-0009 / 03 §13（2026-11-01 定稿）：持仓直接维护的审计留痕表。
+-- 快照校正不写 trades（不伪造零费用交易污染费用/已实现口径）；
+-- before/after = 持仓行可编辑字段快照 JSON（create → before NULL，
+-- delete → after NULL；price/prev 是行情字段不可编辑，不进快照）。
+CREATE TABLE holding_edits (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts          TEXT NOT NULL,
+  op          TEXT NOT NULL CHECK (op IN ('create','update','delete')),
+  code        TEXT NOT NULL,
+  name        TEXT NOT NULL,             -- 操作时刻的标的名称（删除后仍可展示）
+  before_json TEXT,
+  after_json  TEXT,
+  note        TEXT NOT NULL DEFAULT ''
 );
 "#,
     ),
@@ -1515,5 +1534,352 @@ impl Store {
             Some(r) => Ok(Some(r.map_err(|e| WatchlistError::Store(e.to_string()))?)),
             None => Ok(None),
         }
+    }
+}
+
+// ============================================================================
+// 持仓直接维护（ADR-0009 / 03 §13 定稿 2026-11-01：快照校正，schema v3）
+// ============================================================================
+
+/// 维护操作类型（`holding_edits.op`，DB CHECK 同款小写串）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EditOp {
+    Create,
+    Update,
+    Delete,
+}
+
+impl EditOp {
+    fn as_str(self) -> &'static str {
+        match self {
+            EditOp::Create => "create",
+            EditOp::Update => "update",
+            EditOp::Delete => "delete",
+        }
+    }
+
+    fn parse(s: &str) -> Result<Self> {
+        Ok(match s {
+            "create" => EditOp::Create,
+            "update" => EditOp::Update,
+            "delete" => EditOp::Delete,
+            other => anyhow::bail!("未知维护 op: {other}"),
+        })
+    }
+}
+
+/// 持仓行**可编辑字段**快照（`holding_edits` 的 before/after）。
+/// price/prev 是行情字段（刷新链回写，03 §13 不可编辑）——不进快照。
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HoldingSnapshot {
+    pub code: String,
+    pub name: String,
+    /// 'SH' | 'SZ'
+    pub mkt: String,
+    pub kind: Kind,
+    pub sector: String,
+    pub shares: i64,
+    pub cost: f64,
+    pub limit_pct: Option<i64>,
+}
+
+impl HoldingSnapshot {
+    fn of(h: &HoldingRow) -> Self {
+        HoldingSnapshot {
+            code: h.code.clone(),
+            name: h.name.clone(),
+            mkt: h.mkt.clone(),
+            kind: h.kind,
+            sector: h.sector.clone(),
+            shares: h.shares,
+            cost: h.cost,
+            limit_pct: h.limit_pct,
+        }
+    }
+}
+
+/// 维护留痕行（`GET /api/holding_edits`「维护记录」卡数据源）。
+/// create → before 为 null；delete → after 为 null。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct HoldingEditRow {
+    pub id: i64,
+    /// 上海 YYYY-MM-DD HH:MM（与 trades.ts 同口径）
+    pub ts: String,
+    pub op: EditOp,
+    pub code: String,
+    /// 操作时刻的标的名称（持仓行删除后仍可展示）
+    pub name: String,
+    pub before: Option<HoldingSnapshot>,
+    pub after: Option<HoldingSnapshot>,
+    pub note: String,
+}
+
+/// 直接维护入参（整行覆盖 upsert，「看到什么抄什么」）。
+/// 校验见 03 §13：允许奇零股、跳过 lot 与涨跌停（校正不是委托）。
+#[derive(Debug, Clone)]
+pub struct HoldingUpsert {
+    pub code: String,
+    pub name: String,
+    /// 'SH' | 'SZ'（显式字段，B7）
+    pub mkt: String,
+    pub kind: Kind,
+    pub sector: String,
+    /// ≥ 1 任意整数（红利零股/转股零股真实存在，B12 卖出侧豁免承接）
+    pub shares: i64,
+    /// 券商摊薄成本口径（03 §4），≥ 0；调整不产生已实现盈亏
+    pub cost: f64,
+    /// None = 新建 NULL、更新保留原值（03 §13 / §2 配置语义）
+    pub limit_pct: Option<i64>,
+    /// 维护备注（只进 holding_edits 留痕，不进持仓行）
+    pub note: String,
+}
+
+/// 直接维护拒绝原因（HTTP 层映射：BadInput → 400、Store → 500，watchlist 同款）
+#[derive(Debug, Clone)]
+pub enum HoldingEditError {
+    BadInput(String),
+    Store(String),
+}
+
+impl std::fmt::Display for HoldingEditError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadInput(m) => write!(f, "输入不合法：{m}"),
+            Self::Store(m) => write!(f, "存储层：{m}"),
+        }
+    }
+}
+
+impl std::error::Error for HoldingEditError {}
+
+const EDITS_COLS: &str = "id, ts, op, code, name, before_json, after_json, note";
+
+fn row_conv(e: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e.to_string())))
+}
+
+fn map_edit_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HoldingEditRow> {
+    let op_s: String = r.get(2)?;
+    let bj: Option<String> = r.get(5)?;
+    let aj: Option<String> = r.get(6)?;
+    let parse = |s: String| serde_json::from_str::<HoldingSnapshot>(&s).map_err(row_conv);
+    Ok(HoldingEditRow {
+        id: r.get(0)?,
+        ts: r.get(1)?,
+        op: EditOp::parse(&op_s).map_err(row_conv)?,
+        code: r.get(3)?,
+        name: r.get(4)?,
+        before: bj.map(parse).transpose()?,
+        after: aj.map(parse).transpose()?,
+        note: r.get(7)?,
+    })
+}
+
+impl Store {
+    /// 直接维护 upsert（03 §13）：整行覆盖 + 审计留痕**同事务**。
+    /// 不动现金、不写 trades、不改 price/prev（行情字段归刷新链，SET 子句不含它们）。
+    /// 幂等：可编辑字段与现有行逐位一致 → 不写库不留痕，返回 `(现有行, false)`；
+    /// 有变更返回 `(写入后的行, true)`。
+    pub fn upsert_holding(
+        &self,
+        req: &HoldingUpsert,
+        ts: &str,
+    ) -> std::result::Result<(HoldingRow, bool), HoldingEditError> {
+        self.validate_upsert(req)?;
+        let existing = self
+            .holding_of(&req.code)
+            .map_err(|e| HoldingEditError::Store(e.to_string()))?;
+
+        // limit_pct None：新建 NULL、更新保留原值（03 §13）
+        let eff_limit = req
+            .limit_pct
+            .or_else(|| existing.as_ref().and_then(|h| h.limit_pct));
+
+        // 幂等判定：可编辑字段逐位一致 → no-op（f64 用位相等——同一表单重提交）
+        if let Some(h) = &existing {
+            if h.name == req.name
+                && h.mkt == req.mkt
+                && h.kind == req.kind
+                && h.sector == req.sector
+                && h.shares == req.shares
+                && h.cost == req.cost
+                && h.limit_pct == eff_limit
+            {
+                return Ok((h.clone(), false));
+            }
+        }
+
+        let op = if existing.is_some() {
+            EditOp::Update
+        } else {
+            EditOp::Create
+        };
+        let before = existing.as_ref().map(HoldingSnapshot::of);
+
+        // 事务：持仓写入 + 留痕同生共死（record_trade 同款 BEGIN IMMEDIATE 模式）
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| HoldingEditError::Store(format!("事务开启失败：{e}")))?;
+        let result = (|| -> std::result::Result<HoldingRow, HoldingEditError> {
+            self.conn
+                .execute(
+                    "INSERT INTO holdings (code,name,mkt,kind,sector,shares,cost,price,prev,limit_pct,updated_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL,?8,?9)
+                     ON CONFLICT(code) DO UPDATE SET
+                       name=?2, mkt=?3, kind=?4, sector=?5, shares=?6, cost=?7,
+                       limit_pct=?8, updated_at=?9",
+                    params![
+                        req.code, req.name, req.mkt, kind_str(req.kind), req.sector,
+                        req.shares, req.cost, eff_limit, ts
+                    ],
+                )
+                .map_err(|e| HoldingEditError::Store(format!("写入持仓失败：{e}")))?;
+            let row = self
+                .holding_of(&req.code)
+                .map_err(|e| HoldingEditError::Store(e.to_string()))?
+                .ok_or_else(|| HoldingEditError::Store("写入后读回失败".into()))?;
+            self.insert_edit(
+                op,
+                &req.code,
+                &req.name,
+                before,
+                Some(HoldingSnapshot::of(&row)),
+                &req.note,
+                ts,
+            )?;
+            Ok(row)
+        })();
+        match result {
+            Ok(row) => {
+                self.conn
+                    .execute_batch("COMMIT")
+                    .map_err(|e| HoldingEditError::Store(format!("提交失败：{e}")))?;
+                Ok((row, true))
+            }
+            Err(e) => {
+                self.conn.execute_batch("ROLLBACK").ok();
+                Err(e)
+            }
+        }
+    }
+
+    /// 删除持仓行（03 §13）：整行移除 + delete 留痕同事务。
+    /// `trades` 历史保留（holding_code 非外键）、累计已实现不回滚、现金不动。
+    /// 返回 None = code 不存在（HTTP 404）；重复删同样 None（不报错）。
+    pub fn remove_holding(
+        &self,
+        code: &str,
+        ts: &str,
+    ) -> std::result::Result<Option<HoldingRow>, HoldingEditError> {
+        let row = self
+            .holding_of(code)
+            .map_err(|e| HoldingEditError::Store(e.to_string()))?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| HoldingEditError::Store(format!("事务开启失败：{e}")))?;
+        let result = (|| -> std::result::Result<(), HoldingEditError> {
+            self.conn
+                .execute("DELETE FROM holdings WHERE code = ?1", params![code])
+                .map_err(|e| HoldingEditError::Store(format!("删除持仓失败：{e}")))?;
+            self.insert_edit(
+                EditOp::Delete,
+                code,
+                &row.name,
+                Some(HoldingSnapshot::of(&row)),
+                None,
+                "",
+                ts,
+            )
+        })();
+        match result {
+            Ok(()) => {
+                self.conn
+                    .execute_batch("COMMIT")
+                    .map_err(|e| HoldingEditError::Store(format!("提交失败：{e}")))?;
+                Ok(Some(row))
+            }
+            Err(e) => {
+                self.conn.execute_batch("ROLLBACK").ok();
+                Err(e)
+            }
+        }
+    }
+
+    /// 维护留痕（id 降序 = 最近在前；「维护记录」卡数据源）
+    pub fn holding_edits(
+        &self,
+        limit: i64,
+    ) -> std::result::Result<Vec<HoldingEditRow>, HoldingEditError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {EDITS_COLS} FROM holding_edits ORDER BY id DESC LIMIT ?1"
+            ))
+            .map_err(|e| HoldingEditError::Store(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![limit], map_edit_row)
+            .map_err(|e| HoldingEditError::Store(e.to_string()))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| HoldingEditError::Store(e.to_string()))
+    }
+
+    /// 03 §13 校验：6 位数字代码、SH/SZ、名称非空、shares ≥ 1（允许奇零）、
+    /// cost ≥ 0、limit_pct 为正。**不套 lot 与涨跌停**（校正不是委托）。
+    fn validate_upsert(&self, req: &HoldingUpsert) -> std::result::Result<(), HoldingEditError> {
+        let bad = |m: String| Err(HoldingEditError::BadInput(m));
+        if req.code.len() != 6 || !req.code.bytes().all(|b| b.is_ascii_digit()) {
+            return bad(format!("代码需为 6 位数字（当前 {}）", req.code));
+        }
+        if req.name.trim().is_empty() {
+            return bad("name 不能为空".into());
+        }
+        if req.mkt != "SH" && req.mkt != "SZ" {
+            return bad(format!("市场码非法：{}（应为 SH/SZ）", req.mkt));
+        }
+        if req.shares < 1 {
+            return bad(format!("shares 需 ≥ 1（允许奇零股；当前 {}）", req.shares));
+        }
+        // 否定式是有意的 NaN 守卫（同 preview 的 price 校验惯例）
+        #[allow(clippy::neg_cmp_op_on_partial_ord)]
+        if !(req.cost >= 0.0) {
+            return bad("cost 不能为负数或 NaN".into());
+        }
+        if let Some(p) = req.limit_pct {
+            if p <= 0 {
+                return bad(format!("limit_pct 需为正数（当前 {p}）"));
+            }
+        }
+        Ok(())
+    }
+
+    fn insert_edit(
+        &self,
+        op: EditOp,
+        code: &str,
+        name: &str,
+        before: Option<HoldingSnapshot>,
+        after: Option<HoldingSnapshot>,
+        note: &str,
+        ts: &str,
+    ) -> std::result::Result<(), HoldingEditError> {
+        let enc = |s: Option<HoldingSnapshot>| -> std::result::Result<Option<String>, HoldingEditError> {
+            s.map(|v| {
+                serde_json::to_string(&v)
+                    .map_err(|e| HoldingEditError::Store(format!("维护快照序列化失败：{e}")))
+            })
+            .transpose()
+        };
+        self.conn
+            .execute(
+                "INSERT INTO holding_edits (ts, op, code, name, before_json, after_json, note)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![ts, op.as_str(), code, name, enc(before)?, enc(after)?, note],
+            )
+            .map_err(|e| HoldingEditError::Store(format!("写入维护留痕失败：{e}")))?;
+        Ok(())
     }
 }

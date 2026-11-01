@@ -164,6 +164,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/holding_edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_holding_edits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/holdings": {
         parameters: {
             query?: never;
@@ -191,6 +207,22 @@ export interface paths {
         put?: never;
         post: operations["record_trade"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/holdings/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["upsert_holding"];
+        post?: never;
+        delete: operations["delete_holding"];
         options?: never;
         head?: never;
         patch?: never;
@@ -634,6 +666,11 @@ export interface components {
             tool_call_id: string;
         };
         /**
+         * @description 维护操作类型（`holding_edits.op`，DB CHECK 同款小写串）
+         * @enum {string}
+         */
+        EditOp: "create" | "update" | "delete";
+        /**
          * @description 每交易日一行的组合快照。数字直接取 `recalc` 的 `Agg` 原值（不舍入，
          *     逐位可回溯）；`date` 主键 upsert——服务重启不重复（幂等）。
          */
@@ -694,6 +731,51 @@ export interface components {
             /** @description crate 版本 */
             version: string;
         };
+        /**
+         * @description 直接维护请求体（PUT /api/holdings/{code}）。code 以路径为准（body 不带）；
+         *     整行覆盖语义——「看到什么抄什么」（03 §13），price/prev 是行情字段不可编辑。
+         */
+        HoldingEditRequest: {
+            /**
+             * Format: double
+             * @description 券商摊薄成本口径（03 §4），≥ 0；调整不产生已实现盈亏
+             */
+            cost: number;
+            kind: components["schemas"]["Kind"];
+            /**
+             * Format: int64
+             * @description 缺省 = 新建 NULL、更新保留原值（03 §2 配置语义）
+             */
+            limit_pct?: number | null;
+            /** @description 'SH' | 'SZ'（显式字段，B7；北交所不在当前范围） */
+            mkt: string;
+            name: string;
+            /** @description 维护备注（只进 holding_edits 留痕） */
+            note?: string;
+            sector?: string;
+            /**
+             * Format: int64
+             * @description ≥ 1 任意整数——允许奇零股（红利零股真实存在；lot 校验只约束委托路径）
+             */
+            shares: number;
+        };
+        /**
+         * @description 维护留痕行（`GET /api/holding_edits`「维护记录」卡数据源）。
+         *     create → before 为 null；delete → after 为 null。
+         */
+        HoldingEditRow: {
+            after?: null | components["schemas"]["HoldingSnapshot"];
+            before?: null | components["schemas"]["HoldingSnapshot"];
+            code: string;
+            /** Format: int64 */
+            id: number;
+            /** @description 操作时刻的标的名称（持仓行删除后仍可展示） */
+            name: string;
+            note: string;
+            op: components["schemas"]["EditOp"];
+            /** @description 上海 YYYY-MM-DD HH:MM（与 trades.ts 同口径） */
+            ts: string;
+        };
         HoldingRow: {
             code: string;
             /** Format: double */
@@ -711,6 +793,24 @@ export interface components {
             /** Format: int64 */
             shares: number;
             updated_at: string;
+        };
+        /**
+         * @description 持仓行**可编辑字段**快照（`holding_edits` 的 before/after）。
+         *     price/prev 是行情字段（刷新链回写，03 §13 不可编辑）——不进快照。
+         */
+        HoldingSnapshot: {
+            code: string;
+            /** Format: double */
+            cost: number;
+            kind: components["schemas"]["Kind"];
+            /** Format: int64 */
+            limit_pct?: number | null;
+            /** @description 'SH' | 'SZ' */
+            mkt: string;
+            name: string;
+            sector: string;
+            /** Format: int64 */
+            shares: number;
         };
         /**
          * @description 标的类型（03 §1）
@@ -1410,6 +1510,38 @@ export interface operations {
             };
         };
     };
+    get_holding_edits: {
+        parameters: {
+            query?: {
+                /** @description 行数上限：1–200，缺省 50（维护记录卡只展示最近若干条） */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 直接维护留痕（最新在前）：op = create/update/delete；before/after 为持仓行可编辑字段快照（create → before null，delete → after null）；交易录入不产生本表记录（走 trades 流水） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingEditRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     get_holdings: {
         parameters: {
             query?: never;
@@ -1481,6 +1613,92 @@ export interface operations {
             };
             /** @description 业务规则拦截：涨跌停越界（out_of_limit_range，带 limit_down/limit_up/decimals）、现金不足（insufficient_cash，带 cash_after）、新建持仓缺 meta（need_meta） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    upsert_holding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 标的代码（6 位数字） */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingEditRequest"];
+            };
+        };
+        responses: {
+            /** @description 维护后的组合全景（与 GET /api/holdings 同形，前端直接以后端返回覆盖）。快照校正三不动：现金、trades 流水、已实现盈亏（03 §13）；幂等——与现有行逐位一致时不写库不留痕 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioView"];
+                };
+            };
+            /** @description 输入问题（bad_input）：代码非 6 位数字、市场码非法、名称空、shares < 1、cost 为负 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    delete_holding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 标的代码（6 位） */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 删除后的组合全景。trades 历史保留（holding_code 非外键）、累计已实现盈亏不回滚、现金不动——流水与持仓的连续性自校正点断开（03 §13） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioView"];
+                };
+            };
+            /** @description 持仓里没有该标的（no_holding） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
