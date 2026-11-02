@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * 子木会话面板 —— 真实 Agent SSE 线程（P2-T3 验证链路；P5-T2 起即 chat 屏的
@@ -44,8 +44,12 @@ function briefArgs(raw: string): string {
 
 export interface ChatPanelProps {
   agentOnline: boolean;
-  /** 预填输入框（suggest chips / ?q= 深链）；nonce 变化即写入并聚焦，不自动发送 */
-  prefill?: { text: string; nonce: number };
+  /**
+   * 预填输入框（suggest chips / ?q= 深链）；nonce 变化即写入并聚焦，默认不自动发送
+   * （真实 LLM，交用户确认）。`send: true` = 意图明确的深链（analysis 空态
+   * 「去问答触发 /建议」，chat?q=…&send=1）：agent 上线且空闲时自动发送该文本一次。
+   */
+  prefill?: { text: string; nonce: number; send?: boolean };
   /** 递增即清空会话（含 localStorage）；0/undefined = 不触发 */
   clearNonce?: number;
   /** 设置则把会话持久化到 localStorage[key]（上限 30 条，docs/02 chat 约定） */
@@ -72,6 +76,8 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
   const [busy, setBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** 已自动发送过的 prefill nonce（send=1 深链只发一次，busy/离线恢复后不重放） */
+  const autoSent = useRef(0);
 
   // 持久化（上限 30 条）
   useEffect(() => {
@@ -129,27 +135,45 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries, pending]);
 
+  /** 发送核心：手动提交与 send=1 深链自动发送共用（入口不同，链路与留痕完全一致） */
+  const submit = useCallback(
+    async (raw: string) => {
+      const text = raw.trim();
+      if (!text || busy) return;
+      setEntries((prev) => [...prev, { kind: "user", text }]);
+      setInput("");
+      setBusy(true);
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!r.ok) {
+        setBusy(false);
+        const body = await r.text();
+        setEntries((prev) => [
+          ...prev,
+          { kind: "notice", level: "error", text: `发送失败：HTTP ${r.status} ${body}` },
+        ]);
+      }
+    },
+    [busy],
+  );
+
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    const text = input.trim();
-    if (!text || busy) return;
-    setEntries((prev) => [...prev, { kind: "user", text }]);
-    setInput("");
-    setBusy(true);
-    const r = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!r.ok) {
-      setBusy(false);
-      const body = await r.text();
-      setEntries((prev) => [
-        ...prev,
-        { kind: "notice", level: "error", text: `发送失败：HTTP ${r.status} ${body}` },
-      ]);
-    }
+    await submit(input);
   };
+
+  // send=1 深链（如「去问答触发 /建议」）：等 agent 上线且空闲时自动发送一次；
+  // agent 离线时停留在预填态（输入框已有文本，上线后本 effect 因 agentOnline 变化补发）
+  useEffect(() => {
+    if (!prefill?.send || prefill.nonce <= 0) return;
+    if (autoSent.current === prefill.nonce) return;
+    if (!agentOnline || busy) return;
+    autoSent.current = prefill.nonce;
+    void submit(prefill.text);
+  }, [prefill, agentOnline, busy, submit]);
 
   const answerConfirm = async (approved: boolean) => {
     if (!pending) return;
@@ -296,6 +320,9 @@ function handleEvent(
         if (last && last.kind === "assistant" && !last.done) {
           return [...prev.slice(0, -1), { ...last, text: last.text + ev.text }];
         }
+        // 空白首帧（模型流的角色帧 / 思考模式空内容帧）不建占位气泡——
+        // 只有真正可见的文字才开流式段，否则留下空白「子木：」加常驻光标。
+        if (ev.text.trim() === "") return prev;
         return [...prev, { kind: "assistant", text: ev.text, done: false }];
       });
       break;
@@ -348,14 +375,13 @@ function handleEvent(
       ]);
       break;
     case "turn_complete":
-      setEntries((prev) => {
-        // 只收口末尾未完成的流式段
-        const last = prev[prev.length - 1];
-        if (last && last.kind === "assistant" && !last.done) {
-          return [...prev.slice(0, -1), { ...last, done: true }];
-        }
-        return prev;
-      });
+      setEntries((prev) =>
+        prev
+          // 收口**所有**未完成流式段（工具调用前的段落曾被漏掉 → 光标常驻）
+          .map((e) => (e.kind === "assistant" && !e.done ? { ...e, done: true } : e))
+          // 整段没产出可见文字的段落直接移除（空白气泡没有信息量）
+          .filter((e) => !(e.kind === "assistant" && e.text.trim() === "")),
+      );
       setPending(null);
       setBusy(false);
       break;

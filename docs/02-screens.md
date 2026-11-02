@@ -101,6 +101,13 @@
 
 会话存 `localStorage['zimu:chat:me']`，最多保留最近 30 条。
 
+生产侧深链契约（frontend ChatView/ChatPanel）：`/chat?q=<问题>` 只**预填输入不自动发送**
+（真实 LLM，交用户确认——全局搜索回车、analysis「就这只问我」走此形态）；
+`/chat?q=<问题>&send=1` 在 agent 上线且空闲时**自动发送一次**（仅限意图明确的斜杠指令
+深链——analysis 空态「去问答触发 /建议」，`q=/建议 <code>`，代码写法按 generate-advice
+技能约定：持仓内裸代码、非持仓带 sh/sz 前缀）；agent 离线时停留预填态，上线后补发，
+每个 nonce 只发一次不重放。
+
 ## diagnosis.html — 组合诊断
 
 | 模块 | 内容 | 数据依赖 |

@@ -255,6 +255,11 @@ export default function AnalysisScreen() {
     const q = `${item.name}建议「${A.action}」的理由再具体一点，我该在什么价格动手？`;
     navigate(`/chat?q=${encodeURIComponent(q)}`);
   };
+  /** 空态「去问答触发 /建议」的深链查询（send=1 = 跳转即自动发送）；
+   *  代码写法按 generate-advice 技能约定：持仓内裸代码，非持仓带 sh/sz 前缀 */
+  const adviceDeepLink = `/chat?q=${encodeURIComponent(
+    item ? `/建议 ${item.held ? item.code : (sym ?? item.code)}` : "/建议",
+  )}&send=1`;
   const rerun = () => {
     void useAdvice.getState().load();
     if (code) void useAdvice.getState().loadForCode(code, 50);
@@ -415,8 +420,8 @@ export default function AnalysisScreen() {
                     Icon={IconSpark}
                     od="verdict-none"
                     title="该标的暂无建议留档"
-                    desc="建议由交易日 15:05 盘后复盘自动生成，或在「智能问答」用 /建议 触发；数字归规则、文字归模型（ADR-0007），生成后这里显示结论、得分、四维与目标止损。K 线为真实行情，可先查看。"
-                    actions={[{ label: "去问答触发 /建议", to: "/chat" }]}
+                    desc="建议由交易日 15:05 盘后复盘自动生成，或点下方按钮直达问答并自动发送 /建议；数字归规则、文字归模型（ADR-0007），生成后这里显示结论、得分、四维与目标止损。K 线为真实行情，可先查看。"
+                    actions={[{ label: "去问答触发 /建议", to: adviceDeepLink }]}
                   />
                 )}
               </div>

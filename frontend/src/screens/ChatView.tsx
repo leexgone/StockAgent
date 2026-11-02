@@ -18,7 +18,9 @@ import { useUi } from "../store/ui";
  * 右栏三卡：context（助理现在能看到什么，读 portfolio/alerts/clock 原值）、
  * limit（能力边界自陈，静态）、sessions（最近会话 = push_log 定时任务留痕 +
  * 微信渠道待 C4 接入）。建议问题 chips / ?q= 深链只预填输入不自动发送（真实
- * LLM，交用户确认）；会话持久化 localStorage（docs/02 chat 约定，上限 30 条）。
+ * LLM，交用户确认）；例外 = `?q=…&send=1`（analysis 空态「去问答触发 /建议」
+ * 出口——斜杠指令意图明确，跳转即自动发送一次，agent 离线时停留预填态待上线补发）；
+ * 会话持久化 localStorage（docs/02 chat 约定，上限 30 条）。
  */
 
 /* push_log.kind → 会话文案（与 index 时间线同映射，03 §12 封闭词汇） */
@@ -45,15 +47,17 @@ export default function ChatView({ now }: { now: Date }) {
   const pushRows = usePushLog((s) => s.rows);
 
   const agentOnline = health?.agent_online ?? false;
-  const [prefill, setPrefill] = useState<{ text: string; nonce: number }>({ text: "", nonce: 0 });
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number; send?: boolean }>({ text: "", nonce: 0 });
   const [clearNonce, setClearNonce] = useState(0);
   const toast = (m: string) => useUi.getState().pushToast(m);
 
-  // ?q= 深链（analysis「就这只问我」出口）：预填一次，不自动发送
+  // ?q= 深链（analysis「就这只问我」出口）：预填一次，不自动发送；
+  // &send=1（analysis「去问答触发 /建议」出口）：预填 + agent 上线后自动发送一次
   const deepQ = params.get("q");
+  const deepSend = params.get("send") === "1";
   useEffect(() => {
-    if (deepQ) setPrefill({ text: deepQ, nonce: 1 });
-  }, [deepQ]);
+    if (deepQ) setPrefill({ text: deepQ, nonce: 1, send: deepSend });
+  }, [deepQ, deepSend]);
 
   const agg = view?.agg;
   const holdings = view?.holdings ?? [];
