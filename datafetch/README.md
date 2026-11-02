@@ -16,6 +16,9 @@ uv run pytest                            # 离线单测：假源注入，不打�
 uv run spike_probe.py --quick            # 历史探测（P2-T1，三轮结论的出处）
 ```
 
+Windows 日常启动可直接用 `start_sidecar.ps1`（右键「使用 PowerShell 运行」或终端执行）：
+优先 `.venv`、缺则回退 `uv run`，启动前先探 8300 端口，已有实例时提示而不重复启动。
+
 ## 端点契约
 
 | 端点 | 参数 | 说明 |

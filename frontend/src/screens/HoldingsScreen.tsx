@@ -635,6 +635,9 @@ export default function HoldingsScreen() {
         onSaved={(msg) => {
           toast(msg);
           void useHoldingEdits.getState().load();
+          // 快照校正不带行情字段（03 §13）——保存后立即触发刷新链回写现价/昨收，
+          // 兑现表单里「保存后由刷新链自动回写」的提示；sidecar 不在时 store 记 error、旧值保留。
+          void usePortfolio.getState().refresh();
         }}
       />
     </main>
