@@ -29,7 +29,10 @@
 }
 
 .chat-log {
-  max-height: 340px;
+  /* 全高布局下随列伸缩（.chat-thread-col > .chat 为 flex 列），页面不出总滚动条——
+     只有这里内部滚动；min-height 是极矮视口的最后底线 */
+  flex: 1 1 auto;
+  min-height: 160px;
   overflow-y: auto;
   display: grid;
   gap: 8px;
@@ -144,7 +147,29 @@ code {
 
 /* ---------- chat 屏布局（P5-T2，迁移自 design/chat.html <style> 的相关小件） ----------
    线程列（ChatPanel）+ 右栏 rail（上下文 / 边界 / 最近会话）。 */
-.chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 16px; align-items: start; }
+/* 行高必须锁 minmax(0,1fr)：隐式 auto 行会被会话内容撑出容器，
+   整条全高弹性链（page-fill → thread-col → chat → log）随之全部架空 */
+.chat-layout { display: grid; grid-template-columns: minmax(0, 1fr) 296px; grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: stretch; }
+
+/* 全高弹性布局（2026-11-02 布局调整）：会话区吃满视口剩余高度、建议问题 chips 沉到线程列底部。
+   链条：.main(flex 列, min-height:100dvh) → .page-fill(flex:1) → .chat-layout(flex:1)
+   → .chat-thread-col(flex 列) → .chat(flex:1) → .chat-log(flex:1, 内部滚动)。
+   窄屏（<1100px 单列）页面整体自然滚动，.chat-log 的 min-height 保证可用高度。 */
+/* 视口高度钉死在 .main（仅 chat 屏在屏时）：这是整条收缩链的前提——
+   容器高度不由内容决定，page-fill → chat-layout → thread-col → chat → log
+   与右栏三卡的 flex/min-height:0 才真正生效 */
+body.chat-fill .main { height: 100dvh; }
+.page-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.page-fill .chat-layout { flex: 1; min-height: 0; }
+.chat-thread-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.chat-thread-col > .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* 右栏三卡同屏全见：rail 改 flex 列，卡片可收缩（flex-shrink 按内容比例分担）、
+   保底 128px 都露出来；head 固定、其余内容区各自内部滚动（card-body / .list 通吃） */
+.page-fill .rail { display: flex; flex-direction: column; min-height: 0; }
+.page-fill .rail > .card { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 128px; overflow: hidden; }
+.page-fill .rail > .card > .card-head { flex: none; }
+.page-fill .rail > .card > *:not(.card-head) { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
 /* 上下文卡：标签 + 右对齐等宽值（.rail 作用域，避免与全局 .row 冲突） */
 .rail .ctx-row { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; padding: 7px 0; border-bottom: 1px dashed var(--border); }
@@ -156,4 +181,17 @@ code {
 .suggest button { flex: none; font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px dashed var(--border-2); background: transparent; color: var(--muted); transition: color .14s, border-color .14s; }
 .suggest button:hover { color: var(--fg); border-color: var(--accent-line); }
 
-@media (max-width: 1100px) { .chat-layout { grid-template-columns: minmax(0, 1fr); } }
+@media print {
+  body.chat-fill .main { height: auto; }
+}
+
+@media (max-width: 1100px) {
+  .chat-layout { grid-template-columns: minmax(0, 1fr); }
+  /* 窄屏单列：一屏放不下全部区块，恢复页面自然滚动、各区块完整展开不内滚压缩 */
+  body.chat-fill .main { height: auto; }
+  .page-fill { flex: none; }
+  .page-fill .chat-layout { flex: none; grid-template-rows: none; }
+  .chat-log { min-height: 320px; }
+  .page-fill .rail > .card { flex: none; min-height: 0; overflow: visible; }
+  .page-fill .rail > .card > *:not(.card-head) { overflow: visible; }
+}

@@ -59,6 +59,14 @@ export default function ChatView({ now }: { now: Date }) {
     if (deepQ) setPrefill({ text: deepQ, nonce: 1, send: deepSend });
   }, [deepQ, deepSend]);
 
+  // 全高布局：给 body 挂标记类，chat.css 据此把 .main 钉到 100dvh——
+  // .main 高度是 auto（仅 min-height）时，子级 flex:1/min-height:0 没有收缩依据，
+  // 会话一长整页就被撑出总滚动条。离屏即摘类，其它屏不受影响。
+  useEffect(() => {
+    document.body.classList.add("chat-fill");
+    return () => document.body.classList.remove("chat-fill");
+  }, []);
+
   const agg = view?.agg;
   const holdings = view?.holdings ?? [];
   const per = view?.per ?? [];
@@ -84,7 +92,8 @@ export default function ChatView({ now }: { now: Date }) {
   );
 
   return (
-    <main className="page" data-od-id="chat-page">
+    // page-fill：会话区随视口可视高度自动扩展（chat.css 全高弹性布局），chips 沉底
+    <main className="page page-fill" data-od-id="chat-page">
       <div className="page-head">
         <div>
           <div className="eyebrow">智能问答</div>
@@ -107,8 +116,9 @@ export default function ChatView({ now }: { now: Date }) {
       </div>
 
       <div className="chat-layout">
-        {/* 左：建议问题 + 线程（真实 Agent SSE，ChatPanel 自带 card 外壳，不嵌套） */}
-        <div className="grid" style={{ gap: 16 }} data-od-id="chat-thread-col">
+        {/* 左：线程（真实 Agent SSE，ChatPanel 自带 card 外壳，不嵌套）+ 建议问题沉底 */}
+        <div className="chat-thread-col" data-od-id="chat-thread-col">
+          <ChatPanel agentOnline={agentOnline} prefill={prefill} clearNonce={clearNonce} persistKey="zimu:chat:me" />
           <section className="card" data-od-id="chat-suggest-card" style={{ padding: 0 }}>
             <div className="suggest" id="suggest">
               {SUGGESTIONS.map((s) => (
@@ -116,7 +126,6 @@ export default function ChatView({ now }: { now: Date }) {
               ))}
             </div>
           </section>
-          <ChatPanel agentOnline={agentOnline} prefill={prefill} clearNonce={clearNonce} persistKey="zimu:chat:me" />
         </div>
 
         {/* 右：上下文 / 边界 / 最近会话 */}
