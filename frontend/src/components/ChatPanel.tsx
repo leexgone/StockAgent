@@ -73,7 +73,16 @@ export interface ChatPanelProps {
   clearNonce?: number;
   /** 设置则把会话持久化到 localStorage[key]（上限 30 条，docs/02 chat 约定） */
   persistKey?: string;
+  /**
+   * SSE `connected` 事件上抛（model/profile/工具面）——连接信息不进对话框，
+   * 由宿主（ChatView）挂在「Agent 在线」徽章上作悬停 hint（docs/02 展示口径）。
+   * 重连会再次触发，宿主覆盖即可。
+   */
+  onConnected?: (info: { model: string; profile: string; tools: string[] }) => void;
 }
+
+/** 连接通知文本前缀（历史存档清除的判定——新逻辑不再往对话框写此类条目） */
+const CONNECT_NOTICE = "Agent 已连接";
 
 /** 从 localStorage 读回历史（坏数据 → 空）；流式未完成段归一为 done */
 function loadPersisted(key: string): Entry[] {
@@ -81,13 +90,17 @@ function loadPersisted(key: string): Entry[] {
     const raw = localStorage.getItem(key);
     if (!raw) return [];
     const arr = JSON.parse(raw) as Entry[];
-    return arr.map((e) => (e.kind === "assistant" ? { ...e, done: true } : e));
+    return arr
+      .map((e) => (e.kind === "assistant" ? { ...e, done: true } : e))
+      // 历史版本写进对话框的「Agent 已连接」通知读回即清除（2026-11-03 拍板：
+      // 连接信息改走「Agent 在线」徽章的悬停 hint，不属于对话内容）——旧存档自愈。
+      .filter((e) => !(e.kind === "notice" && e.text.startsWith(CONNECT_NOTICE)));
   } catch {
     return [];
   }
 }
 
-export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey }: ChatPanelProps) {
+export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey, onConnected }: ChatPanelProps) {
   const [entries, setEntries] = useState<Entry[]>(() => (persistKey ? loadPersisted(persistKey) : []));
   const [conn, setConn] = useState<Conn>("connecting");
   const [pending, setPending] = useState<Pending>(null);
@@ -97,6 +110,11 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
   const inputRef = useRef<HTMLInputElement>(null);
   /** 已自动发送过的 prefill nonce（send=1 深链只发一次，busy/离线恢复后不重放） */
   const autoSent = useRef(0);
+  // onConnected 走 ref：SSE effect 只依赖 agentOnline，宿主换回调不重连事件流
+  const onConnectedRef = useRef(onConnected);
+  useEffect(() => {
+    onConnectedRef.current = onConnected;
+  }, [onConnected]);
 
   // 持久化（上限 30 条）
   useEffect(() => {
@@ -142,6 +160,10 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
         ev = JSON.parse(e.data as string) as SseEvent;
       } catch {
         return;
+      }
+      // 连接信息上抛宿主（徽章悬停 hint），不进对话流——见 handleEvent connected 分支
+      if (ev.type === "connected") {
+        onConnectedRef.current?.({ model: ev.model, profile: ev.profile, tools: ev.tools });
       }
       handleEvent(ev, setEntries, setPending, setBusy);
     };
@@ -290,9 +312,10 @@ function EntryView({ entry }: { entry: Entry }) {
       return <p className="chat-user">我：{entry.text}</p>;
     case "assistant":
       return (
-        <div className={`chat-assistant${entry.done ? "" : " chat-streaming"}`}>
+        <div className="chat-assistant">
           <span className="chat-who">子木：</span>
-          {/* 累积整段重渲（气泡文本尺寸下每 delta 开销可忽略）；流时光标仍挂容器 ::after */}
+          {/* 累积整段重渲（气泡文本尺寸下每 delta 开销可忽略）；流式无闪烁光标——
+              entry.done 仍归状态机使用（空白帧守卫/持久化归一），渲染层不再消费 */}
           <div className="chat-md">
             <Markdown remarkPlugins={MD_PLUGINS} components={MD_COMPONENTS}>
               {entry.text}
@@ -330,14 +353,8 @@ function handleEvent(
 ) {
   switch (ev.type) {
     case "connected":
-      setEntries((prev) => [
-        ...prev,
-        {
-          kind: "notice",
-          level: "info",
-          text: `Agent 已连接：${ev.model}（profile ${ev.profile}，工具 ${ev.tools.join("、")}）`,
-        },
-      ]);
+      // 2026-11-03 拍板：连接信息（model/profile/工具面）不是对话内容，不写 entries——
+      // 由 onmessage 上抛宿主作「Agent 在线」徽章的悬停 hint（docs/02 chat 展示口径）。
       break;
     case "text_delta":
       setEntries((prev) => {

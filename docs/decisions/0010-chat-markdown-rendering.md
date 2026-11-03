@@ -23,7 +23,7 @@ chat 屏会话面板（frontend ChatPanel）此前把助手消息按纯文本渲
    - `img` → 不渲染（助手文本回答不该出现图片，出现即按注入面处理，丢弃）；
    - `table` → 外套横向滚动容器（窄屏/宽表不撑破气泡）。
 4. **样式 = 设计令牌，作用域 `.chat-md`**：正文 13px/1.7、标题收敛到 ≤15px（气泡不是文档页）、表格 `font-variant-numeric: tabular-nums` + 数字走 `--font-mono`、边框 `--border`、表头底 `--surface-2`、代码沿用 chat.css 现有全局 `code` 样式。**链接不用 `--accent`**（每屏 ≤2 处的预算保护），用继承色 + 下划线。三套涨跌语义色规则照常适用。
-5. **流式兼容 = 零协议改动**。SSE wire、robit、zimu-server 全部不碰；ChatPanel 本就累积整段文本再渲染，每个 `text_delta` 重渲整段（气泡文本尺寸下开销可忽略）。空白帧守卫与 `turn_complete` 收口（10c1e26 落地）语义不变，`chat-streaming` 光标仍是容器 `::after`，挂在渲染后的末尾自然成立。
+5. **流式兼容 = 零协议改动**。SSE wire、robit、zimu-server 全部不碰；ChatPanel 本就累积整段文本再渲染，每个 `text_delta` 重渲整段（气泡文本尺寸下开销可忽略）。空白帧守卫与 `turn_complete` 收口（10c1e26 落地）语义不变。同日拍板：流式回复**去掉闪烁光标**（`chat-streaming::after` 删除）——进行状态由输入框「等待本轮回复…」占位与「取消」按钮承担，正文到达本身即进度指示。
 6. **历史兼容 = 无迁移**。localStorage 会话存的是原始 Markdown 文本，展示层变化不影响已存档数据；旧会话重载即得新渲染。
 
 ## 后果

@@ -15,9 +15,10 @@ import { useUi } from "../store/ui";
  * 线程 = 真实 Agent SSE（ChatPanel，流式文本 + 工具调用/确认 + skill）——比原型
  * 演示问答库（固定三层脚本 + 假 cites）更强：依据来源就是 Agent 实调的行情/持仓
  * 工具（tool_call/tool_result 如实展示），不伪造引用。
- * 右栏三卡：context（助理现在能看到什么，读 portfolio/alerts/clock 原值）、
- * limit（能力边界自陈，静态）、sessions（最近会话 = push_log 定时任务留痕 +
- * 微信渠道待 C4 接入）。建议问题 chips / ?q= 深链只预填输入不自动发送（真实
+ * 右栏两卡：context（助理现在能看到什么，读 portfolio/alerts/clock 原值）、
+ * sessions（最近会话 = push_log 定时任务留痕 + 微信渠道待 C4 接入）。原 limit 卡
+ * 「它不会做的事」已移除（2026-11-03 拍板）——边界承诺由页头描述与免责脚注兜底
+ * （docs/02 chat 展示口径）。建议问题 chips / ?q= 深链只预填输入不自动发送（真实
  * LLM，交用户确认）；例外 = `?q=…&send=1`（analysis 空态「去问答触发 /建议」
  * 出口——斜杠指令意图明确，跳转即自动发送一次，agent 离线时停留预填态待上线补发）；
  * 会话持久化 localStorage（docs/02 chat 约定，上限 30 条）。
@@ -49,6 +50,9 @@ export default function ChatView({ now }: { now: Date }) {
   const agentOnline = health?.agent_online ?? false;
   const [prefill, setPrefill] = useState<{ text: string; nonce: number; send?: boolean }>({ text: "", nonce: 0 });
   const [clearNonce, setClearNonce] = useState(0);
+  // SSE connected 事件的连接信息（model/profile/工具面）：挂「Agent 在线」徽章悬停 hint，
+  // 不进对话框（docs/02 chat 展示口径，2026-11-03 拍板）
+  const [agentInfo, setAgentInfo] = useState<{ model: string; profile: string; tools: string[] } | null>(null);
   const toast = (m: string) => useUi.getState().pushToast(m);
 
   // ?q= 深链（analysis「就这只问我」出口）：预填一次，不自动发送；
@@ -103,7 +107,17 @@ export default function ChatView({ now }: { now: Date }) {
           </p>
         </div>
         <div className="page-actions">
-          <span className={`pill ${agentOnline ? "ok" : ""}`} style={{ marginRight: 4 }}>
+          {/* 连接详情（model/profile/工具面）作悬停 hint，不占对话框（docs/02 展示口径）；
+              离线/未连时不给 title，避免展示陈旧连接信息 */}
+          <span
+            className={`pill ${agentOnline ? "ok" : ""}`}
+            style={{ marginRight: 4 }}
+            title={
+              agentOnline && agentInfo
+                ? `Agent 已连接：${agentInfo.model}（profile ${agentInfo.profile}，工具 ${agentInfo.tools.join("、")}）`
+                : undefined
+            }
+          >
             {health ? (agentOnline ? "Agent 在线" : "Agent 离线") : "连接中…"}
           </span>
           <button className="btn" id="clear-btn" onClick={() => { setClearNonce((n) => n + 1); toast("会话已清空（仅存在本机浏览器）"); }}>
@@ -118,7 +132,7 @@ export default function ChatView({ now }: { now: Date }) {
       <div className="chat-layout">
         {/* 左：线程（真实 Agent SSE，ChatPanel 自带 card 外壳，不嵌套）+ 建议问题沉底 */}
         <div className="chat-thread-col" data-od-id="chat-thread-col">
-          <ChatPanel agentOnline={agentOnline} prefill={prefill} clearNonce={clearNonce} persistKey="zimu:chat:me" />
+          <ChatPanel agentOnline={agentOnline} prefill={prefill} clearNonce={clearNonce} persistKey="zimu:chat:me" onConnected={setAgentInfo} />
           <section className="card" data-od-id="chat-suggest-card" style={{ padding: 0 }}>
             <div className="suggest" id="suggest">
               {SUGGESTIONS.map((s) => (
@@ -128,7 +142,7 @@ export default function ChatView({ now }: { now: Date }) {
           </section>
         </div>
 
-        {/* 右：上下文 / 边界 / 最近会话 */}
+        {/* 右：上下文 / 最近会话 */}
         <div className="grid rail" style={{ gap: 16 }}>
           <section className="card" data-od-id="chat-context-card">
             <div className="card-head">
@@ -148,18 +162,6 @@ export default function ChatView({ now }: { now: Date }) {
               {ctxRow("前三大", top3.length ? top3.map((t) => `${t.name} ${fixed(t.w, 1)}%`).join(" · ") : "暂无持仓")}
               {ctxRow("待处理预警", `${pend} 条`)}
               {ctxRow("市场时段", `${clock.state}${clock.next ? " · " + clock.next : ""}`)}
-            </div>
-          </section>
-
-          <section className="card" data-od-id="chat-limit-card">
-            <div className="card-head"><div><div className="card-title">它不会做的事</div></div></div>
-            <div className="card-body">
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.8, color: "var(--fg-2)" }}>
-                <li>不代为下真实委托，只生成试算</li>
-                <li>不预测涨跌幅百分比，只给条件与区间</li>
-                <li>不引用你没授权的数据源</li>
-                <li>不把置信度说成胜率或收益承诺</li>
-              </ul>
             </div>
           </section>
 

@@ -111,13 +111,8 @@
 }
 .chat-md pre code { background: none; padding: 0; }
 
-/* 流式中：光标式闪烁提示（纯装饰，不用涨跌色） */
-.chat-streaming::after {
-  content: "▍";
-  color: var(--accent);
-  animation: chat-blink 1s step-end infinite;
-}
-@keyframes chat-blink { 50% { opacity: 0; } }
+/* 流式中不再有闪烁光标（2026-11-03 拍板）：进行状态由输入框「等待本轮回复…」
+   占位与「取消」按钮承担，正文到达本身就是最直接的进度指示。 */
 
 .chat-tool {
   border: 1px solid var(--border-2);
@@ -209,8 +204,9 @@ body.chat-fill .main { height: 100dvh; }
 .chat-thread-col { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 .chat-thread-col > .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-/* 右栏三卡同屏全见：rail 改 flex 列，卡片可收缩（flex-shrink 按内容比例分担）、
-   保底 128px 都露出来；head 固定、其余内容区各自内部滚动（card-body / .list 通吃） */
+/* 右栏各卡同屏全见（limit 卡移除后剩两卡，规则与卡数无关）：rail 改 flex 列，
+   卡片可收缩（flex-shrink 按内容比例分担）、保底 128px 都露出来；head 固定、
+   其余内容区各自内部滚动（card-body / .list 通吃） */
 .page-fill .rail { display: flex; flex-direction: column; min-height: 0; }
 .page-fill .rail > .card { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 128px; overflow: hidden; }
 .page-fill .rail > .card > .card-head { flex: none; }
