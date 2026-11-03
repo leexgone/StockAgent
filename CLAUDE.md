@@ -51,7 +51,7 @@ docs/decisions/    ADR 决策记录
 - 路由：react-router v7（BrowserRouter），路由表单一来源 `src/routes.ts`——路径与原型文件名一致（`/` `/dashboard` `/holdings` `/analysis` `/chat` `/diagnosis` `/wechat`），未移植屏渲染占位屏，T2 每移植一屏翻 `ported` 并在 App 挂真实屏；未知路径回落 `/`；新屏必须走 routes.ts 注册 + Chrome 导航项，禁止组件内私自切视图。
 - API client：唯一 REST 入口 `src/api/client.ts`（openapi-fetch + `npm run gen:api` 生成的 `schema.d.ts`）；不手拼 URL、不裸 fetch，`[data, error]` 元组的 error 分支必须处理；唯一例外 = SSE 会话 `/api/chat*`（ChatPanel 原生 fetch 流式读取）。契约变更：后端再生成 openapi.json → `npm run gen:api` → tsc 暴露漂移。
 - 状态：zustand（与 robit-gui 基线一致），store 按域拆 `src/store/<domain>.ts`（随 T2 逐屏落地，不预建空壳）。**派生数字以后端为唯一真值**（recalc/打分/预警判定全在服务端），store 只缓存 API payload 与 UI 状态；唯一例外 = 加减仓抽屉实时试算用 `src/domain/` TS 库，提交后以后端返回覆盖。
-- 组件与样式：手写组件 + 设计令牌（`styles/tokens.css` / `ui.css`），图表手写 SVG 镜像 `design/assets/charts.js`；不引 UI 组件库、图表库、Tailwind——要引先补 ADR。原型约定全部保留：每屏 `data-od-id`、底部 `*-disclaimer`、格式化统一 `money/fmt/pct/wan`（过渡期在 `data/demo.ts`，删除 demo.ts 前先抽 `src/lib/`）、三套涨跌语义不混类、`--accent` 每屏 ≤2 处。
+- 组件与样式：手写组件 + 设计令牌（`styles/tokens.css` / `ui.css`），图表手写 SVG 镜像 `design/assets/charts.js`；不引 UI 组件库、图表库、Tailwind——要引先补 ADR。已记录的例外：助手消息 Markdown 渲染用 react-markdown + remark-gfm（ADR-0010，文本渲染工具非 UI 库；原始 HTML/图片不渲染、链接 noopener）。原型约定全部保留：每屏 `data-od-id`、底部 `*-disclaimer`、格式化统一 `money/fmt/pct/wan`（过渡期在 `data/demo.ts`，删除 demo.ts 前先抽 `src/lib/`）、三套涨跌语义不混类、`--accent` 每屏 ≤2 处。
 - mock 数据：`demo.ts` 随 T2 逐屏被真实 API 替换，最后一屏迁完即删（`design/` 冻结见 P5-T3）。
 
 **代码规范（`design/` 原型）**

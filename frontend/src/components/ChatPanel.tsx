@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 /**
  * 子木会话面板 —— 真实 Agent SSE 线程（P2-T3 验证链路；P5-T2 起即 chat 屏的
@@ -6,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * 流式回答 + 工具调用/结果 + 确认请求 + skill 触发如实展示——「依据来源」就是
  * Agent 实调的行情/持仓工具，不伪造引用。会话可持久化（persistKey，docs/02）。
  * 事件形状与后端 SseEvent 对齐（backend/crates/zimu-server/src/agent_bridge.rs）。
+ * 助手消息按 GFM Markdown 渲染（ADR-0010）；用户/通知/工具条目保持纯文本。
  */
 
 type SseEvent =
@@ -28,6 +31,22 @@ type Entry =
 type Pending = { tool_call_id: string; name: string; arguments: string } | null;
 
 type Conn = "connecting" | "open" | "error";
+
+/* ---------- 助手消息 Markdown 渲染（ADR-0010） ----------
+   react-markdown 产出 React 元素，原始 HTML 默认不渲染——LLM 输出混入
+   <script>/on*= 只是被丢弃，XSS 免疫是结构性的，不靠净化器兜底。
+   守卫三条：链接新标签页 + noopener（不安全协议由内置 urlTransform 默认剥除）、
+   图片一律不渲染（回答不该出现图，出现即按注入面丢弃）、表格外套横向滚动容器。 */
+const MD_PLUGINS = [remarkGfm];
+const MD_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+  img: () => null,
+  table: ({ node: _node, ...props }) => (
+    <div className="chat-md-scroll">
+      <table {...props} />
+    </div>
+  ),
+};
 
 /** 工具参数原文（JSON 字符串）压成一行摘要，长参截断——完整值看 SSE 原文即可 */
 function briefArgs(raw: string): string {
@@ -272,7 +291,13 @@ function EntryView({ entry }: { entry: Entry }) {
     case "assistant":
       return (
         <div className={`chat-assistant${entry.done ? "" : " chat-streaming"}`}>
-          子木：{entry.text}
+          <span className="chat-who">子木：</span>
+          {/* 累积整段重渲（气泡文本尺寸下每 delta 开销可忽略）；流时光标仍挂容器 ::after */}
+          <div className="chat-md">
+            <Markdown remarkPlugins={MD_PLUGINS} components={MD_COMPONENTS}>
+              {entry.text}
+            </Markdown>
+          </div>
         </div>
       );
     case "tool":

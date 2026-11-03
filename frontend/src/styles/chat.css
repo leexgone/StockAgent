@@ -66,6 +66,51 @@
   word-break: break-word;
 }
 
+/* ---------- 助手消息 Markdown 渲染（ADR-0010：react-markdown + remark-gfm） ----------
+   作用域收在 .chat-md；全走设计令牌，标题在气泡里收敛字号（气泡不是文档页）。 */
+.chat-who {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+.chat-md {
+  /* 容器 .chat-assistant 的 pre-wrap 会把源码换行打成硬换行，这里必须复位 */
+  white-space: normal;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.chat-md > :first-child { margin-top: 0; }
+.chat-md > :last-child { margin-bottom: 0; }
+.chat-md p { margin: 6px 0; }
+.chat-md h1 { font-size: 15px; margin: 10px 0 6px; }
+.chat-md h2 { font-size: 14px; margin: 9px 0 5px; }
+.chat-md h3, .chat-md h4, .chat-md h5, .chat-md h6 { font-size: 13.5px; margin: 8px 0 4px; }
+.chat-md ul, .chat-md ol { margin: 6px 0; padding-left: 20px; }
+.chat-md li { margin: 2px 0; }
+.chat-md li > p { margin: 0; }
+.chat-md li input[type="checkbox"] { margin-right: 6px; }
+/* 链接不占 --accent 每屏预算（05）：继承色 + 淡下划线即可 */
+.chat-md a { text-decoration: underline; text-decoration-color: var(--border-2); text-underline-offset: 2px; }
+.chat-md a:hover { text-decoration-color: var(--fg-2); }
+.chat-md blockquote { margin: 6px 0; padding: 2px 10px; border-left: 3px solid var(--border-2); color: var(--fg-2); }
+.chat-md hr { border: 0; border-top: 1px dashed var(--border); margin: 8px 0; }
+/* 宽表横向滚动（.chat-md-scroll 由 ChatPanel components 映射包），不撑破气泡 */
+.chat-md-scroll { overflow-x: auto; margin: 6px 0; }
+.chat-md table { border-collapse: collapse; font-size: 12.5px; }
+.chat-md th, .chat-md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+.chat-md th { background: var(--surface-2); font-weight: 590; white-space: nowrap; }
+.chat-md td { font-variant-numeric: tabular-nums; }
+.chat-md pre {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 6px 0;
+  white-space: pre;
+}
+.chat-md pre code { background: none; padding: 0; }
+
 /* 流式中：光标式闪烁提示（纯装饰，不用涨跌色） */
 .chat-streaming::after {
   content: "▍";

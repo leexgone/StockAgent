@@ -108,6 +108,11 @@
 技能约定：持仓内裸代码、非持仓带 sh/sz 前缀）；agent 离线时停留预填态，上线后补发，
 每个 nonce 只发一次不重放。
 
+生产侧展示口径（ADR-0010）：助手消息按 GFM Markdown 渲染（react-markdown + remark-gfm，
+原始 HTML 不渲染、`javascript:` 等不安全链接剥除、图片不渲染、链接新标签页 + noopener、
+表格外套横向滚动）；用户消息、通知与工具条目保持纯文本。样式作用域 `.chat-md`，全走
+设计令牌，链接不占 `--accent` 预算。
+
 ## diagnosis.html — 组合诊断
 
 | 模块 | 内容 | 数据依赖 |
