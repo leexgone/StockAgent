@@ -12,7 +12,6 @@
 | 06 | [roadmap](./06-roadmap.md) | 路线图与执行计划：阶段、任务分解（带编号）、决策闸门与完成标准 |
 | 07 | [backlog](./07-backlog.md) | 已知问题、待决策项、需要人拍板的事 |
 | — | [decisions/](./decisions/) | ADR 决策记录：每个取舍的理由 |
-| — | [robit-rfc-thinking-output](./robit-rfc-thinking-output.md) | 跨仓库需求文档：模型思考输出进 robit wire（随 07 R7，交给 robit 侧评审实施） |
 
 ## 写作规范
 

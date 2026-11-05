@@ -114,7 +114,7 @@
 
 | # | 任务 | 产出/验收 | 估算 | 状态 |
 |---|---|---|---|---|
-| P7-T1 | 模型思考过程展示链路（`07` R7；需求文档 [robit-rfc-thinking-output.md](./robit-rfc-thinking-output.md)）：robit 三层实施（robit-ai 捕获 `reasoning_content` → `AgentEvent::ThinkingDelta` → robit-web `thinking_delta` wire，顺带收口 R6 空白帧）+ 子木消费（ChatPanel 加 case、docs/02 补展示口径段） | 思考增量在 chat 屏可见（形态待产品拍板：折叠灰字 vs 默认隐藏）；robit 侧验收见 RFC §3；子木侧 tsc/build/test 全绿 + 真实 qwen profile 人工走查 | robit 侧另评（实现复杂度较高）；子木侧 0.5d | ⏸ 2026-11-05 用户拍板：实现复杂，先登记后完善——robit 侧评审排期、子木侧等 robit 发版；不阻塞 P6/MVP |
+| P7-T1 | 模型思考过程展示链路（`07` R7；需求文档已移交 robit，唯一真值 `robit/docs/robit-rfc-thinking-output.md`）：robit 三层实施（robit-ai 捕获 `reasoning_content` → `AgentEvent::ThinkingDelta` → robit-web `thinking_delta` wire，顺带收口 R6 空白帧）+ 子木消费（ChatPanel 加 case、docs/02 补展示口径段） | 思考增量在 chat 屏可见（形态待产品拍板：折叠灰字 vs 默认隐藏）；robit 侧验收见 RFC §3；子木侧 tsc/build/test 全绿 + 真实 qwen profile 人工走查 | robit 侧另评（实现复杂度较高）；子木侧 0.5d | 🔨 2026-11-05 移交 robit 后已立项实施：robit 侧设计文档 `robit/docs/robit-design-thinking-output.md`（分支 `feat/thinking-output`，目标 0.1.28；范围＝reasoning_content 全链路 + robit-gui 启用渲染，TUI/QQ Bot 仅补编译臂）。子木侧等 0.1.28 发版后消费（0.5d：ChatPanel 加 case + `02` 展示口径段）；展示形态（折叠灰字 vs 默认隐藏）仍待产品拍板；不阻塞 P6/MVP |
 
 ## 之后再说（明确不在近期计划里）
 
