@@ -164,6 +164,8 @@ fn main() -> anyhow::Result<()> {
         let mut reader = BufReader::new(stdin).lines();
 
         let mut pending_confirm: Option<oneshot::Sender<bool>> = None;
+        // 思考段进行中（R7：ThinkingDelta 渲染成暗体段，段首/段尾需要状态跟踪）
+        let mut in_thinking = false;
 
         print!("> ");
         let _ = std::io::stdout().flush();
@@ -173,7 +175,7 @@ fn main() -> anyhow::Result<()> {
                 maybe_event = event_rx.recv() => {
                     if let Some(event) = maybe_event {
                         let done = matches!(event, AgentEvent::TurnComplete);
-                        render_event(&event);
+                        render_event(&event, &mut in_thinking);
                         if done {
                             print!("> ");
                             let _ = std::io::stdout().flush();
@@ -244,9 +246,25 @@ fn mask_secret(s: &str) -> String {
 }
 
 /// 把 Agent 事件渲染到 stdout。只在主任务里调用。
-fn render_event(event: &AgentEvent) {
+/// `in_thinking` 跟踪思考段（R7，robit 0.1.28）：段首打 💭 标记进暗体，
+/// 任何非思考事件先收口——顺序契约无显式结束标记，`turn_complete` 兜底。
+fn render_event(event: &AgentEvent, in_thinking: &mut bool) {
+    if *in_thinking && !matches!(event, AgentEvent::ThinkingDelta(_)) {
+        println!("\x1b[0m");
+        *in_thinking = false;
+    }
     match event {
         AgentEvent::TextDelta(text) => {
+            print!("{}", text);
+            let _ = std::io::stdout().flush();
+        }
+        AgentEvent::ThinkingDelta(text) => {
+            // 调试 REPL 的用途之一就是人工核验 reasoning_content 链路，
+            // 故终端以 ANSI 暗体弱样式流式渲染（不做折叠，GUI/网页才有那形态）。
+            if !*in_thinking {
+                print!("\n\x1b[2m💭 ");
+                *in_thinking = true;
+            }
             print!("{}", text);
             let _ = std::io::stdout().flush();
         }

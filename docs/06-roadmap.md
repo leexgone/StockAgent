@@ -15,7 +15,7 @@
 | P4 | 数据管道与存储 | P3 ✅；C5/C8 拍板 ✅（2026-10-28，ADR-0006/0007） | ✅ 2026-10-29（T2–T7 全落地；T1 前端抽屉接线随 P5-T2 holdings 屏于 2026-10-30 收口） | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | 🔨（T1 ✅ 2026-10-29；T2 六屏 ✅ 2026-10-30，余 wechat 待 C4；T3 ✅ design/ 冻结 2026-10-30） | 1–1.5 周 |
 | P6 | MVP 垂直切片（连续 5 个交易日真实跑通） | P4+P5；C4 渠道落地 | ⬜ | ≥5 个交易日 |
-| P7 | MVP 后迭代池（任务自 `07` backlog 与新需求登记；首项：模型思考过程展示链路） | P6；robit 侧 R7 发版 | ⬜ 2026-11-05 登记 | 按任务行 |
+| P7 | MVP 后迭代池（任务自 `07` backlog 与新需求登记；首项：模型思考过程展示链路） | P6；robit 侧 R7 发版 | 🔨 2026-11-07（P7-T1 两侧代码落地：robit v0.1.28 发版 + 子木消费，余真实网关走查） | 按任务行 |
 
 **并行规则**：A 轨 = P1（只动 `design/` 与 `docs/`），B 轨 = P2→P6（新目录）；两轨在 P5 之前互不阻塞。P5 完成后 `design/` 冻结为参照。
 
@@ -110,11 +110,11 @@
 
 **完成标准**：即 P6-T4 验收列。到这里 MVP 成立，之后的迭代按 backlog 与新需求排——P7 是承接这些迭代的登记位（不排死顺序，准入条件 = MVP 成立）。
 
-## P7 · MVP 后迭代 ⬜（2026-11-05 设立）
+## P7 · MVP 后迭代 🔨（2026-11-05 设立）
 
 | # | 任务 | 产出/验收 | 估算 | 状态 |
 |---|---|---|---|---|
-| P7-T1 | 模型思考过程展示链路（`07` R7；需求文档已移交 robit，唯一真值 `robit/docs/robit-rfc-thinking-output.md`）：robit 三层实施（robit-ai 捕获 `reasoning_content` → `AgentEvent::ThinkingDelta` → robit-web `thinking_delta` wire，顺带收口 R6 空白帧）+ 子木消费（ChatPanel 加 case、docs/02 补展示口径段） | 思考增量在 chat 屏可见（形态待产品拍板：折叠灰字 vs 默认隐藏）；robit 侧验收见 RFC §3；子木侧 tsc/build/test 全绿 + 真实 qwen profile 人工走查 | robit 侧另评（实现复杂度较高）；子木侧 0.5d | 🔨 2026-11-05 移交 robit 后已立项实施：robit 侧设计文档 `robit/docs/robit-design-thinking-output.md`（分支 `feat/thinking-output`，目标 0.1.28；范围＝reasoning_content 全链路 + robit-gui 启用渲染，TUI/QQ Bot 仅补编译臂）。子木侧等 0.1.28 发版后消费（0.5d：ChatPanel 加 case + `02` 展示口径段）；展示形态（折叠灰字 vs 默认隐藏）仍待产品拍板；不阻塞 P6/MVP |
+| P7-T1 | 模型思考过程展示链路（`07` R7；需求文档已移交 robit，唯一真值 `robit/docs/robit-rfc-thinking-output.md`）：robit 三层实施（robit-ai 捕获 `reasoning_content` → `AgentEvent::ThinkingDelta` → robit-web `thinking_delta` wire，顺带收口 R6 空白帧）+ 子木消费（ChatPanel 加 case、docs/02 补展示口径段） | 思考增量在 chat 屏可见（形态 2026-11-06 已拍板：对齐 robit-gui 三态折叠）；robit 侧验收见 RFC §3；子木侧 tsc/build/test 全绿 + 真实 qwen profile 人工走查 | robit 侧另评（实现复杂度较高）；子木侧 0.5d | 🔨 两侧代码均已落地，余真实网关人工走查。**robit 侧 ✅ 2026-11-05 发版 v0.1.28**（`feat/thinking-output` 已合并；实施记录 `robit/docs/robit-design-thinking-output.md`：双路径捕获（模型级 `thinking = auto\|on\|off`）+ `thinking_delta` wire + R6 发射端收口 + robit-gui 三态 ThinkingPanel 参考实现）。**子木侧 ✅ 2026-11-07 消费**：backend 升 0.1.28（rusqlite 0.40→0.41 对齐、zimu-agent-cli 穷举 match 补臂——ANSI 暗体渲染思考流）+ openapi SSE 描述补帧再生成 + ChatPanel 思考段三态折叠（live 流式灰字 → 正文/工具事件折叠「▸ 思考过程」→ 点击回看；不持久化）+ `02` 展示口径段；workspace 测试 / tsc / build / vitest 121 例全绿。**余**：真实 qwen profile 人工走查（前置 = `~/.robit/config.toml` 模型级 `thinking = "on"`）；不阻塞 P6/MVP |
 
 ## 之后再说（明确不在近期计划里）
 

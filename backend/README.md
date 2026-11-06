@@ -290,8 +290,8 @@ SQLite 单文件（C9 已决：rusqlite bundled，备份 = 拷文件；`.db` 在
 note）；纯增表，v2 老库自动前进、旧数据无损（`watchlist_migrates_v1_db_to_v2` 覆盖）；八表齐备。
 
 迁移机制：`PRAGMA user_version` 逐版前进，每版一个事务；已发布版本的 SQL 永不修改，
-新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.40）——
-`libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
+新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.41，随
+robit 0.1.28 从 0.40 升）——`libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
 
 ```powershell
 cargo test -p zimu-store   # 28 项：录入事务/校验拒绝/回滚/重启不丢数据/行情回写（P4-T4）/建议留档（P4-T6）/
@@ -312,7 +312,13 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.1.27`（2026-10-31，共同演进回路第二轮：子木
+robit 全家消费 crates.io 正式版 `0.1.28`（2026-11-07 切换，共同演进回路第三轮：
+子木 R7 思考过程输出需求文档 → robit `feat/thinking-output` 落地发布 2026-11-05——
+robit-ai 双路径捕获 `reasoning_content`（模型级 `thinking = auto|on|off`）、
+`AgentEvent::ThinkingDelta`、robit-web `thinking_delta` wire 帧、R6 空白 text_delta
+发射端收口；连带 rusqlite 0.40→0.41 对齐，zimu-agent-cli 穷举 match 补臂）。
+CLI 的 ThinkingDelta 以 ANSI 暗体流式渲染（调试 REPL 兼作链路人工核验面）。
+上一版 0.1.27（2026-10-31，回路第二轮：子木
 R2–R5 宿主形态需求 → robit `feat/host-ergonomics-r2-r5` 落地发布）。子木切换情况：
 **R3 日志可组合原语已消费**——`build_log_filter(host_targets)` + `log_file_layer` +
 `install_panic_hook`，server/cli 单一初始化路径（删「有无 robit 配置」二选一分支，
@@ -380,7 +386,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.27 正式版，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.28 正式版，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

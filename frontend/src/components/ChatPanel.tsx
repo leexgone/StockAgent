@@ -5,15 +5,18 @@ import remarkGfm from "remark-gfm";
 /**
  * 子木会话面板 —— 真实 Agent SSE 线程（P2-T3 验证链路；P5-T2 起即 chat 屏的
  * 会话线程本体，布局与右栏上下文/边界/会话三卡见 screens/ChatView.tsx）。
- * 流式回答 + 工具调用/结果 + 确认请求 + skill 触发如实展示——「依据来源」就是
- * Agent 实调的行情/持仓工具，不伪造引用。会话可持久化（persistKey，docs/02）。
+ * 流式回答 + 思考过程（thinking_delta，R7/robit 0.1.28，三态折叠对齐 robit-gui）
+ * + 工具调用/结果 + 确认请求 + skill 触发如实展示——「依据来源」就是
+ * Agent 实调的行情/持仓工具，不伪造引用。会话可持久化（persistKey，docs/02；
+ * 思考段除外——展示性瞬态，不入 localStorage）。
  * 事件形状与后端 SseEvent 对齐（backend/crates/zimu-server/src/agent_bridge.rs）。
- * 助手消息按 GFM Markdown 渲染（ADR-0010）；用户/通知/工具条目保持纯文本。
+ * 助手消息按 GFM Markdown 渲染（ADR-0010）；用户/通知/工具/思考条目保持纯文本。
  */
 
 type SseEvent =
   | { type: "connected"; profile: string; model: string; tools: string[] }
   | { type: "text_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; tool_call_id: string; name: string; arguments: string }
   | { type: "tool_result"; tool_call_id: string; is_error: boolean; content: string }
   | { type: "skill_triggered"; name: string; description: string }
@@ -25,6 +28,8 @@ type SseEvent =
 type Entry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; done: boolean }
+  /** 思考段（R7）：closed=false 流式展开中，true=已折叠（头行可点开回看）；不持久化 */
+  | { kind: "thinking"; text: string; closed: boolean }
   | { kind: "tool"; id: string; name: string; args: string; result?: { ok: boolean; content: string } }
   | { kind: "notice"; level: "info" | "error"; text: string };
 
@@ -116,11 +121,15 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
     onConnectedRef.current = onConnected;
   }, [onConnected]);
 
-  // 持久化（上限 30 条）
+  // 持久化（上限 30 条；思考段除外——展示性瞬态不入档，与 robit「thinking 不写
+  // history/不落盘」语义一致，会话重开即消失）
   useEffect(() => {
     if (!persistKey) return;
     try {
-      localStorage.setItem(persistKey, JSON.stringify(entries.slice(-30)));
+      localStorage.setItem(
+        persistKey,
+        JSON.stringify(entries.filter((e) => e.kind !== "thinking").slice(-30)),
+      );
     } catch {
       /* 隐私模式/配额满：静默，不影响会话 */
     }
@@ -323,6 +332,8 @@ function EntryView({ entry }: { entry: Entry }) {
           </div>
         </div>
       );
+    case "thinking":
+      return <ThinkingView text={entry.text} closed={entry.closed} />;
     case "tool":
       return (
         <div className="chat-tool">
@@ -344,6 +355,52 @@ function EntryView({ entry }: { entry: Entry }) {
   }
 }
 
+/* ---------- 思考过程段（R7，robit 0.1.28 thinking_delta；2026-11-06 拍板对齐
+   robit-gui 三态）----------
+   live：思考中展开流式灰字（自动滚到尾部）→ 首个正文/工具事件到达折叠为
+   collapsed：「▸ 思考过程」头行，点击回看；turn_complete 兜底闭合。
+   思考文本按纯文本渲染（pre-wrap），不走 Markdown——半截语法在流式中会抖动
+   （GUI 参考实现同款取舍）。 */
+function ThinkingView({ text, closed }: { text: string; closed: boolean }) {
+  // 回看展开是纯 UI 态：closed 后用户点击才展开，不写回 entries
+  const [userOpen, setUserOpen] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // live 态流式自动滚到尾部（折叠/回看态不干预滚动位置）
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!closed && el) el.scrollTop = el.scrollHeight;
+  }, [text, closed]);
+
+  if (!closed) {
+    return (
+      <div className="chat-thinking">
+        <span className="chat-thinking-head">💭 思考中…</span>
+        <div className="chat-thinking-body" ref={bodyRef}>
+          {text}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="chat-thinking">
+      <button
+        type="button"
+        className="chat-thinking-head chat-thinking-toggle"
+        aria-expanded={userOpen}
+        onClick={() => setUserOpen((o) => !o)}
+      >
+        {userOpen ? "▾" : "▸"} 思考过程
+      </button>
+      {userOpen && <div className="chat-thinking-body">{text}</div>}
+    </div>
+  );
+}
+
+/** 折叠所有未闭思考段（三态 live → collapsed；幂等，供正文/工具/收口事件复用） */
+function closeThinking(entries: Entry[]): Entry[] {
+  return entries.map((e) => (e.kind === "thinking" && !e.closed ? { ...e, closed: true } : e));
+}
+
 /** SSE 事件 → 面板状态。纯函数式更新，StrictMode 双挂载下也安全。 */
 function handleEvent(
   ev: SseEvent,
@@ -356,21 +413,36 @@ function handleEvent(
       // 2026-11-03 拍板：连接信息（model/profile/工具面）不是对话内容，不写 entries——
       // 由 onmessage 上抛宿主作「Agent 在线」徽章的悬停 hint（docs/02 chat 展示口径）。
       break;
+    case "thinking_delta":
+      // 思考增量（R7，robit 0.1.28）：续写未闭思考段，否则开新段（工具调用后
+      // 可能再起一段思考）。无显式结束标记——首个正文/工具事件或 turn_complete 折叠。
+      setEntries((prev) => {
+        if (ev.text === "") return prev;
+        const last = prev[prev.length - 1];
+        if (last && last.kind === "thinking" && !last.closed) {
+          return [...prev.slice(0, -1), { ...last, text: last.text + ev.text }];
+        }
+        return [...prev, { kind: "thinking", text: ev.text, closed: false }];
+      });
+      break;
     case "text_delta":
       setEntries((prev) => {
         const last = prev[prev.length - 1];
         if (last && last.kind === "assistant" && !last.done) {
           return [...prev.slice(0, -1), { ...last, text: last.text + ev.text }];
         }
-        // 空白首帧（模型流的角色帧 / 思考模式空内容帧）不建占位气泡——
-        // 只有真正可见的文字才开流式段，否则留下空白「子木：」加常驻光标。
+        // 空白首帧不建占位气泡——只有真正可见的文字才开流式段。robit 0.1.28 起
+        // 空 content 帧已在发射端收口（R6 了断），此守卫保留为惰性兼容。
         if (ev.text.trim() === "") return prev;
-        return [...prev, { kind: "assistant", text: ev.text, done: false }];
+        // 新开正文段：未闭思考段随之折叠（三态 live → collapsed，对齐 robit-gui）
+        const closed = closeThinking(prev);
+        return [...closed, { kind: "assistant", text: ev.text, done: false }];
       });
       break;
     case "tool_call":
       setEntries((prev) => [
-        ...prev,
+        // 工具调用同样闭合思考段（GUI 参考实现以 ToolCallRequested 作段闭合信号）
+        ...closeThinking(prev),
         { kind: "tool", id: ev.tool_call_id, name: ev.name, args: ev.arguments },
       ]);
       break;
@@ -418,7 +490,7 @@ function handleEvent(
       break;
     case "turn_complete":
       setEntries((prev) =>
-        prev
+        closeThinking(prev)
           // 收口**所有**未完成流式段（工具调用前的段落曾被漏掉 → 光标常驻）
           .map((e) => (e.kind === "assistant" && !e.done ? { ...e, done: true } : e))
           // 整段没产出可见文字的段落直接移除（空白气泡没有信息量）

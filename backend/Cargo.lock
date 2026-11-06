@@ -1411,9 +1411,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.38.2"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
+checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
  "cc",
  "pkg-config",
@@ -2071,9 +2071,9 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cc161253ca6af5aaeb2f30e38c76941a1a2ac9696497295c634b3f05776715e"
+checksum = "2a6e9debdc377d6409f6ea47491244d1a3085283066039175480ec2ce22b622d"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2102,13 +2102,17 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71080daa71443a7032d882791e173cab5507e8c1360aacb3f43ef9972df9b15c"
+checksum = "48ec61ddf88ab59f9ef119ca3fe4a91b69995969d504ee5649161b3cc8890875"
 dependencies = [
  "async-openai",
+ "bytes",
  "dirs",
  "dotenvy",
+ "eventsource-stream",
+ "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror",
@@ -2120,9 +2124,9 @@ dependencies = [
 
 [[package]]
 name = "robit-web"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f061c1729b3ecd2889086024adef68d56344747da23329167d771816d8fd0b1"
+checksum = "0217d194d9ee2fab8fa8232d2df818132eb3d42801ac9b5d30608d42b7a6b5dc"
 dependencies = [
  "async-trait",
  "robit-agent",
@@ -2144,9 +2148,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.40.2"
+version = "0.41.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
+checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
 dependencies = [
  "bitflags 2.13.2",
  "chrono",

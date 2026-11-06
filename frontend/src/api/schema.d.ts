@@ -1440,7 +1440,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description SSE 事件流：首帧 connected（宿主元数据：profile/model/tools），随后为 robit-web WebEvent（text_delta / tool_call / tool_result / confirm_request / turn_complete / error），wire schema 由 robit-web 定义（v0.1.26） */
+            /** @description SSE 事件流：首帧 connected（宿主元数据：profile/model/tools），随后为 robit-web WebEvent（text_delta / thinking_delta / tool_call / tool_result / skill_triggered / async_tool_completed / confirm_request / turn_complete / error），wire schema 由 robit-web 定义（v0.1.28；thinking_delta 为思考型模型的展示性增量帧，无显式结束标记，turn_complete 收口） */
             200: {
                 headers: {
                     [name: string]: unknown;
