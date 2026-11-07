@@ -280,6 +280,35 @@ async fn live_responses_and_samples_pass_schema() {
             "2026-10-28 09:30",
         )
         .unwrap();
+    // chat 档案种子（T3/ADR-0011）：一轮 user → tool（展示快照）→ assistant 升序。
+    // 内容全确定性（固定 ts/文本），样例永不腐烂；tool_json 的 arguments 与
+    // recorder 落库形态一致（原始 JSON 串，前端 chatHydrate 解析）。
+    store
+        .append_chat_message("web", "user", "茅台现在什么价", None, "2026-11-07 10:30")
+        .unwrap();
+    let tool_json = json!({
+        "name": "get_quote",
+        "arguments": json!({"codes": ["sh600519"]}).to_string(),
+        "result": json!({
+            "sh600519": {"name": "贵州茅台", "price": 1437.0, "change_pct": 1.13, "status": "ok"},
+            "errors": []
+        })
+        .to_string(),
+        "is_error": false,
+    })
+    .to_string();
+    store
+        .append_chat_message("web", "tool", "", Some(&tool_json), "2026-11-07 10:30")
+        .unwrap();
+    store
+        .append_chat_message(
+            "web",
+            "assistant",
+            "结论：现价 1437.00（+1.13%），维持持有。",
+            None,
+            "2026-11-07 10:31",
+        )
+        .unwrap();
     let base = spawn_api(fake.clone(), store).await;
     let http = reqwest::Client::new();
 
@@ -534,6 +563,24 @@ async fn live_responses_and_samples_pass_schema() {
         &response_validator(&doc, "post", "/api/market/refresh", 503),
         &b,
     );
+
+    // ---- Web 会话档案（T3）：读取 → 重置 → 读空 的完整生命周期 ----
+    let (s, b) = get(&http, &base, "/api/chat/history").await;
+    assert_eq!(s, 200);
+    assert_eq!(b["messages"].as_array().unwrap().len(), 3);
+    assert_eq!(b["has_more"], json!(false));
+    check(&doc, "chat_history", "get", "/api/chat/history", 200, &b);
+
+    let (s, b) = post(&http, &base, "/api/chat/reset", json!(null)).await;
+    assert_eq!(s, 200);
+    assert_eq!(b["cleared"], json!(3));
+    // 契约服务器的缺省钩子恒报离线（common::no_reset_hook）——档案照常清
+    assert_eq!(b["agent_signaled"], json!(false));
+    check(&doc, "chat_reset", "post", "/api/chat/reset", 200, &b);
+
+    let (s, b) = get(&http, &base, "/api/chat/history").await;
+    assert_eq!(s, 200);
+    assert!(b["messages"].as_array().unwrap().is_empty(), "reset 后档案为空");
 
     // 契约文档自身也可在线取（与仓库文件同内容）
     let (s, b) = get(&http, &base, "/api/openapi.json").await;

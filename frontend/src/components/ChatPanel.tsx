@@ -7,8 +7,10 @@ import remarkGfm from "remark-gfm";
  * 会话线程本体，布局与右栏上下文/边界/会话三卡见 screens/ChatView.tsx）。
  * 流式回答 + 思考过程（thinking_delta，R7/robit 0.1.28，三态折叠对齐 robit-gui）
  * + 工具调用/结果 + 确认请求 + skill 触发如实展示——「依据来源」就是
- * Agent 实调的行情/持仓工具，不伪造引用。会话可持久化（persistKey，docs/02；
- * 思考段除外——展示性瞬态，不入 localStorage）。
+ * Agent 实调的行情/持仓工具，不伪造引用。
+ * 会话真值在服务端（T4/ADR-0011）：`initialEntries` 为档案水合入口；
+ * localStorage（persistKey）降级为「服务端不可达时的只读展示缓存」，思考段
+ * 两处都不入档（docs/02 展示口径）。
  * 事件形状与后端 SseEvent 对齐（backend/crates/zimu-server/src/agent_bridge.rs）。
  * 助手消息按 GFM Markdown 渲染（ADR-0010）；用户/通知/工具/思考条目保持纯文本。
  */
@@ -32,6 +34,9 @@ type Entry =
   | { kind: "thinking"; text: string; closed: boolean }
   | { kind: "tool"; id: string; name: string; args: string; result?: { ok: boolean; content: string } }
   | { kind: "notice"; level: "info" | "error"; text: string };
+
+/** 对外暴露条目形态（chatHydrate 的映射目标；导出类型不导出组件内部逻辑） */
+export type ChatEntry = Entry;
 
 type Pending = { tool_call_id: string; name: string; arguments: string } | null;
 
@@ -74,10 +79,17 @@ export interface ChatPanelProps {
    * 「去问答触发 /建议」，chat?q=…&send=1）：agent 上线且空闲时自动发送该文本一次。
    */
   prefill?: { text: string; nonce: number; send?: boolean };
-  /** 递增即清空会话（含 localStorage）；0/undefined = 不触发 */
+  /** 递增即清空会话（含 localStorage 缓存）；0/undefined = 不触发 */
   clearNonce?: number;
-  /** 设置则把会话持久化到 localStorage[key]（上限 30 条，docs/02 chat 约定） */
+  /** localStorage 缓存键（上限 30 条）——T4 起定位是**服务端不可达时的只读展示**，真值在档案 */
   persistKey?: string;
+  /**
+   * 服务端会话档案水合（T4）：宿主取到 GET /api/chat/history 后传入
+   * （chatHydrate 映射）。首次到达且无在途轮次时覆盖本地一次；此后本地事件流
+   * 继续追加（recorder 会把同轮写进档案，下次打开对齐）。undefined = 未就绪
+   * （维持 localStorage 降级展示）。
+   */
+  initialEntries?: ChatEntry[];
   /**
    * SSE `connected` 事件上抛（model/profile/工具面）——连接信息不进对话框，
    * 由宿主（ChatView）挂在「Agent 在线」徽章上作悬停 hint（docs/02 展示口径）。
@@ -105,7 +117,7 @@ function loadPersisted(key: string): Entry[] {
   }
 }
 
-export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey, onConnected }: ChatPanelProps) {
+export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey, initialEntries, onConnected }: ChatPanelProps) {
   const [entries, setEntries] = useState<Entry[]>(() => (persistKey ? loadPersisted(persistKey) : []));
   const [conn, setConn] = useState<Conn>("connecting");
   const [pending, setPending] = useState<Pending>(null);
@@ -142,6 +154,20 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
       inputRef.current?.focus();
     }
   }, [prefill]);
+
+  // 服务端档案水合（T4）：首次就绪且无在途轮次时覆盖本地一次——档案是真值，
+  // localStorage 只是缓存。若此刻正有进行中的轮次（流式未定稿/思考段），不抢：
+  // 那轮结束时会由 recorder 写入档案，下次打开自然对齐。
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current || !initialEntries) return;
+    const streaming =
+      busy ||
+      entries.some((e) => (e.kind === "assistant" && !e.done) || e.kind === "thinking");
+    if (streaming) return;
+    hydratedRef.current = true;
+    setEntries(initialEntries);
+  }, [initialEntries, entries, busy]);
 
   // 清空会话
   useEffect(() => {

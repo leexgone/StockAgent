@@ -179,9 +179,17 @@ async fn chat(State(state): State<AppState>, Json(req): Json<ChatRequest>) -> Re
     if text.is_empty() {
         return (StatusCode::BAD_REQUEST, "消息为空").into_response();
     }
-    match agent.web.send_user_text(text).await {
+    // T3：经 AgentBridge::submit_user_text——先落 chat_messages 再注入（档案即队列）
+    match agent.submit_user_text(text).await {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
-        Err(_) => agent_offline(),
+        Err(e) => {
+            tracing::warn!("/api/chat 受理失败：{e:#}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "会话受理失败：agent 已退出或档案写入失败（详情见服务日志）",
+            )
+                .into_response()
+        }
     }
 }
 
@@ -357,7 +365,8 @@ async fn main() -> anyhow::Result<()> {
                 let bridge = bridge.clone();
                 Arc::new(move |text: String| -> Pin<Box<dyn Future<Output = bool> + Send>> {
                     let bridge = bridge.clone();
-                    Box::pin(async move { bridge.web.send_user_text(text).await.is_ok() })
+                    // T3：复盘注入与浏览器消息走同一包装——`/复盘` 如实入档案 user 行
+                    Box::pin(async move { bridge.submit_user_text(text).await.is_ok() })
                 }) as ReviewTrigger
             });
             let core = zimu_agent::scheduler::SchedulerCore::new(
@@ -378,6 +387,19 @@ async fn main() -> anyhow::Result<()> {
     // SSE 优雅关闭通道：Ctrl+C 后 shutdown_signal 翻 true，chat_stream 的 take_until 收尾
     let (sse_shutdown_tx, sse_shutdown_rx) = watch::channel(false);
 
+    // 会话重置钩子（chat_api，T3）：agent 在线则发 "/clear" 清内存历史，离线返回
+    // false（档案照常清，push_log 如实记）。注意用 web.send_user_text 而非
+    // submit_user_text——"/clear" 不进模型历史，也就不该进档案（档案同时已被清）。
+    let chat_reset: zimu_server::chat_api::ResetHook = {
+        let bridge_opt = agent.clone();
+        Arc::new(move || -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>> {
+            match bridge_opt.clone() {
+                Some(b) => Box::pin(async move { b.web.send_user_text("/clear".to_string()).await.is_ok() }),
+                None => Box::pin(async { false }),
+            }
+        })
+    };
+
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/chat/stream", get(chat_stream))
@@ -390,8 +412,8 @@ async fn main() -> anyhow::Result<()> {
             market_url,
             shutdown_rx: sse_shutdown_rx,
         })
-        // 业务路由（持仓 P4-T1 + 行情 P4-T4）在库目标装配，各自带独立状态
-        .merge(api_router(store, market))
+        // 业务路由（持仓 P4-T1 + 行情 P4-T4 + 会话档案 T3）在库目标装配，各自带独立状态
+        .merge(api_router(store, market, chat_reset))
         // SPA 回落：dist 里不存在的路径返回 index.html。
         // 注意必须用 .fallback() 而不是 .not_found_service()：后者会把状态码强制成 404
         //（tower-http 0.6 的设计，body 照常返回），客户端路由刷新就会拿到 404。

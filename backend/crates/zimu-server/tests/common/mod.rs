@@ -109,9 +109,20 @@ impl MarketApi for FakeApi {
 // 装配与样本构造
 // ============================================================================
 
+/// 缺省重置钩子：恒报 agent 离线（false）。chat reset 的在线行为在
+/// tests/chat_api.rs 注入自己的钩子断言，其余测试不关心。
+pub fn no_reset_hook() -> zimu_server::chat_api::ResetHook {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    Arc::new(move || -> Pin<Box<dyn Future<Output = bool> + Send>> {
+        Box::pin(async { false })
+    })
+}
+
 pub async fn spawn_api(fake: FakeApi, store: Store) -> String {
     let shared: SharedStore = Arc::new(Mutex::new(store));
-    let router = api_router(shared, market_api::new_market(Arc::new(fake)));
+    let router = api_router(shared, market_api::new_market(Arc::new(fake)), no_reset_hook());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });

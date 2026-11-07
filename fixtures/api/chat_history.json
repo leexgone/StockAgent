@@ -1,0 +1,29 @@
+{
+  "has_more": false,
+  "messages": [
+    {
+      "id": 1,
+      "role": "user",
+      "session": "web",
+      "text": "茅台现在什么价",
+      "tool_json": null,
+      "ts": "2026-11-07 10:30"
+    },
+    {
+      "id": 2,
+      "role": "tool",
+      "session": "web",
+      "text": "",
+      "tool_json": "{\"arguments\":\"{\\\"codes\\\":[\\\"sh600519\\\"]}\",\"is_error\":false,\"name\":\"get_quote\",\"result\":\"{\\\"errors\\\":[],\\\"sh600519\\\":{\\\"change_pct\\\":1.13,\\\"name\\\":\\\"贵州茅台\\\",\\\"price\\\":1437.0,\\\"status\\\":\\\"ok\\\"}}\"}",
+      "ts": "2026-11-07 10:30"
+    },
+    {
+      "id": 3,
+      "role": "assistant",
+      "session": "web",
+      "text": "结论：现价 1437.00（+1.13%），维持持有。",
+      "tool_json": null,
+      "ts": "2026-11-07 10:31"
+    }
+  ]
+}

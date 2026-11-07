@@ -116,6 +116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["chat_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/stream": {
         parameters: {
             query?: never;
@@ -655,10 +687,41 @@ export interface components {
             redeem_source?: string | null;
             spot_source?: string | null;
         };
+        /** @description `GET /api/chat/history` 响应（升序档案 + 更早页指针）。 */
+        ChatHistory: {
+            /** @description 是否还有更早的记录（配 `before_id` 翻页） */
+            has_more: boolean;
+            /** @description 时间升序（旧→新）；role 词汇 user/assistant/tool */
+            messages: components["schemas"]["ChatMessageRow"][];
+        };
+        /**
+         * @description Web 会话档案行。`role='tool'` 行只供展示（`GET /api/chat/history`）；
+         *     复活回灌只取 user/assistant（陈旧数字不进上下文，03「派生数字现算」）。
+         */
+        ChatMessageRow: {
+            /** Format: int64 */
+            id: number;
+            /** @description 'user' | 'assistant' | 'tool' */
+            role: string;
+            /** @description 会话键（通道独立：Web 恒 'web'；IM 会话历史在 robit 自持库，不在本表） */
+            session: string;
+            text: string;
+            /** @description role='tool' 的展示快照 {name,args,result,is_error}；其余为 null */
+            tool_json?: string | null;
+            /** @description 上海时刻 YYYY-MM-DD HH:MM（与 push_log/trades 同格式） */
+            ts: string;
+        };
         /** @description `POST /api/chat` 请求体（实现在 bin） */
         ChatRequest: {
             /** @description 用户消息（非空；回复经 SSE 流出） */
             text: string;
+        };
+        /** @description `POST /api/chat/reset` 响应。 */
+        ChatResetResult: {
+            /** @description 是否已通知在线 agent 清内存历史（false = agent 离线，档案照常已清） */
+            agent_signaled: boolean;
+            /** @description 清掉的档案行数 */
+            cleared: number;
         };
         /** @description `POST /api/chat/confirm` 请求体（实现在 bin） */
         ConfirmRequest: {
@@ -1428,6 +1491,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_history: {
+        parameters: {
+            query?: {
+                /** @description 行数上限：1–500，缺省 100（取最近 N 条后按时间升序返回） */
+                limit?: number;
+                /** @description 只取该 id 之前（更早）的记录——游标翻页 */
+                before_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Web 会话档案（服务端真值，ADR-0011）：时间升序 + has_more 页尾标记。thinking 段与通知类不在档案内；tool 行为展示快照（{name,arguments,result,is_error}），复活回灌只取 user/assistant。不依赖 agent 在线。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatHistory"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    chat_reset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话档案已清空；agent_signaled=false 表示 agent 离线（档案照常清，push_log 如实记）。agent 在线时同时向其发送清历史指令。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatResetResult"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
             };
         };
     };

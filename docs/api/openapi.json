@@ -299,6 +299,88 @@
         }
       }
     },
+    "/api/chat/history": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "get_history",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "行数上限：1–500，缺省 100（取最近 N 条后按时间升序返回）",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "description": "只取该 id 之前（更早）的记录——游标翻页",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Web 会话档案（服务端真值，ADR-0011）：时间升序 + has_more 页尾标记。thinking 段与通知类不在档案内；tool 行为展示快照（{name,arguments,result,is_error}），复活回灌只取 user/assistant。不依赖 agent 在线。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatHistory"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/reset": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "chat_reset",
+        "responses": {
+          "200": {
+            "description": "会话档案已清空；agent_signaled=false 表示 agent 离线（档案照常清，push_log 如实记）。agent 在线时同时向其发送清历史指令。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResetResult"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/chat/stream": {
       "get": {
         "tags": [
@@ -1864,6 +1946,66 @@
           }
         }
       },
+      "ChatHistory": {
+        "type": "object",
+        "description": "`GET /api/chat/history` 响应（升序档案 + 更早页指针）。",
+        "required": [
+          "messages",
+          "has_more"
+        ],
+        "properties": {
+          "has_more": {
+            "type": "boolean",
+            "description": "是否还有更早的记录（配 `before_id` 翻页）"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageRow"
+            },
+            "description": "时间升序（旧→新）；role 词汇 user/assistant/tool"
+          }
+        }
+      },
+      "ChatMessageRow": {
+        "type": "object",
+        "description": "Web 会话档案行。`role='tool'` 行只供展示（`GET /api/chat/history`）；\n复活回灌只取 user/assistant（陈旧数字不进上下文，03「派生数字现算」）。",
+        "required": [
+          "id",
+          "session",
+          "role",
+          "text",
+          "ts"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "role": {
+            "type": "string",
+            "description": "'user' | 'assistant' | 'tool'"
+          },
+          "session": {
+            "type": "string",
+            "description": "会话键（通道独立：Web 恒 'web'；IM 会话历史在 robit 自持库，不在本表）"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tool_json": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "role='tool' 的展示快照 {name,args,result,is_error}；其余为 null"
+          },
+          "ts": {
+            "type": "string",
+            "description": "上海时刻 YYYY-MM-DD HH:MM（与 push_log/trades 同格式）"
+          }
+        }
+      },
       "ChatRequest": {
         "type": "object",
         "description": "`POST /api/chat` 请求体（实现在 bin）",
@@ -1874,6 +2016,25 @@
           "text": {
             "type": "string",
             "description": "用户消息（非空；回复经 SSE 流出）"
+          }
+        }
+      },
+      "ChatResetResult": {
+        "type": "object",
+        "description": "`POST /api/chat/reset` 响应。",
+        "required": [
+          "cleared",
+          "agent_signaled"
+        ],
+        "properties": {
+          "agent_signaled": {
+            "type": "boolean",
+            "description": "是否已通知在线 agent 清内存历史（false = agent 离线，档案照常已清）"
+          },
+          "cleared": {
+            "type": "integer",
+            "description": "清掉的档案行数",
+            "minimum": 0
           }
         }
       },

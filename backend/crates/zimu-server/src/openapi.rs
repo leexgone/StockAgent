@@ -25,6 +25,7 @@ use utoipa::{OpenApi, ToSchema};
 
 // schemas() 宏只接受裸标识符/完整路径，不认 `{…}` 分组——统一 import 后引用。
 // （这些 import 全部被 ApiDoc derive 的展开消费，不是死代码。）
+use crate::chat_api::{ChatHistory, ChatResetResult};
 use crate::holdings_api::{AccountPatch, HoldingEditRequest};
 use crate::market_api::{
     CalendarStatus, KlineResponse, MarketStatusResponse, RefreshResponse, SidecarStatus, SkippedRow,
@@ -39,7 +40,7 @@ use zimu_market::models::{
     QuoteStatus,
 };
 use zimu_store::{
-    AccountRow, AdviceRow, AlertRow, EditOp, EquitySnapshotRow, HoldingEditRow, HoldingRow,
+    AccountRow, AdviceRow, AlertRow, ChatMessageRow, EditOp, EquitySnapshotRow, HoldingEditRow, HoldingRow,
     HoldingSnapshot, NewHoldingMeta, NewWatchlist, PortfolioView, PushLogRow, RecordReceipt,
     SimPreview, TradeRequest, TradeRow, WatchlistRow,
 };
@@ -214,6 +215,8 @@ fn chat_cancel_doc() {}
     ),
     paths(
         health_doc, chat_stream_doc, chat_doc, chat_confirm_doc, chat_cancel_doc,
+        crate::chat_api::get_history,
+        crate::chat_api::reset_session,
         openapi_doc,
         crate::holdings_api::get_holdings,
         crate::holdings_api::record_trade,
@@ -239,6 +242,7 @@ fn chat_cancel_doc() {}
     ),
     components(schemas(
         ApiError, Health, ChatRequest, ConfirmRequest,
+        ChatHistory, ChatResetResult, ChatMessageRow,
         AccountPatch,
         CalendarStatus, KlineResponse, MarketStatusResponse, RefreshResponse,
         SidecarStatus, SkippedRow,

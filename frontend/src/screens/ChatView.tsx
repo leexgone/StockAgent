@@ -4,6 +4,8 @@ import ChatPanel from "../components/ChatPanel";
 import { clockView, marketClock } from "../lib/clock";
 import { fixed, money } from "../lib/format";
 import { useAlerts } from "../store/alerts";
+import { useChatHistory } from "../store/chatHistory";
+import { hydrateEntries } from "../lib/chatHydrate";
 import { useHealth } from "../store/health";
 import { useMarket } from "../store/market";
 import { usePortfolio } from "../store/portfolio";
@@ -20,8 +22,11 @@ import { useUi } from "../store/ui";
  * 「它不会做的事」已移除（2026-11-03 拍板）——边界承诺由页头描述与免责脚注兜底
  * （docs/02 chat 展示口径）。建议问题 chips / ?q= 深链只预填输入不自动发送（真实
  * LLM，交用户确认）；例外 = `?q=…&send=1`（analysis 空态「去问答触发 /建议」
- * 出口——斜杠指令意图明确，跳转即自动发送一次，agent 离线时停留预填态待上线补发）；
- * 会话持久化 localStorage（docs/02 chat 约定，上限 30 条）。
+ * 出口——斜杠指令意图明确，跳转即自动发送一次，agent 离线时停留预填态待上线补发）。
+ * 会话真值在服务端档案（T4/ADR-0011）：进入即 GET /api/chat/history 水合，
+ * 「清空会话」走 POST /api/chat/reset（档案 + agent 内存历史一并清，服务端失败
+ * 不清本地）；localStorage 降级为服务端不可达时的只读展示缓存（上限 30 条，
+ * docs/02 chat 口径）。
  */
 
 /* push_log.kind → 会话文案（与 index 时间线同映射，03 §12 封闭词汇） */
@@ -50,6 +55,15 @@ export default function ChatView({ now }: { now: Date }) {
   const agentOnline = health?.agent_online ?? false;
   const [prefill, setPrefill] = useState<{ text: string; nonce: number; send?: boolean }>({ text: "", nonce: 0 });
   const [clearNonce, setClearNonce] = useState(0);
+  // 服务端档案水合（T4）：rows=null（未取到/不可达）时传 undefined → ChatPanel 维持本地缓存展示
+  const historyRows = useChatHistory((s) => s.rows);
+  const initialEntries = useMemo(
+    () => (historyRows ? hydrateEntries(historyRows) : undefined),
+    [historyRows],
+  );
+  useEffect(() => {
+    void useChatHistory.getState().load();
+  }, []);
   // SSE connected 事件的连接信息（model/profile/工具面）：挂「Agent 在线」徽章悬停 hint，
   // 不进对话框（docs/02 chat 展示口径，2026-11-03 拍板）
   const [agentInfo, setAgentInfo] = useState<{ model: string; profile: string; tools: string[] } | null>(null);
@@ -88,6 +102,17 @@ export default function ChatView({ now }: { now: Date }) {
   );
 
   const ask = (text: string) => setPrefill((p) => ({ text, nonce: p.nonce + 1 }));
+  // 清空（T4）：服务端为准——POST reset 成功才清本地缓存；失败保留本地并如实报错
+  // （本地缓存不该比真值先消失）
+  const handleClear = async () => {
+    const ok = await useChatHistory.getState().reset();
+    if (ok) {
+      setClearNonce((n) => n + 1);
+      toast("会话已清空：服务端档案与 Agent 记忆一并清除");
+    } else {
+      toast(`清空服务端档案失败（${useChatHistory.getState().error ?? "未知原因"}），本地显示未动`);
+    }
+  };
   const ctxRow = (k: string, v: React.ReactNode) => (
     <div className="ctx-row">
       <span>{k}</span>
@@ -120,7 +145,7 @@ export default function ChatView({ now }: { now: Date }) {
           >
             {health ? (agentOnline ? "Agent 在线" : "Agent 离线") : "连接中…"}
           </span>
-          <button className="btn" id="clear-btn" onClick={() => { setClearNonce((n) => n + 1); toast("会话已清空（仅存在本机浏览器）"); }}>
+          <button className="btn" id="clear-btn" onClick={() => void handleClear()}>
             清空会话
           </button>
           <button className="btn" id="push-last" onClick={() => toast("微信推送随渠道接入（C4 拍板后）——当前仅本机会话")}>
@@ -132,7 +157,7 @@ export default function ChatView({ now }: { now: Date }) {
       <div className="chat-layout">
         {/* 左：线程（真实 Agent SSE，ChatPanel 自带 card 外壳，不嵌套）+ 建议问题沉底 */}
         <div className="chat-thread-col" data-od-id="chat-thread-col">
-          <ChatPanel agentOnline={agentOnline} prefill={prefill} clearNonce={clearNonce} persistKey="zimu:chat:me" onConnected={setAgentInfo} />
+          <ChatPanel agentOnline={agentOnline} prefill={prefill} clearNonce={clearNonce} persistKey="zimu:chat:me" initialEntries={initialEntries} onConnected={setAgentInfo} />
           <section className="card" data-od-id="chat-suggest-card" style={{ padding: 0 }}>
             <div className="suggest" id="suggest">
               {SUGGESTIONS.map((s) => (

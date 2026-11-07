@@ -1991,8 +1991,8 @@ impl Store {
                 ts: r.get(5)?,
             })
         };
-        // 多取一条探页尾（has_more），返回时裁掉
-        let probe = limit + 1;
+        // 多取一条探页尾（has_more），返回时裁掉；饱和加避免 i64::MAX 全量取时溢出
+        let probe = limit.saturating_add(1);
         let mut stmt = self.conn.prepare(sql)?;
         let rows = match before_id {
             Some(bid) => stmt

@@ -99,7 +99,10 @@
 | 依据来源 | 每条回答下方列出引用的界面与原文（持仓明细 / 组合诊断 / 行情快照 / 公告） | `qa[].cites` |
 | 追问 chips | 三个后续问题快捷入口 | `qa[].chips` |
 
-会话存 `localStorage['zimu:chat:me']`，最多保留最近 30 条。
+会话真值在服务端档案 `chat_messages`（ADR-0011，2026-11-07 T3/T4）：进入 chat 屏即
+`GET /api/chat/history` 水合；「清空会话」走 `POST /api/chat/reset`（服务端档案 +
+Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zimu:chat:me']`
+**降级为服务端不可达时的只读展示缓存**（上限 30 条，thinking 段两处都不入）。
 
 生产侧深链契约（frontend ChatView/ChatPanel）：`/chat?q=<问题>` 只**预填输入不自动发送**
 （真实 LLM，交用户确认——全局搜索回车、analysis「就这只问我」走此形态）；
@@ -121,8 +124,8 @@
 流式渲染（头行「💭 思考中…」，限高内滚、自动滚尾）；**首个正文/工具事件到达自动折叠**
 为「▸ 思考过程」头行；**回合定稿**（turn_complete 兜底闭合）后点击头行可回看本轮思考。
 思考文本按纯文本渲染不走 Markdown（流式中半截语法会抖动，GUI 参考实现同款取舍）。
-展示性单向瞬态：不入 localStorage（会话重开即消失，与框架「thinking 不写回 history」
-语义一致）、不占 30 条存档额度。前置条件：模型级配置 `~/.robit/config.toml` 的
+展示性单向瞬态：不入服务端会话档案、也不入 localStorage 缓存（会话重开即消失，与
+框架「thinking 不写回 history」语义一致）、不占缓存 30 条额度。前置条件：模型级配置 `~/.robit/config.toml` 的
 `thinking = "on"`（DashScope 兼容面拼写，注入 `enable_thinking`）才有思考帧下发；
 默认 `auto` 走传统路径无思考帧，界面行为与旧版一致。空白 `text_delta` 帧自 robit
 0.1.28 起已在发射端收口（R6 了断），ChatPanel 的空白帧守卫保留为惰性兼容。
