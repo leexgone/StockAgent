@@ -46,7 +46,9 @@ cache/
 # ── 工具与临时目录 ────────────────────────────
 .file-versions/
 .od/
-# robit 运行时会话库与记忆文件（<workdir>/.robit/memory/robit.db 等），永不入库
+# robit 运行时会话库与记忆文件（<workdir>/.robit/memory/robit.db 等），永不入库。
+# 2026-11-07 配置分层：工程本地 robit 配置 = backend/.robit/config.toml——虽只含
+# ${VAR} 占位引用，按用户拍板**同样不入库**（机器本地文件），整目录忽略保持不变。
 .robit/
 screenshots/
 shots/
