@@ -309,6 +309,10 @@ async fn live_responses_and_samples_pass_schema() {
             "2026-11-07 10:31",
         )
         .unwrap();
+    // 通道绑定种子（T5）：一条已绑定私聊，列表样例有真实形态
+    store
+        .bind_channel("qq", "private:SEED", "private", "契约种子", "2026-11-07 09:00")
+        .unwrap();
     let base = spawn_api(fake.clone(), store).await;
     let http = reqwest::Client::new();
 
@@ -581,6 +585,45 @@ async fn live_responses_and_samples_pass_schema() {
     let (s, b) = get(&http, &base, "/api/chat/history").await;
     assert_eq!(s, 200);
     assert!(b["messages"].as_array().unwrap().is_empty(), "reset 后档案为空");
+
+    // ---- 通道绑定（T5/拍板⑤）：列表 → 绑定 → 非法 kind → 解绑 → 幂等 404 ----
+    let (s, b) = get(&http, &base, "/api/channel_bindings").await;
+    assert_eq!(s, 200);
+    assert_eq!(b.as_array().unwrap().len(), 1, "种子绑定可见");
+    check(&doc, "channel_bindings", "get", "/api/channel_bindings", 200, &b);
+
+    let (s, b) = post(
+        &http,
+        &base,
+        "/api/channel_bindings",
+        json!({"channel": "qq", "chat_id": "group:NEW", "kind": "group", "label": "家庭群"}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    assert_eq!(b["active"], json!(true));
+    check(&doc, "channel_binding_row", "post", "/api/channel_bindings", 200, &b);
+
+    let (s, b) = post(
+        &http,
+        &base,
+        "/api/channel_bindings",
+        json!({"channel": "qq", "chat_id": "x", "kind": "channel", "label": ""}),
+    )
+    .await;
+    assert_eq!(s, 400);
+    assert_eq!(b["error"], json!("bad_input"));
+    check(&doc, "error_bad_binding", "post", "/api/channel_bindings", 400, &b);
+
+    let (s, b) = delete(&http, &base, "/api/channel_bindings/qq/private:SEED").await;
+    assert_eq!(s, 200);
+    assert_eq!(b["unbound"], json!(true));
+    check(&doc, "channel_unbound", "delete", "/api/channel_bindings/{channel}/{chat_id}", 200, &b);
+
+    // 解绑幂等：二次删除未命中 → 404（留痕行还在，active=0）
+    let (s, b) = delete(&http, &base, "/api/channel_bindings/qq/private:SEED").await;
+    assert_eq!(s, 404);
+    assert_eq!(b["error"], json!("no_binding"));
+    check(&doc, "error_no_binding", "delete", "/api/channel_bindings/{channel}/{chat_id}", 404, &b);
 
     // 契约文档自身也可在线取（与仓库文件同内容）
     let (s, b) = get(&http, &base, "/api/openapi.json").await;

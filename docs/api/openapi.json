@@ -225,6 +225,148 @@
         }
       }
     },
+    "/api/channel_bindings": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "list_bindings",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "query",
+            "description": "只看某通道；缺省全部通道",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "活跃绑定列表（bound_at 升序）。绑定是入站白名单：未绑定会话的来消息被 BoundOnly 静默丢弃（日志留 chat_id 供绑定）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelBindingRow"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "bind_channel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "绑定/重绑成功（同 channel+chat_id 幂等 upsert：刷新 kind/label/bound_at 并激活）。返回生效行",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelBindingRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数非法：channel/chat_id 为空或 kind 不是 private/group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel_bindings/{channel}/{chat_id}": {
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "unbind_channel",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "path",
+            "description": "通道（如 qq）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chat_id",
+            "in": "path",
+            "description": "平台会话 id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "解绑成功（置 active=0 留痕，不删行——推送审计要能对上号）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnbindResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有该活跃绑定",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/chat": {
       "post": {
         "tags": [
@@ -1629,6 +1771,33 @@
           }
         }
       },
+      "BindingRequest": {
+        "type": "object",
+        "description": "`POST /api/channel_bindings` 请求体。",
+        "required": [
+          "channel",
+          "chat_id",
+          "kind"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "通道词汇表：'qq'（'wechat' 随模块到货启用）；非空即可入库（向前兼容）"
+          },
+          "chat_id": {
+            "type": "string",
+            "description": "平台会话 id（QQ 形如 private:{openid} / group:{openid}）"
+          },
+          "kind": {
+            "type": "string",
+            "description": "'private' | 'group'"
+          },
+          "label": {
+            "type": "string",
+            "description": "展示名（可选）"
+          }
+        }
+      },
       "CalendarPayload": {
         "type": "object",
         "required": [
@@ -1946,6 +2115,39 @@
           }
         }
       },
+      "ChannelBindingRow": {
+        "type": "object",
+        "description": "IM 入站绑定（白名单行）。",
+        "required": [
+          "channel",
+          "chat_id",
+          "kind",
+          "label",
+          "bound_at",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "bound_at": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "chat_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "'private' | 'group'（对齐 robit ChatType）"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
       "ChatHistory": {
         "type": "object",
         "description": "`GET /api/chat/history` 响应（升序档案 + 更早页指针）。",
@@ -2173,6 +2375,7 @@
           "static_dir",
           "static_ready",
           "agent_online",
+          "qq_online",
           "market_url"
         ],
         "properties": {
@@ -2186,6 +2389,10 @@
           },
           "ok": {
             "type": "boolean"
+          },
+          "qq_online": {
+            "type": "boolean",
+            "description": "QQ 通道在线状态（T5）：false = 未启用（[zimu.channels].qq 缺省停用）/\n未连上/已退出——health 如实透出，不装在线"
           },
           "service": {
             "type": "string",
@@ -3365,6 +3572,18 @@
           },
           "ts": {
             "type": "string"
+          }
+        }
+      },
+      "UnbindResult": {
+        "type": "object",
+        "description": "解绑结果。",
+        "required": [
+          "unbound"
+        ],
+        "properties": {
+          "unbound": {
+            "type": "boolean"
           }
         }
       },

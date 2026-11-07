@@ -68,6 +68,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/channel_bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_bindings"];
+        put?: never;
+        post: operations["bind_channel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/channel_bindings/{channel}/{chat_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["unbind_channel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -602,6 +634,17 @@ export interface components {
             reason: string;
             source: string;
         };
+        /** @description `POST /api/channel_bindings` 请求体。 */
+        BindingRequest: {
+            /** @description 通道词汇表：'qq'（'wechat' 随模块到货启用）；非空即可入库（向前兼容） */
+            channel: string;
+            /** @description 平台会话 id（QQ 形如 private:{openid} / group:{openid}） */
+            chat_id: string;
+            /** @description 'private' | 'group' */
+            kind: string;
+            /** @description 展示名（可选） */
+            label?: string;
+        };
         CalendarPayload: {
             attempts?: components["schemas"]["Attempt"][];
             count: number;
@@ -686,6 +729,16 @@ export interface components {
             items: components["schemas"]["CbItem"][];
             redeem_source?: string | null;
             spot_source?: string | null;
+        };
+        /** @description IM 入站绑定（白名单行）。 */
+        ChannelBindingRow: {
+            active: boolean;
+            bound_at: string;
+            channel: string;
+            chat_id: string;
+            /** @description 'private' | 'group'（对齐 robit ChatType） */
+            kind: string;
+            label: string;
         };
         /** @description `GET /api/chat/history` 响应（升序档案 + 更早页指针）。 */
         ChatHistory: {
@@ -785,6 +838,11 @@ export interface components {
             /** @description 行情 sidecar 基地址（是否在线由 /api/market/status 探测，health 不打网络） */
             market_url: string;
             ok: boolean;
+            /**
+             * @description QQ 通道在线状态（T5）：false = 未启用（[zimu.channels].qq 缺省停用）/
+             *     未连上/已退出——health 如实透出，不装在线
+             */
+            qq_online: boolean;
             /** @description 恒 "zimu-server" */
             service: string;
             /** @description 静态目录（解析后的绝对路径） */
@@ -1216,6 +1274,10 @@ export interface components {
             side: components["schemas"]["Side"];
             ts: string;
         };
+        /** @description 解绑结果。 */
+        UnbindResult: {
+            unbound: boolean;
+        };
         /**
          * @description 自选行（观察标的，未持仓——无 shares/cost；预警判定按「无持仓形态」，
          *     见 03 §12：cost/stop/target_hi 不喂，序 3/4/5 不参与）。
@@ -1388,6 +1450,114 @@ export interface operations {
             };
             /** @description 存储层内部错误 */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_bindings: {
+        parameters: {
+            query?: {
+                /** @description 只看某通道；缺省全部通道 */
+                channel?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 活跃绑定列表（bound_at 升序）。绑定是入站白名单：未绑定会话的来消息被 BoundOnly 静默丢弃（日志留 chat_id 供绑定） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelBindingRow"][];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    bind_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindingRequest"];
+            };
+        };
+        responses: {
+            /** @description 绑定/重绑成功（同 channel+chat_id 幂等 upsert：刷新 kind/label/bound_at 并激活）。返回生效行 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelBindingRow"];
+                };
+            };
+            /** @description 参数非法：channel/chat_id 为空或 kind 不是 private/group */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    unbind_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 通道（如 qq） */
+                channel: string;
+                /** @description 平台会话 id */
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 解绑成功（置 active=0 留痕，不删行——推送审计要能对上号） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnbindResult"];
+                };
+            };
+            /** @description 没有该活跃绑定 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

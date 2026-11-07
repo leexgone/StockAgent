@@ -55,6 +55,11 @@ pub struct AgentBridge {
     pub web: WebBridge,
     /// 会话档案写入口（与 HTTP API 同一份 store；submit_user_text 先落库后注入）
     pub store: SharedStore,
+    /// 装配三件套的公共句柄（T5：QQ 通道 ChatbotManager 与 Web 共用同一
+    /// LlmClient/ToolRegistry/SkillRegistry——共享 Arc 多 Agent 是框架自家姿势）
+    pub client: Arc<robit_ai::LlmClient>,
+    pub registry: Arc<robit_agent::ToolRegistry>,
+    pub skills_registry: Arc<robit_agent::SkillRegistry>,
     /// 宿主元数据：SSE 首帧 connected 用
     pub profile: String,
     pub model: String,
@@ -125,6 +130,10 @@ pub fn spawn_agent(
     let context_window = core.context_window();
     let working_dir = core.working_dir.clone();
     let auto_approve = core.auto_approve;
+    // 三件套公共句柄（T5 QQ 通道消费；Arc clone 廉价）
+    let client_arc = core.client.clone();
+    let tools_arc = core.tools.clone();
+    let skills_arc = core.skills.clone();
 
     let mut web = WebBridge::new(256, 16);
     let frontend = web.frontend();
@@ -194,6 +203,9 @@ pub fn spawn_agent(
     Ok(AgentBridge {
         web,
         store,
+        client: client_arc,
+        registry: tools_arc,
+        skills_registry: skills_arc,
         profile,
         model,
         tools,

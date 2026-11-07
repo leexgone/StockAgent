@@ -20,8 +20,11 @@
 
 pub mod advice_api;
 pub mod alerts_api;
+pub mod channel_adapter;
+pub mod channel_bindings;
 pub mod chat_api;
 pub mod chat_record;
+pub mod config_flags;
 pub mod holdings_api;
 pub mod market_api;
 pub mod openapi;
@@ -94,5 +97,6 @@ pub fn api_router(
         .merge(advice_router(store.clone()))
         .merge(watchlist_router(store.clone()))
         .merge(chat_api::router(store.clone(), chat_reset))
+        .merge(channel_bindings::router(store.clone()))
         .merge(market_api::router(store, market))
 }

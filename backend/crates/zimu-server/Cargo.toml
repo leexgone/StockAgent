@@ -13,6 +13,11 @@ zimu-agent = { path = "../zimu-agent" }
 robit-ai.workspace = true
 robit-agent.workspace = true
 robit-web.workspace = true
+# T5 QQ 通道：ChatbotManager<QqPlatformAdapter> + BoundOnly decorator（lib 侧）
+robit-chatbot.workspace = true
+robit-qq.workspace = true
+# T5 通道开关：raw 解析 [zimu.channels]（robit 类型化面看不见自有节）
+toml.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 async-trait.workspace = true

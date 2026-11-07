@@ -45,13 +45,17 @@
 //! 公网入站（ADR-0005）。
 
 mod agent_bridge;
+mod qq_channel;
 
 use std::convert::Infallible;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
+use std::time::Duration;
 
 use agent_bridge::{spawn_agent, AgentBridge};
+use qq_channel::QQChannel;
 use anyhow::Context;
 use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
 use zimu_market::MarketApi as _; // base_url() 是 trait 方法
@@ -86,6 +90,8 @@ struct AppState {
     market_url: String,
     /// 优雅关闭通知：Ctrl+C 后翻 true，SSE 长连接随之终止（见 shutdown_signal）
     shutdown_rx: watch::Receiver<bool>,
+    /// QQ 通道在线位（T5）：通道未启用/未连上时为 false，health 如实透出
+    qq_online: Arc<AtomicBool>,
     // 持仓存储（P4-T1）与行情路由（P4-T4）不从这里走：api_router 用独立状态 merge 进来
 }
 
@@ -97,6 +103,7 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         static_dir: state.static_dir.display().to_string(),
         static_ready: state.static_dir.join("index.html").exists(),
         agent_online: state.agent.is_some(),
+        qq_online: state.qq_online.load(Ordering::SeqCst),
         market_url: state.market_url.clone(),
     })
 }
@@ -251,19 +258,28 @@ fn resolve_static_dir() -> PathBuf {
 }
 
 /// Ctrl+C 优雅关闭序列：先中止调度器（停止盘中轮询/盘后链的后台写入），
-/// 再翻 watch 断开全部 SSE 长连接，让 axum 等在途请求完成后退出。
+/// 再停 QQ 通道（notify → 等 supervisor 退出 + WAL flush，T5），
+/// 最后翻 watch 断开全部 SSE 长连接，让 axum 等在途请求完成后退出。
 /// 注意：信号已被 tokio 接管，连按第二次 Ctrl+C 不会强杀进程——等排空即可；
 /// 真卡死就用系统手段（任务管理器 / `taskkill`）。
-async fn shutdown_signal(scheduler: Option<JoinHandle<()>>, sse: watch::Sender<bool>) {
+async fn shutdown_signal(
+    scheduler: Option<JoinHandle<()>>,
+    qq: Option<QQChannel>,
+    sse: watch::Sender<bool>,
+) {
     if let Err(e) = tokio::signal::ctrl_c().await {
         // 监听失败（极罕见）：服务继续运行，但 Ctrl+C 已被 tokio 接管、无人响应，
         // 如实报错并挂起，避免误触发关闭。
         tracing::error!("Ctrl+C 信号监听失败：{e}——优雅关闭不可用，需系统手段停止进程");
         std::future::pending::<()>().await;
     }
-    tracing::info!("收到 Ctrl+C：停止调度器、断开 SSE 长连接、等待在途请求完成…");
+    tracing::info!("收到 Ctrl+C：停止调度器与 QQ 通道、断开 SSE 长连接、等待在途请求完成…");
     if let Some(h) = scheduler {
         h.abort();
+    }
+    if let Some(q) = qq {
+        q.request_stop();
+        q.join(Duration::from_secs(3)).await;
     }
     // 无接收者（从未有 SSE 客户端连过）时 send 返回 Err，属正常情况
     let _ = sse.send(true);
@@ -349,6 +365,36 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // QQ 通道（T5/ADR-0011）：闸门一 = [zimu.channels].qq（缺省停用 fail-closed，
+    // 拍板⑥——未启用则不构造 adapter/ChatbotManager/任何 QQ 会话 Agent）；
+    // 闸门二 = Web 通道在位（共享装配三件套，能力一致性拍板⑦）。
+    // 重连由 QqPlatformAdapter 自带 supervisor 负责（robit-qq platform.rs:164），
+    // 本通道 supervisor 只兜残余退出路径（见 qq_channel.rs 模块头）。
+    let flags = zimu_server::config_flags::load_flags(&working_dir);
+    if flags.wechat {
+        tracing::warn!("微信通道开关已开但本轮无实现（等 robit 平台模块到货）：忽略，不建通道");
+    }
+    let qq_online = Arc::new(AtomicBool::new(false));
+    let qq_channel = match (flags.qq, agent.clone()) {
+        (true, Some(bridge)) => {
+            tracing::info!("QQ 通道已启用（[zimu.channels].qq=true）：supervisor 启动");
+            Some(QQChannel::spawn(
+                bridge,
+                store.clone(),
+                working_dir.clone(),
+                qq_online.clone(),
+            ))
+        }
+        (true, None) => {
+            tracing::warn!("QQ 通道已启用但 Web Agent 不可用（缺 robit 配置或启动失败）：通道跳过");
+            None
+        }
+        (false, _) => {
+            tracing::info!("QQ 通道未启用（[zimu.channels].qq 缺省停用，ADR-0011 拍板⑥）");
+            None
+        }
+    };
+
     // 调度与预警引擎（P4-T7，03 §12）：交易日盘中分钟级轮询（行情刷新 → 预警
     // 判定 → alerts 落库）+ 15:05 盘后链（equity_snapshots 快照 + /复盘 注入
     // agent 会话，push_log 留痕）。复盘回调接 WebBridge；agent 离线传 None——
@@ -411,6 +457,7 @@ async fn main() -> anyhow::Result<()> {
             agent,
             market_url,
             shutdown_rx: sse_shutdown_rx,
+            qq_online,
         })
         // 业务路由（持仓 P4-T1 + 行情 P4-T4 + 会话档案 T3）在库目标装配，各自带独立状态
         .merge(api_router(store, market, chat_reset))
@@ -433,7 +480,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(scheduler_handle, sse_shutdown_tx))
+        .with_graceful_shutdown(shutdown_signal(scheduler_handle, qq_channel, sse_shutdown_tx))
         .await
         .context("服务异常退出")?;
 
@@ -459,6 +506,7 @@ mod tests {
             static_dir: "frontend/dist".into(),
             static_ready: true,
             agent_online: false,
+            qq_online: false,
             market_url: "http://127.0.0.1:8300".into(),
         };
         let value = serde_json::to_value(&sample).expect("Health 可序列化");

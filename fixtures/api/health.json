@@ -5,5 +5,6 @@
   "static_dir": "frontend/dist",
   "static_ready": true,
   "agent_online": false,
+  "qq_online": false,
   "market_url": "http://127.0.0.1:8300"
 }

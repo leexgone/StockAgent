@@ -19,6 +19,14 @@ edition = "2021"
 robit-ai = "0.1.28"
 robit-agent = "0.1.28"
 robit-web = "0.1.28"
+# PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
+# + robit-qq 平台 adapter（lib 面消费，二进制不复用）。0.1.28 已在 crates.io（2026-11-06）；
+# rusqlite 0.41 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
+robit-chatbot = "0.1.28"
+robit-qq = "0.1.28"
+# [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
+# 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
+toml = "0.8"
 tokio = { version = "1.53", features = [
     "rt-multi-thread",
     "macros",
