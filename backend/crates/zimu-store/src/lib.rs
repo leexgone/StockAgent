@@ -27,7 +27,7 @@ use zimu_domain::{Kind, Side};
 
 /// schema 版本（PRAGMA user_version）。新增迁移在 `MIGRATIONS` 尾部追加，
 /// 永不修改已发布版本的 SQL——迁移只前进（P4-T2 迁移机制约定）。
-pub const CURRENT_VERSION: i64 = 3;
+pub const CURRENT_VERSION: i64 = 4;
 
 const MIGRATIONS: &[(i64, &str)] = &[(
     1,
@@ -161,6 +161,37 @@ CREATE TABLE holding_edits (
   before_json TEXT,
   after_json  TEXT,
   note        TEXT NOT NULL DEFAULT ''
+);
+"#,
+    ),
+    (
+        4,
+        r#"
+-- T2/ADR-0011（2026-11-07 拍板）：智能体接入模块的服务端会话真值 + IM 入站白名单。
+-- chat_messages：Web 会话档案（通道独立——QQ/微信会话历史归 robit 自持库，不进这张表）。
+--   session 恒 'web'（词汇表留通道扩展位）；tool 行**只供展示与审计，复活回灌时
+--   只取 user/assistant 文本对**——回灌行情/持仓陈旧数字违反 03「派生数字现算」。
+--   thinking 段不入库（框架「thinking 不写回 history」口径，docs/02 展示口径同源）。
+-- channel_bindings：IM 入站白名单（BoundOnly decorator 的判定表）。绑定是运营动作：
+--   个人应用频率下每次 recv 直查本表即可，不做缓存。
+CREATE TABLE chat_messages (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  session   TEXT NOT NULL,
+  role      TEXT NOT NULL CHECK (role IN ('user','assistant','tool')),
+  text      TEXT NOT NULL DEFAULT '',    -- role='tool' 时为空串（内容在 tool_json）
+  tool_json TEXT,                        -- role='tool'：{name,args,result,is_error} 展示快照
+  ts        TEXT NOT NULL
+);
+CREATE INDEX idx_chat_messages_session ON chat_messages(session, id);
+
+CREATE TABLE channel_bindings (
+  channel  TEXT NOT NULL,                -- 'qq'（词汇表；'wechat' 等随 robit 模块到货扩展）
+  chat_id  TEXT NOT NULL,                -- 平台会话 id（QQ 侧形如 private:{openid} / group:{openid}）
+  kind     TEXT NOT NULL CHECK (kind IN ('private','group')),
+  label    TEXT NOT NULL DEFAULT '',
+  bound_at TEXT NOT NULL,
+  active   INTEGER NOT NULL DEFAULT 1,   -- unbind 置 0 留痕（不 DELETE：推送历史/审计要能对上号）
+  PRIMARY KEY (channel, chat_id)
 );
 "#,
     ),
@@ -1881,5 +1912,178 @@ impl Store {
             )
             .map_err(|e| HoldingEditError::Store(format!("写入维护留痕失败：{e}")))?;
         Ok(())
+    }
+}
+
+// ============================================================================
+// 会话档案与通道绑定（chat_messages / channel_bindings，schema v4，T2/ADR-0011）
+// ============================================================================
+
+/// Web 会话档案行。`role='tool'` 行只供展示（`GET /api/chat/history`）；
+/// 复活回灌只取 user/assistant（陈旧数字不进上下文，03「派生数字现算」）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ChatMessageRow {
+    pub id: i64,
+    /// 会话键（通道独立：Web 恒 'web'；IM 会话历史在 robit 自持库，不在本表）
+    pub session: String,
+    /// 'user' | 'assistant' | 'tool'
+    pub role: String,
+    pub text: String,
+    /// role='tool' 的展示快照 {name,args,result,is_error}；其余为 null
+    pub tool_json: Option<String>,
+    /// 上海时刻 YYYY-MM-DD HH:MM（与 push_log/trades 同格式）
+    pub ts: String,
+}
+
+/// IM 入站绑定（白名单行）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ChannelBindingRow {
+    pub channel: String,
+    pub chat_id: String,
+    /// 'private' | 'group'（对齐 robit ChatType）
+    pub kind: String,
+    pub label: String,
+    pub bound_at: String,
+    pub active: bool,
+}
+
+impl Store {
+    /// 追加一条会话档案行，返回行 id。role 词汇由 CHECK 约束把关（user/assistant/tool）。
+    pub fn append_chat_message(
+        &self,
+        session: &str,
+        role: &str,
+        text: &str,
+        tool_json: Option<&str>,
+        ts: &str,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO chat_messages (session, role, text, tool_json, ts) VALUES (?1,?2,?3,?4,?5)",
+            params![session, role, text, tool_json, ts],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// 按会话读档案：**新在前**（id DESC，分页语义与 push_logs 同族）；
+    /// `before_id` 取该 id 之前（更早）的页；第二返回值 `has_more` = 是否还有更早的。
+    /// 返回顺序是"从新到旧"，需要时间正序的调用方（复活回灌）自行 reverse。
+    pub fn chat_messages(
+        &self,
+        session: &str,
+        limit: i64,
+        before_id: Option<i64>,
+    ) -> Result<(Vec<ChatMessageRow>, bool)> {
+        let sql = match before_id {
+            Some(_) =>
+                "SELECT id, session, role, text, tool_json, ts FROM chat_messages
+                 WHERE session = ?2 AND id < ?3 ORDER BY id DESC LIMIT ?1",
+            None =>
+                "SELECT id, session, role, text, tool_json, ts FROM chat_messages
+                 WHERE session = ?1 ORDER BY id DESC LIMIT ?2",
+        };
+        let map_row = |r: &rusqlite::Row| -> rusqlite::Result<ChatMessageRow> {
+            Ok(ChatMessageRow {
+                id: r.get(0)?,
+                session: r.get(1)?,
+                role: r.get(2)?,
+                text: r.get(3)?,
+                tool_json: r.get(4)?,
+                ts: r.get(5)?,
+            })
+        };
+        // 多取一条探页尾（has_more），返回时裁掉
+        let probe = limit + 1;
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = match before_id {
+            Some(bid) => stmt
+                .query_map(params![probe, session, bid], map_row)?
+                .collect::<Result<Vec<_>, _>>()?,
+            None => stmt
+                .query_map(params![session, probe], map_row)?
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        let has_more = rows.len() as i64 > limit;
+        let mut rows = rows;
+        if has_more {
+            rows.pop();
+        }
+        Ok((rows, has_more))
+    }
+
+    /// 清空会话档案（Web 的 /new 语义由上层组合：先清档案再给 agent 发 "/clear"）。
+    pub fn clear_chat_messages(&self, session: &str) -> Result<usize> {
+        Ok(self.conn.execute("DELETE FROM chat_messages WHERE session = ?1", params![session])?)
+    }
+
+    /// 绑定/重绑：同 (channel, chat_id) 幂等 upsert——重新绑定会刷新 kind/label/bound_at
+    /// 并把 active 拉回 1（unbind 过的老 id 重绑不留双行）。
+    pub fn bind_channel(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        kind: &str,
+        label: &str,
+        bound_at: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO channel_bindings (channel, chat_id, kind, label, bound_at, active)
+             VALUES (?1,?2,?3,?4,?5,1)
+             ON CONFLICT(channel, chat_id) DO UPDATE
+               SET kind = excluded.kind, label = excluded.label,
+                   bound_at = excluded.bound_at, active = 1",
+            params![channel, chat_id, kind, label, bound_at],
+        )?;
+        Ok(())
+    }
+
+    /// 解绑 = 置 active=0 留痕（DELETE 会断推送审计的对应关系）。返回是否命中活跃行。
+    pub fn unbind_channel(&self, channel: &str, chat_id: &str) -> Result<bool> {
+        let n = self.conn.execute(
+            "UPDATE channel_bindings SET active = 0
+             WHERE channel = ?1 AND chat_id = ?2 AND active = 1",
+            params![channel, chat_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// 当前活跃绑定（BoundOnly decorator 的判定面与 GET 列表端点共用）。
+    /// `channel` 为 None 时返回全部通道。bound_at 升序（先绑在前）。
+    pub fn channel_bindings(&self, channel: Option<&str>) -> Result<Vec<ChannelBindingRow>> {
+        let mut stmt = match channel {
+            Some(_) => self.conn.prepare(
+                "SELECT channel, chat_id, kind, label, bound_at, active FROM channel_bindings
+                 WHERE active = 1 AND channel = ?1 ORDER BY bound_at ASC",
+            )?,
+            None => self.conn.prepare(
+                "SELECT channel, chat_id, kind, label, bound_at, active FROM channel_bindings
+                 WHERE active = 1 ORDER BY bound_at ASC",
+            )?,
+        };
+        let map = |r: &rusqlite::Row| -> rusqlite::Result<ChannelBindingRow> {
+            Ok(ChannelBindingRow {
+                channel: r.get(0)?,
+                chat_id: r.get(1)?,
+                kind: r.get(2)?,
+                label: r.get(3)?,
+                bound_at: r.get(4)?,
+                active: r.get::<_, i64>(5)? != 0,
+            })
+        };
+        let rows = match channel {
+            Some(c) => stmt.query_map(params![c], map)?,
+            None => stmt.query_map([], map)?,
+        };
+        rows.collect::<Result<Vec<_>, _>>().context("读取通道绑定失败")
+    }
+
+    /// 单点判定（白名单热路径）：(channel, chat_id) 是否活跃绑定。
+    pub fn is_channel_bound(&self, channel: &str, chat_id: &str) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM channel_bindings
+             WHERE channel = ?1 AND chat_id = ?2 AND active = 1",
+            params![channel, chat_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
     }
 }

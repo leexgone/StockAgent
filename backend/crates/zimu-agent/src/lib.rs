@@ -19,6 +19,7 @@
 //! Skill 模板在仓库根 `skills/`（每目录一个 SKILL.md，robit 约定），内嵌
 //! `03` 口径引用与免责边界；`ZIMU_SKILLS_DIR` 可覆盖目录。
 
+pub mod assembly;
 pub mod echo;
 pub mod scheduler;
 pub mod service;

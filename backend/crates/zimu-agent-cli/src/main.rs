@@ -20,20 +20,15 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use robit_agent::{
-    resolve_memory_settings, Agent, AgentEvent, Frontend, FrontendMessage, SkillRegistry,
-    ToolCallInfo,
-};
-use robit_ai::{build_log_filter, install_panic_hook, load_config, log_file_layer, LlmClient};
+use robit_agent::{Agent, AgentEvent, Frontend, FrontendMessage, ToolCallInfo};
+use robit_ai::{build_log_filter, install_panic_hook, load_config, log_file_layer};
 use serde_json::Value;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer as _;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
-use zimu_agent::skills::load_zimu_skills;
-use zimu_agent::tools::build_registry;
-use zimu_agent::AgentDeps;
+use zimu_agent::assembly::AgentCore;
 use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
 use zimu_market::MarketApi as _; // base_url() 是 trait 方法
 
@@ -62,24 +57,6 @@ fn main() -> anyhow::Result<()> {
         .init();
     install_panic_hook();
 
-    let auto_approve = config
-        .app
-        .as_ref()
-        .and_then(|a| a.auto_approve)
-        .unwrap_or(false);
-
-    let client = Arc::new(
-        LlmClient::from_config(&config, None)
-            .context("创建 LLM 客户端失败：检查 providers / default_model 配置")?,
-    );
-    println!(
-        "子木 Agent（调试 REPL）| profile: {} | model: {}",
-        client.profile(),
-        client.model()
-    );
-    // 脱敏诊断：确认 ${ENV_VAR} 替换是否生效（401 时区分「替换失败」与「key 失效」）
-    println!("api_key: {}", mask_secret(&client.resolved().api_key));
-
     // 持仓库与行情适配器：与 zimu-server 同款环境变量，工具数字与 HTTP API 同源
     let db_path = std::env::var("ZIMU_DB_PATH").unwrap_or_else(|_| "zimu.db".into());
     let store = Arc::new(Mutex::new(
@@ -90,41 +67,27 @@ fn main() -> anyhow::Result<()> {
         HttpMarketClient::new(DEFAULT_BASE_URL, DEFAULT_TIMEOUT)
             .expect("默认配置的行情客户端构建不应失败")
     }));
+    let market_url = market_client.base_url().to_string();
+
+    // 唯一装配线（T1/ADR-0011）：与 zimu-server 同一个 AgentCore，
+    // REPL 的差异只在 Frontend 实现（CliFrontend vs WebFrontend）。
+    let core = AgentCore::assemble(working_dir.clone(), config, store, market_client)?;
     println!(
-        "持仓库：{db_path} | 行情 sidecar：{}（不在线时行情工具如实报错）",
-        market_client.base_url()
+        "子木 Agent（调试 REPL）| profile: {} | model: {}",
+        core.profile, core.model
     );
-
-    // 领域工具面 + Skill 模板（zimu-agent 公共 crate，与 server 同一份装配代码）
-    let deps = AgentDeps::new(store, market_client);
-    let registry = build_registry(deps);
-    let mut tool_names: Vec<String> = registry.tool_names().iter().map(|s| s.to_string()).collect();
-    tool_names.sort();
-    let tools = Arc::new(registry);
-
-    let (loaded_skills, skill_errors) = load_zimu_skills();
-    for e in &skill_errors {
-        println!("[warn] Skill 加载失败（跳过）：{e}");
-    }
-    let skill_names: Vec<String> = loaded_skills
-        .iter()
-        .map(|s| s.frontmatter.name.clone())
-        .collect();
-    let name_refs: Vec<&str> = tool_names.iter().map(|s| s.as_str()).collect();
-    let skills = Arc::new(SkillRegistry::new(loaded_skills, &name_refs));
-
-    println!("已注册工具：{}", tool_names.join(", "));
+    // 脱敏诊断：确认 ${ENV_VAR} 替换是否生效（401 时区分「替换失败」与「key 失效」）
+    println!("api_key: {}", core.api_key_masked());
+    println!("持仓库：{db_path} | 行情 sidecar：{market_url}（不在线时行情工具如实报错）");
+    println!("已注册工具：{}", core.tool_names.join(", "));
     println!(
         "已加载 Skill：{}\n输入消息开始对话；/复盘 /盘前 /建议 <代码> 触发模板；exit 或 /exit 退出\n",
-        if skill_names.is_empty() {
+        if core.skill_names.is_empty() {
             "（无——检查仓库根 skills/ 目录）".to_string()
         } else {
-            skill_names.join(", ")
+            core.skill_names.join(", ")
         }
     );
-
-    let context_config = config.app.as_ref().and_then(|a| a.context.as_ref());
-    let context_window = client.resolved().context_window;
 
     // 通道约定（与 robit examples/robit-agent 相同）：
     //   event   Agent → 主任务（stdout 只由主任务写，避免并发打印交错）
@@ -139,17 +102,19 @@ fn main() -> anyhow::Result<()> {
         confirm_tx,
     });
 
-    let memory = resolve_memory_settings(&config, &working_dir)?;
-
+    // Agent::new 的借用参数在 move core 字段前逐个取好（借用/部分移动互斥）
+    let memory = core.memory()?;
+    let context_config = core.context_config();
+    let context_window = core.context_window();
     let agent = Agent::new(
-        client,
-        tools,
-        skills,
+        core.client,
+        core.tools,
+        core.skills,
         frontend,
-        context_config,
+        context_config.as_ref(),
         context_window,
-        working_dir,
-        auto_approve,
+        core.working_dir,
+        core.auto_approve,
         HashMap::new(),
         memory,
     );
@@ -234,18 +199,8 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 脱敏展示密钥：只留前 3 后 4 位与长度，日志/终端永不出现完整值。
-fn mask_secret(s: &str) -> String {
-    if s.chars().count() > 10 {
-        let head: String = s.chars().take(3).collect();
-        let tail: String = s.chars().skip(s.chars().count() - 4).collect();
-        format!("{head}***{tail}（len {}）", s.chars().count())
-    } else {
-        "***（长度异常，疑似未解析）".to_string()
-    }
-}
-
 /// 把 Agent 事件渲染到 stdout。只在主任务里调用。
+/// （脱敏诊断已收进 `AgentCore::api_key_masked`——原 CLI/ server 两处重复的一处化）
 /// `in_thinking` 跟踪思考段（R7，robit 0.1.28）：段首打 💭 标记进暗体，
 /// 任何非思考事件先收口——顺序契约无显式结束标记，`turn_complete` 兜底。
 fn render_event(event: &AgentEvent, in_thinking: &mut bool) {

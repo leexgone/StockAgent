@@ -46,10 +46,16 @@ cache/
 # ── 工具与临时目录 ────────────────────────────
 .file-versions/
 .od/
-# robit 运行时会话库与记忆文件（<workdir>/.robit/memory/robit.db 等），永不入库。
-# 2026-11-07 配置分层：工程本地 robit 配置 = backend/.robit/config.toml——虽只含
-# ${VAR} 占位引用，按用户拍板**同样不入库**（机器本地文件），整目录忽略保持不变。
-.robit/
+# robit 运行时会话库与记忆文件（<workdir>/.robit/memory/robit.db 等）、工程本地
+# robit 配置（backend/.robit/config.toml，虽只含 ${VAR} 占位，按拍板不入库）与
+# 本地 .env，永不入库。唯一例外：子木主人格提示词 prompts/agent.md 是产品文案
+# 资产（与 skills/ 同性质，入库评审——T8/ADR-0011）。
+# 注意：目录级排除 `.robit/` 会永久挡住一切反向豁免，必须内容级 `/*` + 逐层放行。
+**/.robit/*
+!**/.robit/prompts/
+!**/.robit/prompts/agent.md
+# QQ 通道入站附件随 ChatbotManager working_dir 落盘（backend/media/），不入库
+media/
 screenshots/
 shots/
 *.log

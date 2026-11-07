@@ -644,10 +644,12 @@ fn watchlist_migrates_v1_db_to_v2() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
-        // v2 的 watchlist 与 v3 的 holding_edits 都要删掉：迁移重放是 CREATE TABLE，
-        // 表还在会撞「already exists」
+        // v1 之后新增的表全删（迁移重放是 CREATE TABLE，表还在会撞 already exists）；
+        // 加版迁移时记得在这里补 DROP——本行清单与 CURRENT_VERSION 同步演进。
         conn.execute_batch(
-            "DROP TABLE watchlist; DROP TABLE holding_edits; PRAGMA user_version = 1;",
+            "DROP TABLE watchlist; DROP TABLE holding_edits;
+             DROP TABLE chat_messages; DROP TABLE channel_bindings;
+             PRAGMA user_version = 1;",
         )
         .unwrap();
     }
@@ -810,4 +812,150 @@ fn holding_edits_newest_first_with_limit() {
     // id 降序 = 最近在前
     assert!(edits[0].id > edits[1].id && edits[1].id > edits[2].id);
     assert_eq!(edits[0].code, "600514");
+}
+
+// ============================================================================
+// 会话档案与通道绑定（schema v4，T2/ADR-0011）
+// ============================================================================
+
+#[test]
+fn chat_messages_append_read_clear() {
+    let dir = std::env::temp_dir().join(format!("zimu-chat-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("chat-v4.db");
+    let _ = std::fs::remove_file(&path);
+    let s = Store::open(path.to_str().unwrap()).unwrap();
+
+    // 追加：user → tool 展示行 → assistant
+    let a = s.append_chat_message("web", "user", "茅台什么价", None, "2026-11-07 10:00").unwrap();
+    let b = s
+        .append_chat_message("web", "tool", "", Some(r#"{"name":"get_quote"}"#), "2026-11-07 10:00")
+        .unwrap();
+    let c = s.append_chat_message("web", "assistant", "结论：现价 1400。", None, "2026-11-07 10:01").unwrap();
+    assert!(a < b && b < c, "id 单调递增即时间序");
+
+    // 读：新在前，tool 行带 tool_json
+    let (rows, has_more) = s.chat_messages("web", 10, None).unwrap();
+    assert!(!has_more);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].id, c);
+    assert_eq!(rows[1].role, "tool");
+    assert!(rows[1].tool_json.is_some() && rows[1].text == "");
+    assert_eq!(rows[2].text, "茅台什么价");
+
+    // 分页：limit=1 报 has_more；before_id 翻页拿到更早的
+    let (p1, more1) = s.chat_messages("web", 1, None).unwrap();
+    assert!(more1 && p1.len() == 1 && p1[0].id == c);
+    let (p2, more2) = s.chat_messages("web", 1, Some(c)).unwrap();
+    assert!(more2 && p2[0].id == b);
+    let (p3, more3) = s.chat_messages("web", 1, Some(b)).unwrap();
+    assert!(!more3 && p3[0].id == a);
+
+    // 通道隔离：别的 session 看不见 web 的行
+    s.append_chat_message("other", "user", "串台测试", None, "t").unwrap();
+    let (rows, _) = s.chat_messages("web", 100, None).unwrap();
+    assert_eq!(rows.len(), 3, "会话键隔离（通道独立：本表只归 Web）");
+
+    // CHECK 约束：非法 role 拒收
+    assert!(s.append_chat_message("web", "thinking", "不该入库", None, "t").is_err(),
+        "thinking 段被词汇 CHECK 挡在档案外（框架语义：不写回 history）");
+
+    // 清空：只清指定会话
+    assert_eq!(s.clear_chat_messages("web").unwrap(), 3);
+    let (rows, _) = s.chat_messages("web", 10, None).unwrap();
+    assert!(rows.is_empty());
+    let (rows, _) = s.chat_messages("other", 10, None).unwrap();
+    assert_eq!(rows.len(), 1, "clear 不误伤其他会话");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn channel_bindings_bind_rebind_unbind_and_hot_check() {
+    let dir = std::env::temp_dir().join(format!("zimu-bind-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("bind-v4.db");
+    let _ = std::fs::remove_file(&path);
+    let s = Store::open(path.to_str().unwrap()).unwrap();
+
+    s.bind_channel("qq", "private:ABC", "private", "本人", "2026-11-07 09:00").unwrap();
+    s.bind_channel("qq", "group:XYZ", "group", "家庭群", "2026-11-07 09:01").unwrap();
+    assert!(s.is_channel_bound("qq", "private:ABC").unwrap());
+    assert!(!s.is_channel_bound("qq", "private:OTHER").unwrap());
+    // 跨通道同 id 不互认（chat_id 命名空间撞名时白名单不越权）
+    assert!(!s.is_channel_bound("wechat", "private:ABC").unwrap());
+
+    // unbind 留痕：判定转 false，行还在（active=0）
+    assert!(s.unbind_channel("qq", "group:XYZ").unwrap());
+    assert!(!s.is_channel_bound("qq", "group:XYZ").unwrap());
+    assert!(!s.unbind_channel("qq", "group:XYZ").unwrap(), "重复解绑不命中活跃行");
+    let all = s.channel_bindings(None).unwrap();
+    assert_eq!(all.len(), 1, "列表只报活跃绑定");
+
+    // 重绑幂等 upsert：刷新 label/bound_at、拉回 active，不产生双行
+    s.bind_channel("qq", "group:XYZ", "group", "家人群改名", "2026-11-07 15:00").unwrap();
+    let all = s.channel_bindings(Some("qq")).unwrap();
+    assert_eq!(all.len(), 2);
+    let g = all.iter().find(|b| b.chat_id == "group:XYZ").unwrap();
+    assert_eq!(g.label, "家人群改名");
+    assert_eq!(g.bound_at, "2026-11-07 15:00");
+    // bound_at 升序：先绑在前
+    assert_eq!(all[0].chat_id, "private:ABC");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// 真实库**副本**升版冒烟（P4-T8 双库纪律：原件永不打开——ZIMU_SMOKE_DB 指副本！）。
+/// 手工跑法（有真实库时）：
+///   Copy-Item <真实 zimu.db> $env:TEMP\zimu-v4-smoke.db
+///   $env:ZIMU_SMOKE_DB="$env:TEMP\zimu-v4-smoke.db"; cargo test -p zimu-store --test store -- --ignored
+/// 副本应被 Store::open 自动前进到 CURRENT_VERSION，旧数据读数完好、v4 新表可用。
+#[test]
+#[ignore]
+fn upgrade_copy_of_real_db_to_current() {
+    let path = std::env::var("ZIMU_SMOKE_DB")
+        .expect("ZIMU_SMOKE_DB 必须指向真实库的副本路径（绝不指原件）");
+    let s = Store::open(&path).unwrap();
+    assert_eq!(s.version().unwrap(), zimu_store::CURRENT_VERSION);
+    // 升版后基本读数完好（不断言具体数字——真实库内容不属于测试假设）
+    let _ = s.portfolio().unwrap();
+    let _ = s.push_logs(1).unwrap();
+    // v4 新表读写可用（探针用独立 session/channel 键，不污染 'web' 档案词汇）
+    s.append_chat_message("smoke", "user", "升版探针", None, "2026-11-07 00:00").unwrap();
+    s.bind_channel("smoke", "probe", "private", "升版探针", "2026-11-07 00:00").unwrap();
+    assert!(s.is_channel_bound("smoke", "probe").unwrap());
+    let (rows, more) = s.chat_messages("smoke", 10, None).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!more);
+    s.clear_chat_messages("smoke").unwrap();
+    s.unbind_channel("smoke", "probe").unwrap();
+}
+
+#[test]
+fn migrates_v3_db_to_v4() {
+    // 合成 v3 老库 → Store::open 自动前进到 v4（迁移只前进），旧表数据不丢、新表可用。
+    let dir = std::env::temp_dir().join(format!("zimu-store-mig4-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("mig-v3.db");
+    let _ = std::fs::remove_file(&path);
+    let path_s = path.to_str().expect("临时路径是合法 UTF-8");
+    {
+        let s = Store::open(path_s).unwrap();
+        s.set_account(&AccountRow { cash: 23456.0, ..AccountRow::default() }).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "DROP TABLE chat_messages; DROP TABLE channel_bindings; PRAGMA user_version = 3;",
+        )
+        .unwrap();
+    }
+    let s = Store::open(path_s).unwrap();
+    assert_eq!(s.version().unwrap(), zimu_store::CURRENT_VERSION);
+    assert!((s.portfolio().unwrap().account.cash - 23456.0).abs() < 1e-9, "v3 旧数据不丢");
+    // v4 新表读写可用
+    s.append_chat_message("web", "user", "迁移后第一句", None, "2026-11-07 10:00").unwrap();
+    s.bind_channel("qq", "private:MIG", "private", "迁移", "2026-11-07 10:00").unwrap();
+    assert!(s.is_channel_bound("qq", "private:MIG").unwrap());
+    let (rows, _) = s.chat_messages("web", 10, None).unwrap();
+    assert_eq!(rows.len(), 1);
+    let _ = std::fs::remove_file(&path);
 }
