@@ -95,7 +95,7 @@
 | `chat-thread-card` | 对话流：打字指示 → 分段呈现，回答固定「结论 / 为什么 / 怎么做」三层 | `qa[]`（`k: conclusion / body / plan`） |
 | `chat-context-card` | 「助理现在能看到什么」：账户、总资产、持仓数、现金、时段 | `ws`、汇总快照（`renderCtx()`，顶栏刷新时重绘） |
 | `chat-limit-card` | 「它不会做的事」：能力边界自陈 | 静态文案 + 免责 |
-| `chat-sessions-card` | 最近会话，含微信里的语音与文字 | `sessions` |
+| `chat-sessions-card` | 最近会话，含微信里的语音与文字 | `sessions`（生产侧读 `/api/push_logs`；通道独立：QQ/微信会话不与网页合流——ADR-0011 拍板①） |
 | 依据来源 | 每条回答下方列出引用的界面与原文（持仓明细 / 组合诊断 / 行情快照 / 公告） | `qa[].cites` |
 | 追问 chips | 三个后续问题快捷入口 | `qa[].chips` |
 
@@ -149,10 +149,10 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 
 | 模块 | 内容 | 数据依赖 |
 |---|---|---|
-| `wx-channel-card` | 接入通道开关，主通道失败自动改用备用通道重试一次 | 本地状态 |
-| `wx-push-card` | 6 类推送订阅 + 推送时段 + 静音标的 | 本地状态 |
-| `wx-config-card` | 服务号 / 推送参数（AppID、Token、Webhook），**仅存本机浏览器** | `localStorage` |
-| `wx-bind-card` | 绑定二维码、绑定状态、解绑二次确认弹窗 | `sessions` |
+| `wx-channel-card` | 接入通道开关，主通道失败自动改用备用通道重试一次 | 本地状态（生产侧：启用开关在服务器配置文件 `[zimu.channels]`，界面只读展示——ADR-0011 拍板⑤⑥） |
+| `wx-push-card` | 6 类推送订阅 + 推送时段 + 静音标的 | 本地状态（生产侧界面管理、落 zimu.db——P7-T2 后具备接线条件） |
+| `wx-config-card` | 服务号 / 推送参数（AppID、Token、Webhook），**仅存本机浏览器**（原型语义） | `localStorage`。**生产侧改口径（ADR-0011 拍板⑤）**：连接参数在服务器配置文件编辑（`backend/.robit/config.toml` + `.env` 占位，凭据永不入库），卡片仅做**脱敏只读状态展示**；产品定位 = 个人微信助理（OpenClaw 形态），非服务号——本卡文案随 C4 落地重写 |
+| `wx-bind-card` | 绑定二维码、绑定状态、解绑二次确认弹窗 | `sessions`（生产侧契约已就位：`/api/channel_bindings` GET/POST/DELETE，`channel_bindings` 表；QQ 本轮以端点操作绑定，二维码流程随微信模块到货） |
 | `wx-preview-card` | 推送卡片模板预览（可点按钮） | `ZM` 样本 |
 | `wx-log-card` | 最近 6 条推送日志 | 本地状态 |
 

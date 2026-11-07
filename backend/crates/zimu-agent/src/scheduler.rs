@@ -54,6 +54,21 @@ const REVIEW_TRIGGER_TEXT: &str = "/复盘";
 pub type ReviewTrigger =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
+/// 预警推送回调（T6/ADR-0011）：收到一条新预警的落库原值（name/alert_type/
+/// level/text），返回是否送达至少一个目标。**文案组装、多目标循环与 push_log
+/// 留痕全在宿主侧**——本 crate 只说「推这条」，不认通道、不依赖 robit
+/// （边界与 ReviewTrigger 同构，scheduler.rs 头部纪律）。
+pub type AlertPusher =
+    Arc<dyn Fn(NewAlertInfo) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+
+/// 盘后摘要推送回调（T6）：携带当日 `equity_snapshots` 行原值（数字 = recalc
+/// agg 原值，03 §12 不现编）；返回是否送达至少一个目标。同样：格式化与留痕归宿主。
+pub type SummaryPusher = Arc<
+    dyn Fn(zimu_store::EquitySnapshotRow) -> Pin<Box<dyn Future<Output = bool> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// 单轮调度的事实汇报（测试断言面 + 日志素材；不落库）
 #[derive(Debug, Default)]
 pub struct TickReport {
@@ -64,9 +79,13 @@ pub struct TickReport {
     pub polled: bool,
     pub quotes_updated: usize,
     pub new_alerts: Vec<NewAlertInfo>,
+    /// 预警推送送达至少一目标的数量（T6；未接推送恒 0）
+    pub alerts_pushed: usize,
     pub snapshot_written: bool,
     /// None = 本轮未触发复盘链（时刻未到/当日快照已存在）
     pub review_ok: Option<bool>,
+    /// 盘后摘要推送（T6）：None = 本轮未走盘后链或未接推送
+    pub summary_pushed: Option<bool>,
     /// 降级与错误明细（如实上报，不吞）
     pub notes: Vec<String>,
 }
@@ -75,8 +94,12 @@ pub struct TickReport {
 pub struct NewAlertInfo {
     pub id: i64,
     pub code: String,
+    pub name: String,
     pub alert_type: String,
     pub level: String,
+    /// 预警文案原值（zimu-domain::alert 判定产出，03 §12）——推送侧直接用，
+    /// 不再二次加工数字
+    pub text: String,
 }
 
 /// 转债期限类事实（cb_list 每日一次的缓存值）
@@ -112,14 +135,24 @@ impl DailyState {
 pub struct SchedulerCore {
     deps: Arc<AgentDeps>,
     review: Option<ReviewTrigger>,
+    /// 通道推送（T6）：None = 宿主未接（与 review 同构的降级语义）
+    push_alert: Option<AlertPusher>,
+    push_summary: Option<SummaryPusher>,
     daily: Mutex<DailyState>,
 }
 
 impl SchedulerCore {
-    pub fn new(deps: Arc<AgentDeps>, review: Option<ReviewTrigger>) -> Arc<Self> {
+    pub fn new(
+        deps: Arc<AgentDeps>,
+        review: Option<ReviewTrigger>,
+        push_alert: Option<AlertPusher>,
+        push_summary: Option<SummaryPusher>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             deps,
             review,
+            push_alert,
+            push_summary,
             daily: Mutex::new(DailyState::default()),
         })
     }
@@ -158,6 +191,15 @@ impl SchedulerCore {
         // 盘中分钟级轮询（集合竞价/早盘/午盘 = clock.live）
         if clock.live {
             self.poll_once(&today, now, &mut rep).await;
+            // 新预警推送（T6）：落库与同日去重在 poll_once 已完成——每条 (code,type)
+            // 至多推一次；送达失败不重试（下轮已被去重挡住，如实接受），宿主留痕。
+            if let Some(pusher) = &self.push_alert {
+                for a in rep.new_alerts.clone() {
+                    if pusher(a).await {
+                        rep.alerts_pushed += 1;
+                    }
+                }
+            }
         }
 
         // 盘后链（≥15:05；幂等 = 当日快照行存在，含补跑语义）
@@ -376,8 +418,10 @@ impl SchedulerCore {
                     rep.new_alerts.push(NewAlertInfo {
                         id,
                         code: na.code,
+                        name: na.name,
                         alert_type: na.alert_type,
                         level: na.level,
+                        text: na.text,
                     });
                 }
                 Err(e) => rep.notes.push(format!("{code} 预警落库失败：{e}")),
@@ -562,6 +606,13 @@ impl SchedulerCore {
             rep.notes.push(format!("push_log 落库失败：{e}"));
         }
         tracing::info!(ok, detail = %detail, "盘后复盘触发（15:05 调度）");
+
+        // 盘后摘要推送（T6）：把刚写入的快照行原值交给宿主（数字不现编，03 §12；
+        // 格式化与 push_log 留痕归宿主侧）。复盘正文仍留在 Web 会话——这里只推
+        // 数字摘要，不向 IM 会话注入触发回合（robit 缺注入 API，见 R8）。
+        if let Some(pusher) = &self.push_summary {
+            rep.summary_pushed = Some(pusher(snap.clone()).await);
+        }
     }
 }
 

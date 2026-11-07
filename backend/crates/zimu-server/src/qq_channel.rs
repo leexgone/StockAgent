@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use robit_chatbot::ChatbotManager;
+use robit_chatbot::{ChatbotManager, PlatformAdapter};
 use robit_qq::{QqConfig, QqPlatformAdapter};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -28,6 +28,36 @@ use crate::agent_bridge::AgentBridge;
 // bin 模块引 lib 目标：走 zimu_server:: 路径（crate:: 是 bin 自己，见 agent_bridge 同款）
 use zimu_server::channel_adapter::BoundOnly;
 use zimu_server::holdings_api::SharedStore;
+
+/// 在线连接槽（T6 推送侧的"只推在线的"）：run_once 连上后写入 adapter，
+/// 退出/失败清空。宿主 sink 经它出站——未连接时 `send` 返回 None（如实失败，
+/// 不装送达）。锁内只 clone 出句柄，await 在锁外。
+#[derive(Clone, Default)]
+pub struct ActiveAdapter(Arc<std::sync::Mutex<Option<Arc<QqPlatformAdapter>>>>);
+
+impl ActiveAdapter {
+    /// 出站一条文本：None = 通道当前不在线；Some(Err) = 平台发送失败。
+    pub async fn send(
+        &self,
+        chat_id: &str,
+        text: &str,
+    ) -> Option<robit_agent::error::Result<robit_chatbot::SendResult>> {
+        let adapter = self.0.lock().ok()?.clone()?;
+        Some(adapter.send_message(chat_id, text).await)
+    }
+
+    fn set(&self, adapter: Arc<QqPlatformAdapter>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(adapter);
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = None;
+        }
+    }
+}
 
 /// 通道句柄：health 的 `qq_online` 由 main 自持同一个 `Arc<AtomicBool>` 读；
 /// 优雅关闭调 `request_stop()` 后 `join()`。
@@ -47,6 +77,7 @@ impl QQChannel {
         store: SharedStore,
         working_dir: PathBuf,
         online: Arc<AtomicBool>,
+        active: ActiveAdapter,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let shutdown = Arc::new(Notify::new());
@@ -57,6 +88,7 @@ impl QQChannel {
             online.clone(),
             stop.clone(),
             shutdown.clone(),
+            active,
         ));
         Self { stop, shutdown, handle }
     }
@@ -89,13 +121,14 @@ async fn run_supervisor(
     online: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     shutdown: Arc<Notify>,
+    active: ActiveAdapter,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        match run_once(&bridge, &store, &working_dir, &shutdown, &stop, &online).await {
+        match run_once(&bridge, &store, &working_dir, &shutdown, &stop, &online, &active).await {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break; // 关停路径的"正常退出"，不重连
@@ -107,6 +140,7 @@ async fn run_supervisor(
             }
         }
         online.store(false, Ordering::SeqCst);
+        active.clear(); // 推送侧此刻起 send 返回 None（未连接如实失败）
         if stop.load(Ordering::SeqCst) {
             break;
         }
@@ -129,6 +163,7 @@ async fn run_once(
     shutdown: &Arc<Notify>,
     stop: &Arc<AtomicBool>,
     online: &Arc<AtomicBool>,
+    active: &ActiveAdapter,
 ) -> Result<()> {
     // 第二份 RobitConfig：不可 Clone 且 ChatbotManager::new 按值吃（manager.rs:117）；
     // load_config 重复调用安全（纯文件读，robit-ai config.rs:388）
@@ -146,6 +181,8 @@ async fn run_once(
     let adapter = QqPlatformAdapter::connect(qq_cfg, shutdown.clone())
         .await
         .context("连接 QQ 网关失败")?;
+    // 推送侧句柄（T6）：出站走原始 adapter（不过白名单——入站闸门与主动出站不同层）
+    active.set(adapter.clone());
     let bounded = Arc::new(BoundOnly::new(adapter, store.clone(), "qq"));
 
     let manager = ChatbotManager::new(

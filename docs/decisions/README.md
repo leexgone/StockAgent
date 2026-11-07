@@ -47,3 +47,7 @@ B …
 | [0005](./0005-tech-route-rust-robit-react-sidecar.md) | 技术路线：Rust + robit 基建、React 前端、Python 行情 sidecar | 接受 |
 | [0006](./0006-first-position-entry-manual-first.md) | 首笔持仓录入：手工逐笔先行，CSV 导入作后续增强（C5） | 接受 |
 | [0007](./0007-hybrid-scoring-rules-plus-model.md) | 分析结论生成：规则打分 + 模型写文案的混合方式（C8） | 接受 |
+| [0008](./0008-frontend-conventions.md) | 前端工程约定：路由表单一来源 + 契约客户端 + zustand + 手写组件 | 接受 |
+| [0009](./0009-direct-holding-maintenance.md) | 持仓直接维护：快照校正三入口，不动现金不写流水 | 接受 |
+| [0010](./0010-chat-markdown-rendering.md) | 助手消息 Markdown 渲染：react-markdown + remark-gfm | 接受 |
+| [0011](./0011-agent-channels-and-server-side-history.md) | 智能体接入模块：通道独立会话、服务端真值、QQ 验证通道与配置分界 | 接受 |

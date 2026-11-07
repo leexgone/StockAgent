@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde_json::json;
-use zimu_agent::scheduler::{ReviewTrigger, SchedulerCore};
+use zimu_agent::scheduler::{AlertPusher, ReviewTrigger, SchedulerCore, SummaryPusher};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_domain::Side;
 use zimu_market::error::{MarketError, MarketResult};
@@ -308,7 +308,44 @@ fn core_with(
     fake: Arc<FakeApi>,
     review: Option<ReviewTrigger>,
 ) -> Arc<SchedulerCore> {
-    SchedulerCore::new(AgentDeps::new(store, fake), review)
+    SchedulerCore::new(AgentDeps::new(store, fake), review, None, None)
+}
+
+/// T6：接入通道推送回调的核心（None = 未接线，与生产 main.rs 的降级同构）
+fn core_with_push(
+    store: SharedStore,
+    fake: Arc<FakeApi>,
+    review: Option<ReviewTrigger>,
+    alert: Option<AlertPusher>,
+    summary: Option<SummaryPusher>,
+) -> Arc<SchedulerCore> {
+    SchedulerCore::new(AgentDeps::new(store, fake), review, alert, summary)
+}
+
+/// 记录送达调用（返回定值 ok）的预警推送回调
+fn recording_alert_pusher(
+    log: Arc<Mutex<Vec<String>>>,
+    ok: bool,
+) -> AlertPusher {
+    Arc::new(
+        move |a: zimu_agent::scheduler::NewAlertInfo| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+            log.lock().unwrap().push(format!("{}|{}", a.code, a.alert_type));
+            Box::pin(async move { ok })
+        },
+    )
+}
+
+/// 记录快照原值的摘要推送回调
+fn recording_summary_pusher(
+    log: Arc<Mutex<Vec<(String, f64)>>>,
+    ok: bool,
+) -> SummaryPusher {
+    Arc::new(
+        move |snap: zimu_store::EquitySnapshotRow| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+            log.lock().unwrap().push((snap.date.clone(), snap.total_assets));
+            Box::pin(async move { ok })
+        },
+    )
 }
 
 fn standard_fake() -> Arc<FakeApi> {
@@ -745,4 +782,105 @@ async fn held_code_in_watchlist_is_not_double_judged() {
     let kinds: Vec<&str> = rep.new_alerts.iter().map(|a| a.alert_type.as_str()).collect();
     assert_eq!(kinds, vec!["跌破成本"], "持仓形态判定一次，自选侧不重复");
     assert_eq!(fake.quote_calls.load(Ordering::SeqCst), 1); // 仅刷新链一次，自选未单独拉
+}
+
+// ============================================================================
+// 通道推送（T6/ADR-0011）：预警推送与盘后摘要——恰一次/未接线/失败如实
+// ============================================================================
+
+#[tokio::test]
+async fn alert_push_fires_once_per_dedup_and_failures_reported() {
+    // 种子 + 现价 105 跌破成本（与 in-session 预警用例同款形态）
+    let store = seeded_store();
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 105.0, 110.0, 1000.0,
+    )]));
+    let hits = Arc::new(Mutex::new(Vec::new()));
+    let core = core_with_push(
+        store.clone(),
+        fake.clone(),
+        None,
+        Some(recording_alert_pusher(hits.clone(), true)),
+        None,
+    );
+
+    let rep = core.tick(sh(29, 10, 30)).await;
+    assert!(!rep.new_alerts.is_empty(), "本轮有预警");
+    assert_eq!(rep.alerts_pushed, rep.new_alerts.len(), "每条新预警推送恰一次并送达");
+    assert_eq!(hits.lock().unwrap().len(), rep.new_alerts.len());
+
+    // 第二轮（10:31）：同日去重 → 不重复落库，也**不再推送**
+    let rep2 = core.tick(sh(29, 10, 31)).await;
+    assert!(rep2.new_alerts.is_empty());
+    assert_eq!(rep2.alerts_pushed, 0);
+    assert_eq!(hits.lock().unwrap().len(), rep.new_alerts.len(), "推送不重复");
+}
+
+#[tokio::test]
+async fn alert_push_failure_counts_zero_but_alert_still_persisted() {
+    let store = seeded_store();
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 105.0, 110.0, 1000.0,
+    )]));
+    let hits = Arc::new(Mutex::new(Vec::new()));
+    let core = core_with_push(
+        store.clone(),
+        fake,
+        None,
+        Some(recording_alert_pusher(hits.clone(), false)),
+        None,
+    );
+    let rep = core.tick(sh(29, 10, 30)).await;
+    // 送达失败如实计数 0，但预警照常落库（推送是尽力面，不是判定面）
+    assert!(rep.alerts_pushed == 0 && !rep.new_alerts.is_empty());
+    assert!(!hits.lock().unwrap().is_empty(), "失败也要被调用（宿主侧留痕归宿主）");
+    assert!(!lock(&store).list_alerts(None, 50).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn no_pushers_wired_is_quiet_and_harmless() {
+    // 未接线（None/None）：调度链与 T6 前行为完全一致——core_with 的既有用例已覆盖
+    // 触发路径，这里只断摘要面：15:05 盘后链不炸、summary_pushed 保持 None
+    let store = seeded_store();
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 112.0, 110.0, 3000.0,
+    )]));
+    let core = core_with(store.clone(), fake, None);
+    let rep = core.tick(sh(29, 15, 5)).await;
+    assert!(rep.snapshot_written && rep.summary_pushed.is_none());
+}
+
+#[tokio::test]
+async fn summary_push_carries_snapshot_raw_values_once() {
+    let store = seeded_store();
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 112.0, 110.0, 3000.0,
+    )]));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let core = core_with_push(
+        store.clone(),
+        fake.clone(),
+        None,
+        None,
+        Some(recording_summary_pusher(seen.clone(), true)),
+    );
+
+    let rep = core.tick(sh(29, 15, 5)).await;
+    assert!(rep.snapshot_written);
+    assert_eq!(rep.summary_pushed, Some(true), "摘要随盘后链恰一次送达");
+    let got = seen.lock().unwrap().clone();
+    assert_eq!(got.len(), 1);
+    // 推的是**落库行原值**：与 equity_snapshots 当日行逐位一致（数字不现编）
+    let stored = lock(&store).equity_snapshot("2026-10-29").unwrap().unwrap();
+    assert_eq!(got[0].0, stored.date);
+    assert!((got[0].1 - stored.total_assets).abs() < 1e-12);
+
+    // 幂等闸：当日快照已存在 → 整链跳过，摘要也不重推
+    let rep2 = core.tick(sh(29, 15, 6)).await;
+    assert!(rep2.summary_pushed.is_none());
+    assert_eq!(seen.lock().unwrap().len(), 1);
 }

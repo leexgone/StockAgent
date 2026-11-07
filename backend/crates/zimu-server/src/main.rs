@@ -234,6 +234,90 @@ fn agent_offline() -> Response {
 }
 
 // ============================================================================
+// 通道推送出站（T6/ADR-0011）——文案组装、多目标循环、逐目标留痕都在宿主
+// ============================================================================
+
+/// QQ 消息长度上限（PlatformCaps::qq().max_message_length = 2000，robit-chatbot
+/// adapter.rs:97）；出站前清洗 + 截断都要贴这个数。
+const QQ_MAX_LEN: usize = 2000;
+
+/// 一条系统消息 → 全部已绑定 QQ 会话，逐目标 push_log 留痕。
+/// 送达失败如实记（调度器已按日去重，同一预警今日不重推——失败的可补救面
+/// 就是留痕本身，与「受理 ≠ 完成」同纪律）。返回是否送达至少一目标。
+async fn push_to_bound(
+    store: &SharedStore,
+    active: &qq_channel::ActiveAdapter,
+    kind: &'static str,
+    text: &str,
+    subject: &str,
+) -> bool {
+    let targets = match zimu_agent::lock(store).channel_bindings(Some("qq")) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("绑定会话读取失败（放弃推送）：{e:#}");
+            return false;
+        }
+    };
+    if targets.is_empty() {
+        let _ = zimu_agent::lock(store).insert_push_log(
+            &zimu_server::chat_record::ts_now(),
+            "qq",
+            kind,
+            false,
+            &format!("{subject}｜无已绑定会话（跳过推送）"),
+        );
+        return false;
+    }
+    // QQ 的 Markdown 面只有 code_blocks：过 robit-chatbot 现成清洗器降级为可读纯文本
+    let cleaned = robit_chatbot::markdown::prepare_markdown_for_platform(
+        text,
+        &robit_chatbot::MarkdownFeatures::qq(),
+    );
+    let clipped = clip_by_lines(&cleaned, QQ_MAX_LEN);
+    let mut any = false;
+    for t in targets {
+        let (ok, note): (bool, String) = match active.send(&t.chat_id, &clipped).await {
+            None => (false, "通道未在线（发送放弃）".into()),
+            Some(Ok(_)) => (true, "已送达".into()),
+            Some(Err(e)) => (false, format!("发送失败：{e}")),
+        };
+        any |= ok;
+        if let Err(e) = zimu_agent::lock(store).insert_push_log(
+            &zimu_server::chat_record::ts_now(),
+            "qq",
+            kind,
+            ok,
+            &format!("{subject} → {}：{note}", t.chat_id),
+        ) {
+            tracing::warn!("推送留痕失败：{e:#}");
+        }
+    }
+    any
+}
+
+/// 按行截到 cap 字符内（不切半行；超限省略标记）——保证多行摘要不被拦腰截断
+fn clip_by_lines(s: &str, cap: usize) -> String {
+    let mut out = String::new();
+    for line in s.lines() {
+        let candidate = if out.is_empty() {
+            line.to_string()
+        } else {
+            format!("{out}\n{line}")
+        };
+        if candidate.chars().count() > cap {
+            if out.is_empty() {
+                // 单行超限：按字符硬截（至少给出开头）
+                return s.chars().take(cap.saturating_sub(4)).collect::<String>() + "…截";
+            }
+            out.push_str("\n…（已截断）");
+            return out;
+        }
+        out = candidate;
+    }
+    out
+}
+
+// ============================================================================
 // 启动装配
 // ============================================================================
 
@@ -375,6 +459,8 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("微信通道开关已开但本轮无实现（等 robit 平台模块到货）：忽略，不建通道");
     }
     let qq_online = Arc::new(AtomicBool::new(false));
+    // 在线连接槽（T6 推送侧）：QQ 未启用/未连上时 send 恒 None，推送如实失败留痕
+    let qq_active = qq_channel::ActiveAdapter::default();
     let qq_channel = match (flags.qq, agent.clone()) {
         (true, Some(bridge)) => {
             tracing::info!("QQ 通道已启用（[zimu.channels].qq=true）：supervisor 启动");
@@ -383,6 +469,7 @@ async fn main() -> anyhow::Result<()> {
                 store.clone(),
                 working_dir.clone(),
                 qq_online.clone(),
+                qq_active.clone(),
             ))
         }
         (true, None) => {
@@ -415,11 +502,67 @@ async fn main() -> anyhow::Result<()> {
                     Box::pin(async move { bridge.submit_user_text(text).await.is_ok() })
                 }) as ReviewTrigger
             });
+            // 通道推送回调（T6/ADR-0011）：QQ 启用时接线，未启用 = None（与 review
+            // 同构降级）。送达 = 对全部已绑定会话逐条发 + 逐目标 push_log 留痕。
+            let (push_alert, push_summary) = if qq_channel.is_some() {
+                let store = store.clone();
+                let active = qq_active.clone();
+                let alert: zimu_agent::scheduler::AlertPusher = {
+                    let store = store.clone();
+                    let active = active.clone();
+                    Arc::new(move |a: zimu_agent::scheduler::NewAlertInfo| {
+                        let store = store.clone();
+                        let active = active.clone();
+                        Box::pin(async move {
+                            let msg = format!("子木预警 · {} {}", a.name, a.text);
+                            let subject = format!("预警 {} {}", a.code, a.alert_type);
+                            push_to_bound(&store, &active, "alert_push", &msg, &subject).await
+                        })
+                            as std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+                    })
+                };
+                let summary: zimu_agent::scheduler::SummaryPusher =
+                    Arc::new(move |snap: zimu_store::EquitySnapshotRow| {
+                    let store = store.clone();
+                    let active = active.clone();
+                    Box::pin(async move {
+                        // 数字 = equity_snapshots 落库原值（03 §12 不现编）；
+                        // 复盘正文留在 Web 会话，这里只推数字摘要
+                        let msg = format!(
+                            "子木盘后摘要 {}\n总资产 {:.2}\n当日盈亏 {:+.2}（{:+.2}%）\n累计盈亏 {:+.2}（{:+.2}%）\n现金 {:.2} · 仓位 {:.1}% · 集中度 {:.2}",
+                            snap.date,
+                            snap.total_assets,
+                            snap.day_pnl,
+                            snap.day_pnl_pct,
+                            snap.total_pnl,
+                            snap.total_pnl_pct,
+                            snap.cash,
+                            snap.exposure,
+                            snap.hhi,
+                        );
+                        let subject = format!("盘后摘要 {}", snap.date);
+                        push_to_bound(
+                            &store,
+                            &active,
+                            "post_market_review_push",
+                            &msg,
+                            &subject,
+                        )
+                        .await
+                    })
+                        as std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+                });
+                (Some(alert), Some(summary))
+            } else {
+                (None, None)
+            };
             let core = zimu_agent::scheduler::SchedulerCore::new(
                 // 独立 AgentDeps（自己的 CalendarCache）：调度与工具面/HTTP 侧解耦，
                 // 多一个 1h TTL 缓存实例无害（与 agent_bridge 同款取舍）
                 zimu_agent::AgentDeps::new(store.clone(), market_client.clone()),
                 review,
+                push_alert,
+                push_summary,
             );
             Some(tokio::spawn(zimu_agent::scheduler::run(
                 core,

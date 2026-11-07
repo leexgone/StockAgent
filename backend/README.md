@@ -42,13 +42,24 @@ workspace 里有多个 bin，`cargo run` 必须带 `-p` 指明。
 
 ## 会话端点（P2-T3 SSE 桥）
 
-Agent 随服务启动装配（与 zimu-agent-cli 同一链路，`CliFrontend` 换成 robit-web
-的 `WebFrontend`：`WebEvent` broadcast 扇出 + 单槽位确认，P2-T5 起由 robit
-提供）。宿主侧只剩 axum 接线（SSE 编码、`connected` 首帧——P4-T6 起含 `skills`
-键、POST → `WebBridge` 路由，见 `main.rs`）与 Agent 装配（`agent_bridge.rs`）；
-工具面与 Skill 模板在 `zimu-agent` crate（见下节）。找不到 robit 配置时服务
-照常起、静态首页可用，仅 `/api/chat*` 降级 503。spike 边界：进程级单会话，
-多会话与持久化留给后续（robit-web 约定单会话一桥）。
+Agent 随服务启动装配（装配线在 `zimu_agent::assembly::AgentCore`——Web 桥、
+QQ 通道与 zimu-agent-cli 共享同一 `LlmClient`/`ToolRegistry`/`SkillRegistry`
+三 Arc，ADR-0011/T1；`CliFrontend` 换成 robit-web 的 `WebFrontend`：`WebEvent`
+broadcast 扇出 + 单槽位确认，P2-T5 起由 robit 提供）。宿主侧只剩 axum 接线
+（SSE 编码、`connected` 首帧——P4-T6 起含 `skills` 键、POST → `WebBridge` 路由，
+见 `main.rs`）与桥接线（`agent_bridge.rs`）；工具面与 Skill 模板在 `zimu-agent`
+crate（见下节）。找不到 robit 配置时服务照常起、静态首页可用，仅 `/api/chat*`
+降级 503。会话真值在服务端（T3/T4）：用户消息**先落 `chat_messages` 再注入**、
+事件流经 recorder 状态机归档（thinking 不入档）、启动时 `Agent::with_history`
+复活回灌；`GET /api/chat/history` + `POST /api/chat/reset` 进契约。边界更新：
+Web 通道仍是单会话（多 Web 会话不是本轮义务），IM 通道按 chat_id 独立会话。
+
+QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.1.28 库面消费，
+robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
+表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
+文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
+宿主循环只兜残余退出。health 透出 `qq_online`。
 
 | 端点 | 说明 |
 |---|---|
@@ -312,7 +323,8 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.1.28`（2026-11-07 切换，共同演进回路第三轮：
+robit 全家消费 crates.io 正式版 `0.1.28`（含 P7-T2 起新消费的 `robit-chatbot`/
+`robit-qq`；共同演进回路第三轮：
 子木 R7 思考过程输出需求文档 → robit `feat/thinking-output` 落地发布 2026-11-05——
 robit-ai 双路径捕获 `reasoning_content`（模型级 `thinking = auto|on|off`）、
 `AgentEvent::ThinkingDelta`、robit-web `thinking_delta` wire 帧、R6 空白 text_delta

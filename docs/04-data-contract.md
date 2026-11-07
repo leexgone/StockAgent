@@ -105,11 +105,27 @@
 
 | 键 | 内容 | 出处 |
 |---|---|---|
-| `zimu:chat:me` | 问答会话，最多 30 条；空态模式（见下）另存 `zimu:chat:me:empty`，两种演示态的历史互不串 | `chat.html` |
+| `zimu:chat:me` | 问答会话，最多 30 条；空态模式（见下）另存 `zimu:chat:me:empty`，两种演示态的历史互不串。**生产侧语义已变（P7-T2/ADR-0011）**：会话真值在服务端 `chat_messages`（进屏经 `GET /api/chat/history` 水合），本键降级为**服务端不可达时的只读展示缓存**；「清空会话」先 `POST /api/chat/reset` 成功才清本地 | `chat.html`（原型语义）→ `frontend/`（生产语义） |
 | `zimu:wechat:v2` | 通道开关、订阅、静音标的、绑定状态、推送参数 | `wechat.html` |
 | `zimu:demo:empty`（sessionStorage） | 空持仓演示模式开关（P1-T1）：`?empty=1` 写入、`?empty=0` 清除；仅当前标签页有效，关掉标签即回演示数据 | `data.js` |
 
-约定：键名统一 `zimu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。
+约定：键名统一 `zimu:` 前缀 + `:vN` 版本后缀，结构变更时升版本而不是迁移旧数据。⚠️ `wx-config-card` 允许在浏览器里填 AppID / Token / Webhook —— 这条通道将来接服务端后，密钥必须移到服务端配置，**永远不要继续存在 localStorage**。（P7-T2/ADR-0011 已定生产侧分界：连接参数与启用开关只走服务器配置文件 `backend/.robit/config.toml` + `.env` 占位；界面管理的是绑定关系（`channel_bindings`）与推送偏好，不碰凭据。）
+
+## 会话档案与服务端真值（P7-T2，ADR-0011）
+
+Web 通道会话的生产数据边界（IM 通道会话历史归 robit 自持库，不在此面）：
+
+- **存什么**：`zimu.db` v4 `chat_messages`——user 行（**先落库再注入**，含调度器
+  `/复盘` 注入，如实入档）、assistant 定稿文本、tool 展示行（`tool_json` =
+  `{name,arguments,result,is_error}`，仅供「依据来源」回看）。**不存**：thinking
+  段（框架「不写回 history」同口径）、通知/确认/连接类条目。
+- **怎么用**：启动复活只取 user/assistant 文本对喂 `Agent::with_history`——
+  **工具轨迹不回灌**（行情/持仓陈旧数字不进模型上下文，03「派生数字现算」）；
+  `GET /api/chat/history?limit=&before_id=`（升序 + 游标翻页，不依赖 agent
+  在线）、`POST /api/chat/reset`（清档案 + 通知 agent 清内存 + push_log 留痕，
+  离线档案照常清、如实记 `ok=false`）。
+- **丢帧如实**：档案 recorder 落后（broadcast Lagged）时当轮 assistant 尾部
+  标注「（事件流丢帧，档案不完整）」——宁可标注，不静默缺字。
 
 ## 附录 A · 行情源实测与字段对照（P2-T1 spike，2026-10-26）
 
@@ -261,8 +277,9 @@ HTTP 调用。要点：
 - **守护**（验收「样例响应过 schema 校验」）：`cargo test -p zimu-server --test contract`
   三连——① 仓库文档与代码生成逐字节一致（up-to-date 断言）；② seeded 测试
   服务**全端点实时响应**过其声明的响应 schema（jsonschema，draft 2020-12，
-  `$ref` 解析自 components.schemas）；③ `fixtures/api/` 的 15 份**提交样例**
-  过同一校验（样例永不腐烂，前端移植可直接当 mock）。样例再生成：
+  `$ref` 解析自 components.schemas）；③ `fixtures/api/` 的 35 份**提交样例**
+  过同一校验（样例永不腐烂，前端移植可直接当 mock；P7-T2 起含 Web 会话档案
+  2 份与通道绑定 5 份）。样例再生成：
   `ZIMU_REGEN_API_SAMPLES=1 cargo test -p zimu-server --test contract`。
 - **消费**：运行时 `GET /api/openapi.json`（与仓库文件同内容，契约测试断言
   相等）；前端 `npm run gen:api`（openapi-typescript）生成
