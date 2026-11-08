@@ -15,7 +15,7 @@
 | P4 | 数据管道与存储 | P3 ✅；C5/C8 拍板 ✅（2026-10-28，ADR-0006/0007） | ✅ 2026-10-29（T2–T7 全落地；T1 前端抽屉接线随 P5-T2 holdings 屏于 2026-10-30 收口） | 1–1.5 周 |
 | P5 | 前端移植（7 屏 → React） | P4（API 面冻结）；**C4 拍板** | 🔨（T1 ✅ 2026-10-29；T2 六屏 ✅ 2026-10-30，余 wechat 待 C4；T3 ✅ design/ 冻结 2026-10-30） | 1–1.5 周 |
 | P6 | MVP 垂直切片（连续 5 个交易日真实跑通） | P4+P5；C4 渠道落地 | ⬜ | ≥5 个交易日 |
-| P7 | MVP 后迭代池（任务自 `07` backlog 与新需求登记；首项：模型思考过程展示链路） | P6；robit 侧 R7 发版 | 🔨 2026-11-07（P7-T1 两侧代码落地余走查；P7-T2 智能体接入模块子木侧全量落地，余 QQ 真机走查） | 按任务行 |
+| P7 | MVP 后迭代池（任务自 `07` backlog 与新需求登记；首项：模型思考过程展示链路） | P6；robit 侧 R7 发版 | 🔨 2026-11-07（P7-T1 两侧代码落地余走查；P7-T2 智能体接入模块子木侧全量落地，QQ 真机核心链路走查通过 2026-11-08，余项见任务行） | 按任务行 |
 
 **并行规则**：A 轨 = P1（只动 `design/` 与 `docs/`），B 轨 = P2→P6（新目录）；两轨在 P5 之前互不阻塞。P5 完成后 `design/` 冻结为参照。
 
@@ -103,7 +103,7 @@
 
 | # | 任务 | 产出/验收 | 估算 | 状态 |
 |---|---|---|---|---|
-| P6-T1 | QQ 适配器接入（`robit-qq`，出站 WS）：双向会话 + 推送 | 群里问「某只要不要止损」得到带口径的回答 | 0.5–1d | 🔶 子木侧代码面由 **P7-T2 提前承担**（ADR-0011：`ChatbotManager<QqPlatformAdapter>` 已挂进 zimu-server，缺省停用待真机走查）；微信通道仍等 C4 与 robit 平台模块 |
+| P6-T1 | QQ 适配器接入（`robit-qq`，出站 WS）：双向会话 + 推送 | 群里问「某只要不要止损」得到带口径的回答 | 0.5–1d | 🔶 子木侧代码面由 **P7-T2 提前承担**（ADR-0011：`ChatbotManager<QqPlatformAdapter>` 已挂进 zimu-server，缺省停用；真机核心链路走查通过 2026-11-08）；微信通道仍等 C4 与 robit 平台模块 |
 | P6-T2 | 微信渠道落地（**gate：C4**，含公网回调/内网穿透评估，若需入站先补安全 ADR） | 同上 | 1–2d | ⏸ 等 C4 |
 | P6-T3 | 部署与运维：Windows 服务/计划任务、日志轮转、SQLite 备份策略、密钥管理（`.env`，永不入库） | 无人值守运行一周 | 0.5d | ⬜ |
 | P6-T4 | 端到端实跑：录入 → 每日行情 → 盘后复盘与建议 → 条件预警 → 会话/推送 | **连续 5 个交易日**跑通；推送里每个数字可回溯 P3 公式；每条建议带时间与数据版本留档 | 5 个交易日 | ⬜ |
@@ -114,8 +114,8 @@
 
 | # | 任务 | 产出/验收 | 估算 | 状态 |
 |---|---|---|---|---|
-| P7-T1 | 模型思考过程展示链路（`07` R7；需求文档已移交 robit，唯一真值 `robit/docs/robit-rfc-thinking-output.md`）：robit 三层实施（robit-ai 捕获 `reasoning_content` → `AgentEvent::ThinkingDelta` → robit-web `thinking_delta` wire，顺带收口 R6 空白帧）+ 子木消费（ChatPanel 加 case、docs/02 补展示口径段） | 思考增量在 chat 屏可见（形态 2026-11-06 已拍板：对齐 robit-gui 三态折叠）；robit 侧验收见 RFC §3；子木侧 tsc/build/test 全绿 + 真实 qwen profile 人工走查 | robit 侧另评（实现复杂度较高）；子木侧 0.5d | 🔨 两侧代码均已落地，余真实网关人工走查。**robit 侧 ✅ 2026-11-05 发版 v0.1.28**（`feat/thinking-output` 已合并；实施记录 `robit/docs/robit-design-thinking-output.md`：双路径捕获（模型级 `thinking = auto\|on\|off`）+ `thinking_delta` wire + R6 发射端收口 + robit-gui 三态 ThinkingPanel 参考实现）。**子木侧 ✅ 2026-11-07 消费**：backend 升 0.1.28（rusqlite 0.40→0.41 对齐、zimu-agent-cli 穷举 match 补臂——ANSI 暗体渲染思考流）+ openapi SSE 描述补帧再生成 + ChatPanel 思考段三态折叠（live 流式灰字 → 正文/工具事件折叠「▸ 思考过程」→ 点击回看；不持久化）+ `02` 展示口径段；workspace 测试 / tsc / build / vitest 121 例全绿。**余**：真实 qwen profile 人工走查（前置已就位：工程本地 `backend/.robit/config.toml` 默认模型 `thinking = "on"`，2026-11-07 配置分层落地）；不阻塞 P6/MVP |
-| P7-T2 | 智能体接入模块重设计（ADR-0011，2026-11-07 立项）：装配线抽取（`zimu_agent::assembly::AgentCore`）+ Web 会话真值上服务端（`chat_messages` v4：先落库再注入、`with_history` 复活、history/reset 端点、前端水合、localStorage 降级缓存）+ QQ 验证通道（`ChatbotManager<BoundOnly<QqPlatformAdapter>>` 挂 zimu-server：`[zimu.channels]` 开关缺省停用、绑定白名单 + `/api/channel_bindings`、调度器 PushSink 预警/盘后摘要推送）+ 子木主人格提示词入库（`prompts/agent.md`）。微信代码不做（等 robit 平台模块，届时只换泛型参数）；robit 缺口移交 R8 清单 | 全离线门禁绿（含档案状态机/复活/分页、白名单 decorator、推送恰一次、契约 35 样例）；QQ 真机走查七项（见计划验证节）；人格「你是谁」问答以子木身份+边界回应 | 1.5–2d | 🔨 2026-11-07 子木侧 T1–T8 全量落地（分支 `feat/agent-channels`，PR1–PR4 四笔），**余**：QQ 真机走查（qq=true + 凭据）与 P7-T1 思考走查同日做；wechat 开关词汇就位待模块 |
+| P7-T1 | 模型思考过程展示链路（`07` R7；需求文档已移交 robit，唯一真值 `robit/docs/robit-rfc-thinking-output.md`）：robit 三层实施（robit-ai 捕获 `reasoning_content` → `AgentEvent::ThinkingDelta` → robit-web `thinking_delta` wire，顺带收口 R6 空白帧）+ 子木消费（ChatPanel 加 case、docs/02 补展示口径段） | 思考增量在 chat 屏可见（形态 2026-11-06 已拍板：对齐 robit-gui 三态折叠）；robit 侧验收见 RFC §3；子木侧 tsc/build/test 全绿 + 真实 qwen profile 人工走查 | robit 侧另评（实现复杂度较高）；子木侧 0.5d | 🔨 两侧代码均已落地，余真实网关人工走查。**robit 侧 ✅ 2026-11-05 发版 v0.1.28**（`feat/thinking-output` 已合并；实施记录 `robit/docs/robit-design-thinking-output.md`：双路径捕获（模型级 `thinking = auto\|on\|off`）+ `thinking_delta` wire + R6 发射端收口 + robit-gui 三态 ThinkingPanel 参考实现）。**子木侧 ✅ 2026-11-07 消费**：backend 升 0.1.28（rusqlite 0.40→0.41 对齐、zimu-agent-cli 穷举 match 补臂——ANSI 暗体渲染思考流）+ openapi SSE 描述补帧再生成 + ChatPanel 思考段三态折叠（live 流式灰字 → 正文/工具事件折叠「▸ 思考过程」→ 点击回看；不持久化）+ `02` 展示口径段；workspace 测试 / tsc / build / vitest 121 例全绿。**余**：Web chat 屏 💭 三态折叠目视一遍（**模型侧出帧已随 2026-11-08 QQ 真机走查顺带实锤**——日志大量 `ThinkingDelta`，前置 `thinking = "on"` 生效）；不阻塞 P6/MVP |
+| P7-T2 | 智能体接入模块重设计（ADR-0011，2026-11-07 立项）：装配线抽取（`zimu_agent::assembly::AgentCore`）+ Web 会话真值上服务端（`chat_messages` v4：先落库再注入、`with_history` 复活、history/reset 端点、前端水合、localStorage 降级缓存）+ QQ 验证通道（`ChatbotManager<BoundOnly<QqPlatformAdapter>>` 挂 zimu-server：`[zimu.channels]` 开关缺省停用、绑定白名单 + `/api/channel_bindings`、调度器 PushSink 预警/盘后摘要推送）+ 子木主人格提示词入库（`prompts/agent.md`）。微信代码不做（等 robit 平台模块，届时只换泛型参数）；robit 缺口移交 R8 清单 | 全离线门禁绿（含档案状态机/复活/分页、白名单 decorator、推送恰一次、契约 35 样例）；QQ 真机走查七项（见计划验证节）；人格「你是谁」问答以子木身份+边界回应 | 1.5–2d | 🔨 2026-11-07 子木侧 T1–T8 全量落地（分支 `feat/agent-channels`，PR1–PR4 四笔），**QQ 真机核心链路走查通过 2026-11-08**（启用开关→连接 `qq_online=true`→未绑定消息静默丢弃+留案底→绑定后应答恢复→人格加载链路存活、思考帧出帧正常但 QQ 投影按设计不渲染）。**余单项**（不阻塞，择日补验）：15:05 盘后摘要推送 + `push_log channel='qq'`（需交易日在场）、Ctrl+C 优雅关闭 + 二次启动档案在、网关 ~30min 轮换不断会话、Web 端 💭 三态折叠目视（P7-T1 余项同源）；wechat 开关词汇就位待模块 |
 
 ## 之后再说（明确不在近期计划里）
 
