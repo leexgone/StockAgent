@@ -2,7 +2,9 @@
 //!
 //! 与 zimu-server 的 Agent 完全同装配（`zimu-agent` 公共 crate）：
 //! - 领域工具：market_status / get_quote / get_holdings / calc_discipline /
-//!   simulate_trade / refresh_quotes / calc_advice / finalize_advice + echo（链路验证）；
+//!   simulate_trade / record_trade / adjust_cash / get_trades（写账本三件，
+//!   ADR-0012 自动落账+读回）/ refresh_quotes / calc_advice / finalize_advice
+//!   + echo（链路验证）；
 //! - Skill 模板：仓库根 `skills/`（盘后复盘 /review /复盘、盘前关注 /watch /盘前、
 //!   建议生成 /advice /建议 <代码>），`ZIMU_SKILLS_DIR` 可覆盖。
 //!
@@ -92,7 +94,8 @@ fn main() -> anyhow::Result<()> {
     // 通道约定（与 robit examples/robit-agent 相同）：
     //   event   Agent → 主任务（stdout 只由主任务写，避免并发打印交错）
     //   message 主任务 → Agent（用户输入）
-    //   confirm Agent → 主任务（工具确认；当前工具面全部免确认，trait 要求实现）
+    //   confirm Agent → 主任务（工具确认；当前工具面全部免确认——写账本类亦免，
+    //   拍板见 ADR-0012 自动落账 + 读回；trait 要求实现）
     let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(64);
     let (message_tx, message_rx) = mpsc::channel::<FrontendMessage>(16);
     let (confirm_tx, mut confirm_rx) = mpsc::channel::<(String, oneshot::Sender<bool>)>(4);

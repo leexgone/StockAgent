@@ -24,7 +24,7 @@ use robit_agent::{Frontend, TaskRegistry, Tool, ToolContext};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use zimu_agent::skills::load_zimu_skills;
-use zimu_agent::tools::{build_registry, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, MarketStatusTool, RefreshQuotesTool, SimulateTradeTool};
+use zimu_agent::tools::{build_registry, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, SimulateTradeTool};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::{MarketError, MarketResult};
@@ -559,6 +559,117 @@ async fn market_status_survives_dead_sidecar() {
     assert!(out["sidecar_error"].is_string());
     assert_eq!(out["calendar_available"], false); // 无日历 → 工作日启发式
     assert!(out["clock"]["state"].is_string()); // 时钟照走针
+}
+
+// ============================================================================
+// 写账本三件（ADR-0012：自动落账 + 读回，流水只增不改）
+// ============================================================================
+
+#[tokio::test]
+async fn record_trade_writes_ledger_with_agent_note_mark() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let tool = RecordTradeTool { deps: deps_with(store.clone(), fake) };
+
+    // 成功路径：再买 100 股 @112，用户 note 后追加来源标记
+    let out = exec(&tool, json!({ "code": "600519", "side": "buy", "qty": 100, "price": 112.0, "note": "加仓" })).await;
+    let receipt = &out["receipt"];
+    assert_eq!(receipt["trade"]["qty"], 100);
+    assert_eq!(receipt["trade"]["note"], "加仓（经智能体录入）");
+    assert_eq!(receipt["removed"], false);
+    // 读回指令内嵌在工具返回里（模型必然看到，ADR-0012 防线第二层）
+    assert!(out["note"].as_str().unwrap().contains("宣读"));
+    // 账本落地：持仓 200 股、流水 +1、现金联动（100×112 + 费用）
+    let s = zimu_agent::lock(&store);
+    assert_eq!(s.holdings().unwrap()[0].shares, 200);
+    assert_eq!(s.trades(50).unwrap().len(), 2); // seeded 1 笔 + 本笔
+    assert!(s.account().unwrap().cash < 300_000.0 - 11_200.0);
+    drop(s);
+
+    // note 为空 → 只落来源标记
+    let out2 = exec(&tool, json!({ "code": "600519", "side": "buy", "qty": 100, "price": 110.0 })).await;
+    assert_eq!(out2["receipt"]["trade"]["note"], "（经智能体录入）");
+}
+
+#[tokio::test]
+async fn record_trade_rejects_and_leaves_ledger_untouched() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let tool = RecordTradeTool { deps: deps_with(store.clone(), fake) };
+    let before_cash = zimu_agent::lock(&store).account().unwrap().cash;
+    let before_trades = zimu_agent::lock(&store).trades(50).unwrap().len();
+
+    // 非整手买入 → lot 校验拒绝（03 §1）
+    let err = exec_err(&tool, json!({ "code": "600519", "side": "buy", "qty": 50, "price": 112.0 })).await;
+    assert!(err.contains("拒绝"), "{err}");
+    // 卖出超持有 → exceeds_held 拒绝
+    let err = exec_err(&tool, json!({ "code": "600519", "side": "sell", "qty": 200, "price": 112.0 })).await;
+    assert!(err.contains("拒绝"), "{err}");
+    // 现金不足 → InsufficientCash（300k 买不起 10000 股 ×112）
+    let err = exec_err(&tool, json!({ "code": "600519", "side": "buy", "qty": 10000, "price": 112.0 })).await;
+    assert!(err.contains("现金不足"), "{err}");
+
+    // 零副作用：流水行数与现金分毫不动（事务性 store 保证，此处断言钉死）
+    let s = zimu_agent::lock(&store);
+    assert_eq!(s.trades(50).unwrap().len(), before_trades);
+    assert_eq!(s.account().unwrap().cash, before_cash);
+}
+
+#[tokio::test]
+async fn adjust_cash_sets_absolute_value_with_delta() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let tool = AdjustCashTool { deps: deps_with(store.clone(), fake) };
+    let before = zimu_agent::lock(&store).account().unwrap().cash;
+
+    let out = exec(&tool, json!({ "cash": 250_000.0, "reason": "对账单校正" })).await;
+    assert_eq!(out["before"].as_f64().unwrap(), before);
+    assert_eq!(out["after"], 250_000.0);
+    assert!((out["delta"].as_f64().unwrap() - (250_000.0 - before)).abs() < 1e-9);
+    assert_eq!(out["reason"], "对账单校正");
+    assert_eq!(zimu_agent::lock(&store).account().unwrap().cash, 250_000.0);
+
+    // 负现金 → store BadInput 拒绝（现金下限是业务事实）
+    let err = exec_err(&tool, json!({ "cash": -1.0 })).await;
+    assert!(err.contains("现金不能为负"), "{err}");
+    // 缺 cash → 参数错误
+    let err = exec_err(&tool, json!({})).await;
+    assert!(err.contains("cash"), "{err}");
+}
+
+#[tokio::test]
+async fn get_trades_reads_ledger_newest_first_with_limit() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let deps = deps_with(store.clone(), fake);
+    let rec = RecordTradeTool { deps: deps.clone() };
+    for _ in 0..3 {
+        exec(&rec, json!({ "code": "600519", "side": "buy", "qty": 100, "price": 110.0 })).await;
+    }
+    let tool = GetTradesTool { deps };
+
+    let out = exec(&tool, json!({})).await; // 缺省 limit 20
+    assert_eq!(out["count"], 4); // seeded 1 + 3
+    assert_eq!(out["limit"], 20);
+    // 最新在前：首条是工具写入的（带来源标记），seeded 那笔 note 为空
+    assert!(out["trades"][0]["note"].as_str().unwrap().contains("经智能体录入"));
+
+    let out = exec(&tool, json!({ "limit": 2 })).await;
+    assert_eq!(out["count"], 2);
+    let out = exec(&tool, json!({ "limit": 999 })).await; // 上限 50（对话侧省 context）
+    assert_eq!(out["limit"], 50);
+}
+
+#[test]
+fn ledger_tools_are_auto_commit_per_adr_0012() {
+    // 把拍板钉进测试：写账本/流水三件全部免确认（自动落账 + 读回）。
+    // 翻回逐笔确认 = 改三个 requires_confirmation() 为 true（ADR-0012 被否决项 B）。
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let deps = deps_with(store, fake);
+    assert!(!RecordTradeTool { deps: deps.clone() }.requires_confirmation());
+    assert!(!AdjustCashTool { deps: deps.clone() }.requires_confirmation());
+    assert!(!GetTradesTool { deps }.requires_confirmation());
 }
 
 // ============================================================================

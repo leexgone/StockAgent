@@ -31,7 +31,13 @@ fn persona_prompt_present_and_opens_with_zimu_identity() {
         text.trim_start().chars().take(24).collect::<String>()
     );
     // 边界硬规则的最小断言：与 CLAUDE.md「安全与责任边界」同条纪律的关键句
-    for must in ["永不代下单", "不是胜率", "失效条件"] {
+    for must in [
+        "永不代下单",
+        "不是胜率",
+        "失效条件",
+        "只增不改",
+        "record_trade",
+    ] {
         assert!(text.contains(must), "人格提示词缺关键边界句：{must}");
     }
 }

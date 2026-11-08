@@ -69,7 +69,8 @@ impl AgentCore {
             .and_then(|a| a.auto_approve)
             .unwrap_or(false);
 
-        // 领域工具面（9 个，无下单类；R2 决策见模块头）
+        // 领域工具面（12 个注册 = 11 领域 + echo；含写账本三件——自动落账纪律
+        // 见 tools/mod.rs 头与 ADR-0012；R2 决策见模块头）
         let deps = AgentDeps::new(store, market);
         let registry = build_registry(deps);
         let mut tool_names: Vec<String> =
