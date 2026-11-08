@@ -7,6 +7,9 @@ version = "0.0.1"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.1.29（2026-11-08）= R9 chatbot 思考日志刷屏收口（子木 QQ 真机走查反馈）：
+# robit-chatbot 对 ThinkingDelta 的每帧一条 trace 改为回合收口汇总一条
+# （deltas/bytes 原子计数，TurnComplete/Error 时输出）；无 API/wire 变化。
 # 0.1.28（2026-11-05）= 子木 R7 思考过程输出落地版：robit-ai 双路径捕获
 # reasoning_content（模型级 thinking = auto|on|off）/ AgentEvent::ThinkingDelta /
 # robit-web thinking_delta wire 帧；R6 空白 text_delta 帧在发射端收口（子木前端
@@ -16,14 +19,14 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.1.28"
-robit-agent = "0.1.28"
-robit-web = "0.1.28"
+robit-ai = "0.1.29"
+robit-agent = "0.1.29"
+robit-web = "0.1.29"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。0.1.28 已在 crates.io（2026-11-06）；
 # rusqlite 0.41 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.1.28"
-robit-qq = "0.1.28"
+robit-chatbot = "0.1.29"
+robit-qq = "0.1.29"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "0.8"

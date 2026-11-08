@@ -55,7 +55,7 @@ crate（见下节）。找不到 robit 配置时服务照常起、静态首页�
 Web 通道仍是单会话（多 Web 会话不是本轮义务），IM 通道按 chat_id 独立会话。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.1.28 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.1.29 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
@@ -326,8 +326,9 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.1.28`（含 P7-T2 起新消费的 `robit-chatbot`/
-`robit-qq`；共同演进回路第三轮：
+robit 全家消费 crates.io 正式版 `0.1.29`（0.1.29 = R9 chatbot 思考日志刷屏收口：
+ThinkingDelta 每帧一条 trace → 回合收口汇总计数，子木 QQ 真机走查反馈，无 API
+变化；含 P7-T2 起新消费的 `robit-chatbot`/`robit-qq`；共同演进回路第三轮：
 子木 R7 思考过程输出需求文档 → robit `feat/thinking-output` 落地发布 2026-11-05——
 robit-ai 双路径捕获 `reasoning_content`（模型级 `thinking = auto|on|off`）、
 `AgentEvent::ThinkingDelta`、robit-web `thinking_delta` wire 帧、R6 空白 text_delta
@@ -401,7 +402,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.28 正式版，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.29 正式版，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
