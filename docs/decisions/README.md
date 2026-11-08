@@ -51,3 +51,4 @@ B …
 | [0009](./0009-direct-holding-maintenance.md) | 持仓直接维护：快照校正三入口，不动现金不写流水 | 接受 |
 | [0010](./0010-chat-markdown-rendering.md) | 助手消息 Markdown 渲染：react-markdown + remark-gfm | 接受 |
 | [0011](./0011-agent-channels-and-server-side-history.md) | 智能体接入模块：通道独立会话、服务端真值、QQ 验证通道与配置分界 | 接受 |
+| [0012](./0012-agent-ledger-write-tools.md) | 智能体写账本工具面：自动落账 + 读回，流水只增不改 | 接受 |
