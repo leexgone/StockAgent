@@ -59,6 +59,8 @@ P5-T2 index 屏冒烟发现：sina spot 不 carry 中证转债指数（回空名
 | C9 | 数据存储位置 | ✅ 已决（ADR-0005）：SQLite（rusqlite bundled），单文件、gitignored，备份 = 拷文件；持仓仍是敏感数据，永不入库（git 意义上的库） |
 | C10 | 许可与版权 | `LICENSE` 是 Apache-2.0 正文，缺少先常见的版权声明附录段落；要不要补 `NOTICE` |
 | C11 | `design/README.md` 与 `docs/` 收敛 | ✅ 已决（2026-10-28，P1-T8）：README 只保留原型定位、打开方式、指向 `docs/` 的导引表与许可；业务规则/数据契约/设计约定/本地状态/已知边界全部删除，规格单一来源 = `docs/` |
+| C12 | 现金校正无审计留痕表 | `adjust_cash`/`POST /api/account` 直接覆盖 `account.cash`：持仓侧校正有 `holding_edits` 留痕（ADR-0009），现金侧没有对应表。现阶段最低痕迹 = 工具返回的 before/after/delta 随 tool 行进会话档案（ADR-0012）。候选：`cash_edits` 表（op + before/after + note，与现金写入同事务）+ 界面「维护记录」卡露出；界面调整入口同样受益 |
+| C13 | 启用逐笔确认门禁的前置补丁 | ADR-0012 拍板写账本工具自动落账（requires_confirmation=false），逐笔确认机制三端健在、翻回一行；但启用前须先补两个已知洞：① Web `confirm_request` 无超时——刷新/关闭页面会无限期冻结 agent 循环（宿主需接 `reject_pending_confirms` 或超时策略）；② QQ Confirmer 关键词是整句全等匹配、答非关键词当普通消息注入（绑定会话内的注入诱导面）。若真实使用中出现错账事故，此项优先级上调 |
 
 ## 框架反馈（R 系列）
 
