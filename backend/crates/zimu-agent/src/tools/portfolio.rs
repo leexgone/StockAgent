@@ -11,9 +11,9 @@ use robit_agent::{Tool, ToolContext, ToolResult};
 use serde_json::{json, Value};
 use zimu_domain::discipline::{check, sell_to, SellToInput};
 use zimu_domain::lot::lot_size;
-use zimu_store::{RecordError, TradeRequest};
+use zimu_store::{HoldingEditError, HoldingUpsert, RecordError, TradeRequest};
 
-use super::{ok_json, store_try};
+use super::{ok_json, store_err, store_try};
 use crate::AgentDeps;
 
 // ============================================================================
@@ -422,5 +422,180 @@ impl Tool for GetTradesTool {
         let rows = store_try!(crate::lock(&self.deps.store).trades(limit));
         let count = rows.len();
         Ok(ok_json(&json!({ "trades": rows, "count": count, "limit": limit })))
+    }
+}
+
+// ============================================================================
+// upsert_holding / remove_holding（写账本：持仓快照校正，ADR-0009/0013）
+// ============================================================================
+
+/// 维护留痕与校正写入的 ts 用上海时刻（与 holdings_api::now_sh 同口径）
+fn now_ts() -> String {
+    zimu_market::clock::now_shanghai()
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
+}
+
+/// HoldingEditError → 面向对话文本：BadInput 校验细节如实透传（模型可转述纠正），
+/// Store 走脱敏通道（细节进日志）
+fn holding_edit_err(e: HoldingEditError) -> ToolResult {
+    match e {
+        HoldingEditError::BadInput(_) => ToolResult::error(format!("持仓校正被拒：{e}")),
+        HoldingEditError::Store(_) => store_err(e),
+    }
+}
+
+/// 工具入参中转（`HoldingUpsert` 无 Deserialize derive，照 holdings_api 的
+/// `HoldingEditRequest` 同款形状；code 是字段不是路径——工具面没有 URL）
+#[derive(serde::Deserialize)]
+struct UpsertArgs {
+    code: String,
+    name: String,
+    /// 'SH' | 'SZ'（显式字段不按代码猜，B7）
+    mkt: String,
+    kind: zimu_domain::Kind,
+    #[serde(default)]
+    sector: String,
+    shares: i64,
+    cost: f64,
+    #[serde(default)]
+    limit_pct: Option<i64>,
+    #[serde(default)]
+    note: String,
+}
+
+pub struct UpsertHoldingTool {
+    pub deps: Arc<AgentDeps>,
+}
+
+#[async_trait]
+impl Tool for UpsertHoldingTool {
+    fn name(&self) -> &str {
+        "upsert_holding"
+    }
+
+    fn description(&self) -> &str {
+        "直接维护持仓行（快照校正，ADR-0009/0013）：初始化映射（券商存量持仓搬入）、定期校准漂移、纠错、场外变动（送股零股/退市/债转股）。**整行覆盖**语义——先调 get_holdings 读现值，只改用户明示的字段，其余字段原样带回（sector 留空会清掉行业）；数字必须来自用户明示（券商界面/对账单读数），缺项先问不猜。校验刻意宽松（03 §13：shares≥1 允许奇零股、跳过 lot 与涨跌停——校正不是委托）；price/prev 行情字段不可改（归刷新链）。三不动：现金、trades 流水、已实现盈亏均不变（现金校正另走 adjust_cash）。审计痕自动写 holding_edits（before/after 行快照 + note 来源标记，同事务）。幂等：与现值逐位一致则不写库不留痕。参数：code、name、mkt(SH|SZ)、kind(stock|etf|cb)、shares、cost 必填；sector、limit_pct、note 可选。"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "code": { "type": "string", "description": "标的代码（6 位数字）" },
+                "name": { "type": "string", "description": "标的名称（非空）" },
+                "mkt": { "type": "string", "enum": ["SH", "SZ"], "description": "市场（显式给出，不按代码猜）" },
+                "kind": { "type": "string", "enum": ["stock", "etf", "cb"], "description": "标的类型" },
+                "sector": { "type": "string", "description": "行业（整行覆盖：不改也要原样带回）" },
+                "shares": { "type": "integer", "description": "股数/张数（≥1 任意整数，允许奇零股）" },
+                "cost": { "type": "number", "description": "券商摊薄成本（≥0；调整不产生已实现盈亏）" },
+                "limit_pct": { "type": ["integer", "null"], "description": "涨跌停 %（可选：缺省新建为 null、更新保留原值）" },
+                "note": { "type": "string", "description": "维护备注（可选，只进 holding_edits 留痕；工具会自动追加来源标记）" }
+            },
+            "required": ["code", "name", "mkt", "kind", "shares", "cost"]
+        })
+    }
+
+    fn requires_confirmation(&self) -> bool {
+        // ADR-0013 选项 A：沿用自动落账 + 读回（硬门禁评估见被否决项 B / 07 C13）
+        false
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+    ) -> robit_agent::error::Result<ToolResult> {
+        let a: UpsertArgs = match serde_json::from_value(args) {
+            Ok(a) => a,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "参数不符：{e}。需要 code、name、mkt(SH|SZ)、kind(stock|etf|cb)、shares 整数≥1、cost ≥0；整行覆盖——先 get_holdings 读现值，未变字段原样带回"
+                )))
+            }
+        };
+        let note = if a.note.trim().is_empty() {
+            AGENT_NOTE_MARK.to_string()
+        } else {
+            format!("{}{}", a.note.trim(), AGENT_NOTE_MARK)
+        };
+        let upsert = HoldingUpsert {
+            code: a.code,
+            name: a.name,
+            mkt: a.mkt,
+            kind: a.kind,
+            sector: a.sector,
+            shares: a.shares,
+            cost: a.cost,
+            limit_pct: a.limit_pct,
+            note,
+        };
+        let (row, changed) = match crate::lock(&self.deps.store).upsert_holding(&upsert, &now_ts())
+        {
+            Ok(r) => r,
+            Err(e) => return Ok(holding_edit_err(e)),
+        };
+        let note = if changed {
+            "已落账（快照校正：现金、trades 流水、已实现盈亏三不动——校正不是交易；审计痕已写 holding_edits）。向用户宣读校正后的行：代码/名称/股数/成本；涉及现金变化另走 adjust_cash。"
+        } else {
+            "与现值逐位一致——未写库、未留痕（幂等）。向用户说明该持仓与现值一致，无需校正。"
+        };
+        Ok(ok_json(&json!({
+            "holding": row,
+            "changed": changed,
+            "note": note,
+        })))
+    }
+}
+
+pub struct RemoveHoldingTool {
+    pub deps: Arc<AgentDeps>,
+}
+
+#[async_trait]
+impl Tool for RemoveHoldingTool {
+    fn name(&self) -> &str {
+        "remove_holding"
+    }
+
+    fn description(&self) -> &str {
+        "删除持仓行（快照校正，ADR-0009/0013）。**对话内两步确认纪律**：调用前必须向用户复述将被删除的整行（代码/名称/股数/成本，来自 get_holdings 现值）并得到明确同意——对应界面删除的两步确认交互。语义：trades 流水保留、累计已实现盈亏不回滚、现金不动——流水与持仓的连续性自校正点断开，必须向用户如实说明。留痕自动写 holding_edits（op=delete + before 行快照，可照快照恢复）。标的不在持仓时如实报错。参数：code。"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "code": { "type": "string", "description": "要删除的持仓代码（6 位数字）" }
+            },
+            "required": ["code"]
+        })
+    }
+
+    fn requires_confirmation(&self) -> bool {
+        // ADR-0013 选项 A：软门禁（人格两步确认纪律）；框架硬门禁评估见被否决项 B / 07 C13
+        false
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+    ) -> robit_agent::error::Result<ToolResult> {
+        let Some(code) = args.get("code").and_then(Value::as_str) else {
+            return Ok(ToolResult::error(
+                "参数不符：需要 code（6 位数字持仓代码）".to_string(),
+            ));
+        };
+        match crate::lock(&self.deps.store).remove_holding(code, &now_ts()) {
+            Ok(Some(row)) => Ok(ok_json(&json!({
+                "removed": row,
+                "note": "已删除。向用户宣读被删行内容，并如实说明：trades 流水保留、累计已实现盈亏不回滚、现金不动——连续性自校正点断开（03 §13）；如需恢复可按 holding_edits 的 before 快照重新 upsert_holding。",
+            }))),
+            Ok(None) => Ok(ToolResult::error(format!(
+                "持仓中没有 {code}（get_holdings 可查当前持仓）"
+            ))),
+            Err(e) => Ok(holding_edit_err(e)),
+        }
     }
 }

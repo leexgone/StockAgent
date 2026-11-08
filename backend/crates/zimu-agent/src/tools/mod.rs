@@ -1,7 +1,7 @@
 //! 领域工具集（P4-T6）：agent 的全部取数与出数入口。
 //!
-//! 工具面（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新两件 + 写账本三件
-//! （ADR-0012）+ echo 链路验证 = 11 领域工具 + echo，注册 12）：
+//! 工具面（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新两件 + 写账本五件
+//! （ADR-0012/0013）+ echo 链路验证 = 13 领域工具 + echo，注册 14）：
 //!
 //! | 工具 | 性质 | 口径来源 |
 //! |---|---|---|
@@ -13,6 +13,8 @@
 //! | `record_trade` | **写账本**（trades+持仓+现金，与界面录入同一事务） | `store.record_trade`（03 §1–§4，ADR-0012） |
 //! | `adjust_cash` | **写账本**（现金绝对值覆盖，不写流水） | `store.update_account`（ADR-0009/0012） |
 //! | `get_trades` | 只读（流水账本，最新在前） | `store.trades` |
+//! | `upsert_holding` | **写账本**（快照校正：整行覆盖 + holding_edits 留痕，三不动） | `store.upsert_holding`（03 §13，ADR-0013） |
+//! | `remove_holding` | **写账本**（删持仓行：流水保留、已实现不回滚、现金不动） | `store.remove_holding`（03 §13，ADR-0013） |
 //! | `refresh_quotes` | 写行情字段 | `service::refresh_portfolio`（与 HTTP API 同一条链） |
 //! | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice`（03 §10 生产口径，ADR-0007） |
 //! | `finalize_advice` | 写 advice_history 文案列 | risks 非空校验（03 §10） |
@@ -24,7 +26,8 @@
 //! （note 互相引用）。系统不对接任何交易系统——「永不代下单」是表述纪律（不得
 //! 让用户误以为能真实执行），不是工具面限制；逐笔确认门禁机制三端健在、本轮
 //! 拍板不启用（翻回与被否决理由见 ADR-0012）。快照校正（upsert/remove_holding）
-//! 保持界面专属，不进工具面。
+//! 自 ADR-0013 起同样进工具面（初始化映射 / 定期校准 / 场外变动）：整行覆盖
+//! 先读后改、删除须对话内两步确认（复述整行 → 用户明确同意，人格纪律）。
 //!
 //! 全部工具返回 JSON 文本（`ToolResult::success`），失败返回 `ToolResult::error`
 //! 并把降级原因如实写给模型（sidecar 不可达/数据缺失），由模型转述给用户——
@@ -47,7 +50,7 @@ pub use advice::{CalcAdviceTool, FinalizeAdviceTool};
 pub use market::{GetQuoteTool, MarketStatusTool, RefreshQuotesTool};
 pub use portfolio::{
     AdjustCashTool, CalcDisciplineTool, GetHoldingsTool, GetTradesTool, RecordTradeTool,
-    SimulateTradeTool,
+    RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool,
 };
 
 /// 存储调用早退助手：anyhow 错误 → 脱敏 `ToolResult::error`。
@@ -78,6 +81,8 @@ pub fn build_registry(deps: Arc<AgentDeps>) -> ToolRegistry {
     reg.register(RecordTradeTool { deps: deps.clone() });
     reg.register(AdjustCashTool { deps: deps.clone() });
     reg.register(GetTradesTool { deps: deps.clone() });
+    reg.register(UpsertHoldingTool { deps: deps.clone() });
+    reg.register(RemoveHoldingTool { deps: deps.clone() });
     reg.register(RefreshQuotesTool { deps: deps.clone() });
     reg.register(CalcAdviceTool { deps: deps.clone() });
     reg.register(FinalizeAdviceTool { deps });

@@ -4,7 +4,7 @@ ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
 Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约，
 P2-T3/P4-T1/P4-T4/P4-T5/P4-T7；P2-T5 起桥体消费 robit `robit-web` crate；bin 侧
-启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：11 个领域工具（含 ADR-0012 写账本三件）+
+启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：13 个领域工具（含 ADR-0012/0013 写账本五件）+
 Skill 模板加载 + 与 HTTP API 共用的刷新链服务 + 调度预警引擎 `scheduler`，
 server 与 CLI 共同消费）、`zimu-agent-cli`（Agent 调试 REPL：P2-T2 spike 起，
 P4-T6 换装与 server 相同的领域工具面与 Skill）、`zimu-domain`（P3-T3 领域纯函数库：
@@ -86,10 +86,12 @@ curl.exe -s -X POST http://127.0.0.1:8080/api/chat -H "Content-Type: application
 server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 echo 工具两处
 重复的债在此收敛。边界：**数字口径只在 `zimu-domain`**，工具只做取数
 （zimu-store / zimu-market）→ 调领域函数 → 组装 JSON；行情只经 `zimu-market`
-（sidecar 唯一消费入口）；**写账本三件（ADR-0012）**：`record_trade`（成交
+（sidecar 唯一消费入口）；**写账本五件（ADR-0012/0013）**：`record_trade`（成交
 录入，与界面录入同一 store 事务，note 自动追加来源标记）/ `adjust_cash`
-（现金绝对值校正）/ `get_trades`（流水只读）——自动落账 + 读回纪律（数字必来自
-用户明示、先试算后落账并宣读收据、账本只增不改错账冲正）；系统不对接交易系统，
+（现金绝对值校正）/ `get_trades`（流水只读）/ `upsert_holding`（持仓快照校正，
+整行覆盖 + holding_edits 留痕 + 三不动，03 §13）/ `remove_holding`（删行，流水
+保留、删除前对话内两步确认）——自动落账 + 读回纪律（数字必来自用户明示、先试算
+后落账并宣读收据、流水只增不改错账冲正、整行覆盖先读后改）；系统不对接交易系统，
 「永不代下单」是表述纪律。`simulate_trade` 仍只试算不落库。
 
 | 工具 | 性质 | 说明 |
@@ -416,7 +418,7 @@ crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话
                             └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/28 份样例过 schema）· common/ 共享装置（FakeApi/seed）
 crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill 加载 + 应用服务 + 调度预警引擎（server/CLI 共用）
                             ├─ lib.rs            AgentDeps（store + market + 日历缓存）与 crate 边界说明
-                            ├─ tools/            11 领域工具 + echo（mod.rs 注册器；market/portfolio/advice 三组，portfolio 含 ADR-0012 写账本三件）
+                            ├─ tools/            13 领域工具 + echo（mod.rs 注册器；market/portfolio/advice 三组，portfolio 含 ADR-0012/0013 写账本五件）
                             ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链；P4-T7 增 detailed 变体供调度器复用——多回 quote 原始行，wire 契约不变）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
                             ├─ scheduler.rs      调度与预警引擎（P4-T7 + B13，03 §12 纯编排：tick(now) 时刻注入可测、盘中轮询判定落 alerts（持仓 + 自选无持仓形态）、日级缓存（kline 量窗口/cb_list）、15:05 快照 + /复盘 触发 + push_log）
                             ├─ skills.rs         Skill 目录解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ robit loader 接线

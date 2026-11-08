@@ -2,9 +2,9 @@
 //!
 //! 与 zimu-server 的 Agent 完全同装配（`zimu-agent` 公共 crate）：
 //! - 领域工具：market_status / get_quote / get_holdings / calc_discipline /
-//!   simulate_trade / record_trade / adjust_cash / get_trades（写账本三件，
-//!   ADR-0012 自动落账+读回）/ refresh_quotes / calc_advice / finalize_advice
-//!   + echo（链路验证）；
+//!   simulate_trade / record_trade / adjust_cash / get_trades / upsert_holding /
+//!   remove_holding（写账本五件，ADR-0012/0013 自动落账+读回）/ refresh_quotes /
+//!   calc_advice / finalize_advice + echo（链路验证）；
 //! - Skill 模板：仓库根 `skills/`（盘后复盘 /review /复盘、盘前关注 /watch /盘前、
 //!   建议生成 /advice /建议 <代码>），`ZIMU_SKILLS_DIR` 可覆盖。
 //!

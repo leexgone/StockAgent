@@ -8,7 +8,7 @@
 
 ```
 backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管 + Agent SSE 会话 + 会话档案与重置端点 + 通道绑定管理 + 持仓录入/直接维护 API + 行情 API + 预警/快照 API + OpenAPI 契约；bin 侧启动调度器 + QQ IM 通道（ADR-0011：`[zimu.channels].qq` 缺省停用；`ChatbotManager<BoundOnly<QqPlatformAdapter>>`，robit-chatbot/robit-qq = 0.1.29）+ Ctrl+C 优雅关闭）
-                   crates/zimu-agent（agent 应用层，P4-T6/T7 + ADR-0011/0012：11 个领域工具（含写账本三件 record_trade/adjust_cash/get_trades，自动落账+读回）+ Skill 加载 + 刷新链应用服务 + 调度预警引擎 scheduler + 唯一装配线 assembly::AgentCore（Web 桥/IM 通道/CLI 共用三 Arc）+ 通道推送回调面（AlertPusher/SummaryPusher，T6）——server 与 CLI 共用，数字口径只在 zimu-domain）
+                   crates/zimu-agent（agent 应用层，P4-T6/T7 + ADR-0011/0012/0013：13 个领域工具（含写账本五件 record_trade/adjust_cash/get_trades/upsert_holding/remove_holding，自动落账+读回）+ Skill 加载 + 刷新链应用服务 + 调度预警引擎 scheduler + 唯一装配线 assembly::AgentCore（Web 桥/IM 通道/CLI 共用三 Arc）+ 通道推送回调面（AlertPusher/SummaryPusher，T6）——server 与 CLI 共用，数字口径只在 zimu-domain）
                    crates/zimu-agent-cli（Agent 调试 REPL：P2-T2 spike 起，P4-T6 换装与 server 相同的领域工具面与 Skill）
                    crates/zimu-domain（领域纯函数库，P3-T3：03 数字口径唯一 Rust 实现 + 黄金向量测试；P4-T6 增 advice 打分、P4-T7 增 alert 预警判定）
                    crates/zimu-store（存储层，P4-T1/T2/T7 + B13 + ADR-0009/0011：SQLite 十表（schema v2 增 watchlist 自选、v3 增 holding_edits 维护留痕、v4 增 chat_messages Web 会话档案 + channel_bindings IM 入站白名单）与迁移 + 录入事务 + 持仓直接维护（upsert/删除/留痕——快照校正不动现金不写 trades，03 §13）+ 行情回写 + advice_history/alerts/equity_snapshots/push_log/watchlist/会话档案/绑定 读写，校验复用 zimu-domain，.db 不入库）
@@ -96,4 +96,4 @@ docs/decisions/    ADR 决策记录
 
 ## 安全与责任边界
 
-本系统不对接任何交易系统，只是一份账户信息快照账本（ADR-0012，2026-11-08 准则）——「不代下单」是表述纪律：不得让用户误以为系统能真实执行交易，真实操作永远由用户在券商端完成。智能体可写账本（record_trade/adjust_cash，自动落账+读回）：记账数字必须来自用户明示、先试算后落账并宣读收据、账本只增不改错账反向冲正（三纪律见 `zimu-agent/src/tools/mod.rs` 头）。每条建议必须带目标价/止损/失效条件与风险自陈；`conf` 指样本内信号一致性，不是胜率，不要在文案里改成收益承诺或确定性表述。
+本系统不对接任何交易系统，只是一份账户信息快照账本（ADR-0012，2026-11-08 准则）——「不代下单」是表述纪律：不得让用户误以为系统能真实执行交易，真实操作永远由用户在券商端完成。智能体可写账本（交易录入/现金校正 ADR-0012 + 持仓快照校正 ADR-0013，自动落账+读回）：记账数字必须来自用户明示、先试算后落账并宣读收据、流水只增不改错账反向冲正、快照校正整行覆盖先读后改、删除持仓须对话内两步确认（纪律全文见 `zimu-agent/src/tools/mod.rs` 头）。每条建议必须带目标价/止损/失效条件与风险自陈；`conf` 指样本内信号一致性，不是胜率，不要在文案里改成收益承诺或确定性表述。

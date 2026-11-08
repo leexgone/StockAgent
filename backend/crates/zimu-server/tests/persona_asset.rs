@@ -37,6 +37,8 @@ fn persona_prompt_present_and_opens_with_zimu_identity() {
         "失效条件",
         "只增不改",
         "record_trade",
+        "整行覆盖",
+        "remove_holding",
     ] {
         assert!(text.contains(must), "人格提示词缺关键边界句：{must}");
     }

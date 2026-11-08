@@ -24,7 +24,7 @@ use robit_agent::{Frontend, TaskRegistry, Tool, ToolContext};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use zimu_agent::skills::load_zimu_skills;
-use zimu_agent::tools::{build_registry, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, SimulateTradeTool};
+use zimu_agent::tools::{build_registry, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::{MarketError, MarketResult};
@@ -670,6 +670,113 @@ fn ledger_tools_are_auto_commit_per_adr_0012() {
     assert!(!RecordTradeTool { deps: deps.clone() }.requires_confirmation());
     assert!(!AdjustCashTool { deps: deps.clone() }.requires_confirmation());
     assert!(!GetTradesTool { deps }.requires_confirmation());
+}
+
+// ============================================================================
+// 持仓快照校正两件（ADR-0013：初始化映射 / 定期校准 / 场外变动）
+// ============================================================================
+
+#[tokio::test]
+async fn upsert_holding_creates_edits_with_audit_trail_and_three_untouched() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let tool = UpsertHoldingTool { deps: deps_with(store.clone(), fake) };
+
+    // 新建：奇零股 150 合法（快照校正跳过 lot 校验，03 §13）
+    let out = exec(&tool, json!({
+        "code": "000001", "name": "平安银行", "mkt": "SZ", "kind": "stock",
+        "sector": "银行", "shares": 150, "cost": 10.5, "note": "初始化搬入"
+    })).await;
+    assert_eq!(out["changed"], true);
+    assert_eq!(out["holding"]["shares"], 150);
+    assert!(out["note"].as_str().unwrap().contains("三不动"));
+
+    // 留痕：op=create、note 用户备注 + 来源标记；三不动：现金/流水分毫不动
+    let s = zimu_agent::lock(&store);
+    let edits = s.holding_edits(10).unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].op, zimu_store::EditOp::Create);
+    assert!(edits[0].note.contains("初始化搬入"));
+    assert!(edits[0].note.contains("经智能体录入"));
+    assert_eq!(s.trades(50).unwrap().len(), 1); // seeded 那笔，校正不写流水
+    // 三不动之现金：仍是 seeded 买入后的原值（11000 + 佣金 5 + 过户费 0.11）
+    assert!((s.account().unwrap().cash - (300_000.0 - 11_005.11)).abs() < 1e-9);
+    drop(s);
+
+    // 编辑：整行覆盖改 shares，其余字段原样带回
+    let out = exec(&tool, json!({
+        "code": "000001", "name": "平安银行", "mkt": "SZ", "kind": "stock",
+        "sector": "银行", "shares": 200, "cost": 10.5
+    })).await;
+    assert_eq!(out["changed"], true);
+    assert_eq!(out["holding"]["shares"], 200);
+    let s = zimu_agent::lock(&store);
+    let edits = s.holding_edits(10).unwrap(); // 最新在前
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[0].op, zimu_store::EditOp::Update);
+    assert_eq!(edits[0].before.as_ref().unwrap().shares, 150);
+    drop(s);
+
+    // 幂等：与现值逐位一致 → changed=false、不留痕
+    let out = exec(&tool, json!({
+        "code": "000001", "name": "平安银行", "mkt": "SZ", "kind": "stock",
+        "sector": "银行", "shares": 200, "cost": 10.5
+    })).await;
+    assert_eq!(out["changed"], false);
+    assert!(out["note"].as_str().unwrap().contains("幂等"));
+    assert_eq!(zimu_agent::lock(&store).holding_edits(10).unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn upsert_holding_rejects_bad_input_without_side_effects() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let tool = UpsertHoldingTool { deps: deps_with(store.clone(), fake) };
+
+    // shares=0 → validate_upsert 拒绝（≥1，奇零股也至少 1 股）
+    let err = exec_err(&tool, json!({
+        "code": "000001", "name": "平安银行", "mkt": "SZ", "kind": "stock",
+        "shares": 0, "cost": 10.5
+    })).await;
+    assert!(err.contains("被拒"), "{err}");
+    // 零副作用：无留痕、无新持仓行
+    let s = zimu_agent::lock(&store);
+    assert!(s.holding_edits(10).unwrap().is_empty());
+    assert_eq!(s.holdings().unwrap().len(), 1); // 只有 seeded 600519
+}
+
+#[tokio::test]
+async fn remove_holding_deletes_row_keeps_trades_and_leaves_delete_trail() {
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let tool = RemoveHoldingTool { deps: deps_with(store.clone(), fake) };
+
+    let out = exec(&tool, json!({ "code": "600519" })).await;
+    assert_eq!(out["removed"]["code"], "600519");
+    assert!(out["note"].as_str().unwrap().contains("流水保留"));
+    let s = zimu_agent::lock(&store);
+    assert!(s.holdings().unwrap().is_empty());
+    assert_eq!(s.trades(50).unwrap().len(), 1); // 流水保留（holding_code 非外键）
+    let edits = s.holding_edits(10).unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].op, zimu_store::EditOp::Delete);
+    assert!(edits[0].before.is_some() && edits[0].after.is_none()); // before 快照可恢复
+    drop(s);
+
+    // 再删同一标的 → 如实报错，不假装成功
+    let err = exec_err(&tool, json!({ "code": "600519" })).await;
+    assert!(err.contains("没有"), "{err}");
+}
+
+#[test]
+fn snapshot_tools_are_auto_commit_per_adr_0013() {
+    // ADR-0013 选项 A：快照校正沿用自动落账 + 读回（删除的框架硬门禁是被否决项 B，
+    // 对话内两步确认走人格纪律）。翻回 = 改 requires_confirmation() 为 true。
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    let deps = deps_with(store, fake);
+    assert!(!UpsertHoldingTool { deps: deps.clone() }.requires_confirmation());
+    assert!(!RemoveHoldingTool { deps }.requires_confirmation());
 }
 
 // ============================================================================
