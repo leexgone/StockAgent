@@ -7,11 +7,13 @@
 //! 边界（与 lib.rs 头部纪律一致）：
 //! - core **不建 Frontend/桥**：一桥一会话、宿主用 key 管理是 robit-web 成文契约
 //!   （bridge.rs "One bridge per session…key them in the host"），Frontend 属通道私有物；
-//! - **R2 决策（docs/07）随迁**：工具面维持纯领域手搓（`build_registry`），不走
-//!   robit `bootstrap_with`——其系统工具（read/load_skill/search_history/query_task）
-//!   始终注册、不受白名单控制；server 工作目录可能存在 .env（密钥），把 read 暴露给
-//!   LLM 是安全面。Skill 触发不依赖 load_skill 工具（触发词命中由 robit-agent 内部
-//!   注入正文）；
+//! - **工具面 = robit 标准面 + 领域 14 件（ADR-0014，推翻 R2）**：标准面走公开内核
+//!   `create_tools_from_config_with`（与 bootstrap 同实现：截断缺省/provider 解析/
+//!   memory 模式判定内置），**不用 bootstrap_with**——它强引全局 skill 目录，违背
+//!   子木 skill 单源政策（仓库 skills/ 为准）；内核路径 skill 加载主权留子木。
+//!   read_image 按需补注册（内核因主模型支持图像强制跳过，独立 vision 描述非冗余）；
+//!   确认关闭自动执行（config auto_approve=true，ADR-0014 拍板；信任边界扩张与
+//!   防线收缩明示于 ADR-0014）；
 //! - 数字口径只在 zimu-domain：本 crate 工具只取数→调领域函数→组装 JSON。
 //!
 //! `RobitConfig` 不可 Clone 且 `Agent::new` 需要 `app.context` 的引用——core 持一份
@@ -22,13 +24,26 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use robit_agent::{resolve_memory_settings, MemorySettings, SkillRegistry, ToolRegistry};
-use robit_ai::{ContextConfig, LlmClient, RobitConfig};
+use robit_agent::storage::{init_db, resolve_db_path};
+use robit_agent::tool::read_image::ReadImageTool;
+use robit_agent::{
+    create_tools_from_config_with, resolve_memory_settings, MemorySettings, SkillRegistry,
+    ToolRegistry,
+};
+use robit_ai::{resolve_vision_model, ContextConfig, LlmClient, RobitConfig};
 use zimu_market::MarketApi;
 
 use crate::skills::load_zimu_skills;
-use crate::tools::build_registry;
+use crate::tools::{register_domain_tools, DOMAIN_TOOL_NAMES};
 use crate::{AgentDeps, SharedStore};
+
+/// robit 标准面可能注册的工具名（tools_required 校验名单用，warn-only）。
+/// 条件件（generate_image 随 key、read_image 随 vision 配置）缺席时仅 warn 不阻断；
+/// 记忆四件不在此列——file 模式维持（ADR-0014），memory_mode="tools" 另案。
+const STANDARD_TOOL_NAMES: [&str; 12] = [
+    "read", "write", "edit", "ls", "find", "grep", "bash", "generate_image", "read_image",
+    "load_skill", "search_history", "query_task",
+];
 
 /// 装配产物：三 Arc + 通道无关元数据。日志/展示各宿主自便（server tracing、CLI println）。
 pub struct AgentCore {
@@ -48,8 +63,9 @@ pub struct AgentCore {
 }
 
 impl AgentCore {
-    /// 装配（与 P2-T3 以来 agent_bridge/CLI 的既有顺序逐行等价，语义零改动）。
-    /// store/market 与 HTTP API 同一份句柄——工具数字与端点数字同源（P4-T6 纪律）。
+    /// 装配（ADR-0014 重排：skills 先行 → robit 标准面内核 → read_image 按需 →
+    /// init_db → 领域 14 件叠加）。store/market 与 HTTP API 同一份句柄——
+    /// 工具数字与端点数字同源（P4-T6 纪律）。
     pub fn assemble(
         working_dir: PathBuf,
         config: RobitConfig,
@@ -68,25 +84,79 @@ impl AgentCore {
             .as_ref()
             .and_then(|a| a.auto_approve)
             .unwrap_or(false);
+        if auto_approve {
+            // 诊断而非警告：用户拍板（ADR-0014）。重开确认 = config 翻 false + 先补 C13。
+            tracing::info!("工具确认已关闭，自动执行（ADR-0014 拍板；重开须先补 docs/07 C13）");
+        }
 
-        // 领域工具面（14 个注册 = 13 领域 + echo；含写账本五件——自动落账纪律
-        // 见 tools/mod.rs 头与 ADR-0012/0013；R2 决策见模块头）
-        let deps = AgentDeps::new(store, market);
-        let registry = build_registry(deps);
-        let mut tool_names: Vec<String> =
-            registry.tool_names().iter().map(|s| s.to_string()).collect();
-        tool_names.sort();
-        let tools = Arc::new(registry);
-
-        // Skill 模板（仓库根 skills/，ZIMU_SKILLS_DIR 可覆盖）：坏文件逐条上报不致命
+        // Skill 模板先行（LoadSkillTool 构造需要 Arc<SkillRegistry>）：
+        // 仓库根 skills/，ZIMU_SKILLS_DIR 可覆盖；坏文件逐条上报不致命。
         let (loaded, errors) = load_zimu_skills();
         for e in &errors {
             tracing::warn!("Skill 加载失败（跳过该文件）：{e}");
         }
         let skill_names: Vec<String> =
             loaded.iter().map(|s| s.frontmatter.name.clone()).collect();
-        let name_refs: Vec<&str> = tool_names.iter().map(|s| s.as_str()).collect();
-        let skills = Arc::new(SkillRegistry::new(loaded, &name_refs));
+        // tools_required 校验名单 = 领域 14 + 标准面可能名（warn-only，容条件注册缺席）
+        let mut available: Vec<&str> = DOMAIN_TOOL_NAMES.to_vec();
+        available.extend(STANDARD_TOOL_NAMES);
+        let skills = Arc::new(SkillRegistry::new(loaded, &available));
+
+        // robit 标准工具面（ADR-0014）：与 bootstrap 同内核，skill 主权留子木。
+        // standard_tools=None → 回退 app.enabled_tools（未设 = 全注，robit 官方语义）。
+        let mut registry = create_tools_from_config_with(&config, skills.clone(), None);
+
+        // read_image 按需补注册：内核因主模型 supports_images=true 强制跳过
+        // （bootstrap.rs:361-371），独立 vision 描述与 read 图像注入互补而非冗余。
+        let ctx_cfg = config.app.as_ref().and_then(|a| a.context.as_ref());
+        let max_bytes = ctx_cfg.and_then(|c| c.max_output_bytes).unwrap_or(51200);
+        let max_dim = ctx_cfg.and_then(|c| c.max_image_dimension).unwrap_or(1024);
+        match resolve_vision_model(&config) {
+            Ok(resolved) => {
+                registry.register(ReadImageTool::new(
+                    LlmClient::from_resolved(resolved),
+                    max_dim,
+                    max_bytes,
+                ));
+                tracing::info!("read_image 按需注册（default_vision_model 已解析）");
+            }
+            Err(e) => tracing::debug!("read_image 未注册（vision 模型未配置或解析失败）：{e}"),
+        }
+
+        // robit 自持会话库初始化（幂等，ADR-0014）：Web 通道从不自建库，不补则
+        // search_history 报 no such table（QQ 由 ChatbotManager 自建）。库语义：
+        // robit.db 存 IM 会话档案，Web 会话档案在 zimu.db（ADR-0011 通道独立）。
+        let global_storage = config
+            .app
+            .as_ref()
+            .and_then(|a| a.global_storage)
+            .unwrap_or(false);
+        match resolve_db_path(&working_dir, global_storage) {
+            Ok(db_path) => {
+                if let Some(parent) = db_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                match rusqlite::Connection::open(&db_path) {
+                    Ok(conn) => {
+                        if let Err(e) = init_db(&conn) {
+                            tracing::warn!("robit 会话库初始化失败（search_history 可能不可用）：{e}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("robit 会话库打开失败（search_history 可能不可用）：{e}");
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("robit 会话库路径解析失败：{e}"),
+        }
+
+        // 领域 14 件叠加（写账本五件自动落账纪律见 tools/mod.rs 头与 ADR-0012/0013）
+        let deps = AgentDeps::new(store, market);
+        register_domain_tools(&mut registry, deps);
+        let mut tool_names: Vec<String> =
+            registry.tool_names().iter().map(|s| s.to_string()).collect();
+        tool_names.sort();
+        let tools = Arc::new(registry);
 
         Ok(Self {
             working_dir,

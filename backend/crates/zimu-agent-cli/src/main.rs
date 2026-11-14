@@ -1,10 +1,13 @@
 //! 子木 · zimu-agent-cli —— Agent 调试 REPL（P2-T2 spike 起；P4-T6 换装真实领域工具面）。
 //!
-//! 与 zimu-server 的 Agent 完全同装配（`zimu-agent` 公共 crate）：
-//! - 领域工具：market_status / get_quote / get_holdings / calc_discipline /
+//! 与 zimu-server 的 Agent 完全同装配（`zimu-agent` 公共 crate，ADR-0014）：
+//! - 领域工具 14 件：market_status / get_quote / get_holdings / calc_discipline /
 //!   simulate_trade / record_trade / adjust_cash / get_trades / upsert_holding /
 //!   remove_holding（写账本五件，ADR-0012/0013 自动落账+读回）/ refresh_quotes /
 //!   calc_advice / finalize_advice + echo（链路验证）；
+//! - robit 标准面：read / write / edit / ls / find / grep / bash / load_skill /
+//!   search_history / query_task（+ generate_image 随 key、read_image 随 vision
+//!   配置按需）——确认关闭自动执行（auto_approve=true，ADR-0014）；
 //! - Skill 模板：仓库根 `skills/`（盘后复盘 /review /复盘、盘前关注 /watch /盘前、
 //!   建议生成 /advice /建议 <代码>），`ZIMU_SKILLS_DIR` 可覆盖。
 //!
@@ -94,8 +97,8 @@ fn main() -> anyhow::Result<()> {
     // 通道约定（与 robit examples/robit-agent 相同）：
     //   event   Agent → 主任务（stdout 只由主任务写，避免并发打印交错）
     //   message 主任务 → Agent（用户输入）
-    //   confirm Agent → 主任务（工具确认；当前工具面全部免确认——写账本类亦免，
-    //   拍板见 ADR-0012 自动落账 + 读回；trait 要求实现）
+    //   confirm Agent → 主任务（工具确认；ADR-0014 确认关闭 auto_approve=true
+    //   自动执行，本臂保留为 trait 要求与将来重开预留；写账本五件软门禁不变，ADR-0012）
     let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(64);
     let (message_tx, message_rx) = mpsc::channel::<FrontendMessage>(16);
     let (confirm_tx, mut confirm_rx) = mpsc::channel::<(String, oneshot::Sender<bool>)>(4);

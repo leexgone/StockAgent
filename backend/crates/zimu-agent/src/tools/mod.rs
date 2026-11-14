@@ -1,7 +1,14 @@
-//! 领域工具集（P4-T6）：agent 的全部取数与出数入口。
+//! 领域工具集（P4-T6）：agent 的账本/行情取数与出数入口。
 //!
-//! 工具面（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新两件 + 写账本五件
-//! （ADR-0012/0013）+ echo 链路验证 = 13 领域工具 + echo，注册 14）：
+//! 工具面组成（ADR-0014 起 = 领域 14 件 + robit 标准面，注册 25–27 随配置）：
+//! 本模块只管**领域 14 件**（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新
+//! 两件 + 写账本五件（ADR-0012/0013）+ echo 链路验证 = 13 领域工具 + echo）；
+//! robit 标准面（read/write/edit/ls/find/grep/bash/load_skill/search_history/
+//! query_task 恒在，generate_image 随 image provider key、read_image 随 vision
+//! 配置按需）由装配线经 `create_tools_from_config_with` 内核取得后叠加本模块
+//! （assembly.rs，ADR-0014）——确认关闭自动执行（auto_approve=true）。
+//!
+//! 领域工具表：
 //!
 //! | 工具 | 性质 | 口径来源 |
 //! |---|---|---|
@@ -24,8 +31,11 @@
 //! 缺项先问不猜（禁止用行情价/记忆补数）；② 先 simulate_trade 试算复述、再
 //! record_trade 落账、落账后宣读完整收据；③ 流水只增不改，错账反向一笔冲正
 //! （note 互相引用）。系统不对接任何交易系统——「永不代下单」是表述纪律（不得
-//! 让用户误以为能真实执行），不是工具面限制；逐笔确认门禁机制三端健在、本轮
-//! 拍板不启用（翻回与被否决理由见 ADR-0012）。快照校正（upsert/remove_holding）
+//! 让用户误以为能真实执行），不是工具面限制。门禁两形态并存（ADR-0014）：
+//! 写账本五件**软门禁**（自动落账 + 读回 + 人格纪律，ADR-0012/0013 不变）；
+//! robit 标准面 write/edit/bash/generate_image 工具层 requires_confirmation=true，
+//! 但 ADR-0014 拍板 auto_approve=true **确认关闭自动执行**（重开 = config 翻
+//! false + 先补 docs/07 C13 两洞）。快照校正（upsert/remove_holding）
 //! 自 ADR-0013 起同样进工具面（初始化映射 / 定期校准 / 场外变动）：整行覆盖
 //! 先读后改、删除须对话内两步确认（复述整行 → 用户明确同意，人格纪律）。
 //!
@@ -69,10 +79,18 @@ macro_rules! store_try {
 }
 pub(crate) use store_try;
 
-/// 装配全部领域工具（zimu-server 与 zimu-agent-cli 共用；不走 robit bootstrap()，
-/// 通用工具 read/bash 等一律不注册——子木的工具面就是领域面）。
-pub fn build_registry(deps: Arc<AgentDeps>) -> ToolRegistry {
-    let mut reg = ToolRegistry::new();
+/// 领域工具名清单（tools_required 校验名单用，与下表逐件对应）。
+pub const DOMAIN_TOOL_NAMES: [&str; 14] = [
+    "market_status", "get_quote", "get_holdings", "calc_discipline", "simulate_trade",
+    "record_trade", "adjust_cash", "get_trades", "upsert_holding", "remove_holding",
+    "refresh_quotes", "calc_advice", "finalize_advice", "echo",
+];
+
+/// 把全部领域工具（14 件）注册进给定 registry——装配线先经
+/// `create_tools_from_config_with` 取 robit 标准面，再调本函数叠加
+/// （ADR-0014；zimu-server 与 zimu-agent-cli 共用同一装配线）。
+/// 领域名与标准名零冲突（已逐件核对）；同名注册语义为覆盖（robit registry）。
+pub fn register_domain_tools(reg: &mut ToolRegistry, deps: Arc<AgentDeps>) {
     reg.register(MarketStatusTool { deps: deps.clone() });
     reg.register(GetQuoteTool { deps: deps.clone() });
     reg.register(GetHoldingsTool { deps: deps.clone() });
@@ -87,7 +105,6 @@ pub fn build_registry(deps: Arc<AgentDeps>) -> ToolRegistry {
     reg.register(CalcAdviceTool { deps: deps.clone() });
     reg.register(FinalizeAdviceTool { deps });
     reg.register(EchoTool);
-    reg
 }
 
 /// 成功返回：JSON pretty 文本（模型可读，键序稳定便于人工核对留档）

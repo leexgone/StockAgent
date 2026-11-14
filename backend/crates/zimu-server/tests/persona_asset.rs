@@ -39,6 +39,10 @@ fn persona_prompt_present_and_opens_with_zimu_identity() {
         "record_trade",
         "整行覆盖",
         "remove_holding",
+        // ADR-0014 文件与 shell 纪律（自动执行语境，软约束是唯一防线）
+        "bash",
+        ".env",
+        "直写",
     ] {
         assert!(text.contains(must), "人格提示词缺关键边界句：{must}");
     }

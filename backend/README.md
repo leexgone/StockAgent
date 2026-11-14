@@ -4,7 +4,7 @@ ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
 Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约，
 P2-T3/P4-T1/P4-T4/P4-T5/P4-T7；P2-T5 起桥体消费 robit `robit-web` crate；bin 侧
-启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：13 个领域工具（含 ADR-0012/0013 写账本五件）+
+启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：领域工具 14 件（含 ADR-0012/0013 写账本五件）+ robit 标准工具面（ADR-0014，确认关闭自动执行）+
 Skill 模板加载 + 与 HTTP API 共用的刷新链服务 + 调度预警引擎 `scheduler`，
 server 与 CLI 共同消费）、`zimu-agent-cli`（Agent 调试 REPL：P2-T2 spike 起，
 P4-T6 换装与 server 相同的领域工具面与 Skill）、`zimu-domain`（P3-T3 领域纯函数库：
@@ -355,9 +355,10 @@ R2–R5 宿主形态需求 → robit `feat/host-ergonomics-r2-r5` 落地发布�
 `install_panic_hook`，server/cli 单一初始化路径（删「有无 robit 配置」二选一分支，
 宿主 workspace 全 crate 日志可见，CLI 顺带修正自身 crate 未被放行的旧 bug）；
 **R4 额外技能目录已消费**——`load_zimu_skills` 内部切 `load_skills_from_dirs`；
-**R2/R5 有意不消费**（`bootstrap_with` 的系统工具含 `read`——server 工作目录可能
-有 `.env`，工具面维持纯领域装配；存储错误维持脱敏话术不用 cause 链直传——决策
-记录见 `docs/07-backlog.md` R 系列与代码注释）。第一轮回路（R1/robit-web，
+**R5 有意不消费**（存储错误维持脱敏话术不用 cause 链直传）；**R2 经 ADR-0014
+整体推翻**（2026-11-14：标准工具面全量消费——`create_tools_from_config_with`
+内核 + 领域注册，skill 单源主权保留；确认关闭自动执行 `auto_approve=true`，
+信任边界扩张明示于 ADR-0014）——决策记录见 `docs/07-backlog.md` R 系列与代码注释。第一轮回路（R1/robit-web，
 v0.1.26，2026-10-30）：git pin → registry 切换收口。后续升级版本前先对齐 robit
 发布节奏（约定见 CLAUDE.md）；开发期可临时改回
 `git = "https://github.com/leexgone/robit", tag/rev = …` 消费未发布改动。
@@ -374,8 +375,9 @@ cargo run -p zimu-agent-cli
 # > 请调用 echo 工具回显：子木集成验证   ← 链路验证（P2-T2 起）
 ```
 
-P4-T6 起 CLI 与 server 是**同一份工具面与 Skill**（`zimu-agent::tools::build_registry`
-+ `skills::load_zimu_skills`），差别只在 Frontend（CliFrontend vs WebFrontend）。
+P4-T6 起 CLI 与 server 是**同一份工具面与 Skill**（`zimu-agent::assembly::AgentCore`：
+robit 标准面内核 + `tools::register_domain_tools` + `skills::load_zimu_skills`，
+ADR-0014），差别只在 Frontend（CliFrontend vs WebFrontend）。
 运行时会话库/记忆写在 `<cwd>/.robit/memory/`（已在仓库 `.gitignore` 忽略）。
 
 ## zimu-domain（P3-T3 领域纯函数库）
@@ -431,11 +433,11 @@ crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话
                             └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/28 份样例过 schema）· common/ 共享装置（FakeApi/seed）
 crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill 加载 + 应用服务 + 调度预警引擎（server/CLI 共用）
                             ├─ lib.rs            AgentDeps（store + market + 日历缓存）与 crate 边界说明
-                            ├─ tools/            13 领域工具 + echo（mod.rs 注册器；market/portfolio/advice 三组，portfolio 含 ADR-0012/0013 写账本五件）
+                            ├─ tools/            领域 14 件（mod.rs register_domain_tools；market/portfolio/advice 三组，portfolio 含 ADR-0012/0013 写账本五件；robit 标准面经 assembly 内核叠加，ADR-0014）
                             ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链；P4-T7 增 detailed 变体供调度器复用——多回 quote 原始行，wire 契约不变）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
                             ├─ scheduler.rs      调度与预警引擎（P4-T7 + B13，03 §12 纯编排：tick(now) 时刻注入可测、盘中轮询判定落 alerts（持仓 + 自选无持仓形态）、日级缓存（kline 量窗口/cb_list）、15:05 快照 + /复盘 触发 + push_log）
                             ├─ skills.rs         Skill 目录解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ robit loader 接线
-                            └─ tests/            tools.rs 10 项（黄金向量端到端/留档/降级/Skill 完整性）· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
+                            └─ tests/            tools.rs 20 项（黄金向量端到端/留档/降级/Skill 完整性/写账本九例/注册面组成）· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
                             └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 108 用例）

@@ -20,11 +20,15 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::Days;
 use robit_agent::tool::async_runner::AsyncTaskRunner;
-use robit_agent::{Frontend, TaskRegistry, Tool, ToolContext};
+use robit_agent::{
+    create_tools_from_config_with, Frontend, SkillRegistry, TaskRegistry, Tool, ToolContext,
+    ToolRegistry,
+};
+use robit_ai::RobitConfig;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use zimu_agent::skills::load_zimu_skills;
-use zimu_agent::tools::{build_registry, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
+use zimu_agent::tools::{register_domain_tools, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::{MarketError, MarketResult};
@@ -804,7 +808,8 @@ async fn skills_load_with_unique_triggers_and_registered_tools() {
 
     // tools_required 必须全部已注册（robit 只 warn，这里收紧成断言）
     let store = seeded_store();
-    let registry = build_registry(AgentDeps::new(store, FakeApi::arc()));
+    let mut registry = ToolRegistry::new();
+    register_domain_tools(&mut registry, AgentDeps::new(store, FakeApi::arc()));
     let registered: Vec<&str> = registry.tool_names();
     for s in &skills {
         for required in &s.frontmatter.tools_required {
@@ -818,4 +823,49 @@ async fn skills_load_with_unique_triggers_and_registered_tools() {
         assert!(s.content.contains("不构成投资建议"), "{} 缺免责声明", s.frontmatter.name);
         assert!(s.content.contains("工具返回"), "{} 缺数字来源硬规则", s.frontmatter.name);
     }
+}
+
+// ============================================================================
+// 注册面组成（ADR-0014：robit 标准面 + 领域 14 件）
+// ============================================================================
+
+/// 空配置装置：无 provider/image/vision → 条件件（generate_image/read_image）
+/// 与记忆四件（file 模式）全缺席，标准面恰 10 件恒在件。
+fn empty_config() -> RobitConfig {
+    RobitConfig {
+        default_model: None,
+        providers: HashMap::new(),
+        app: None,
+        channels: None,
+        default_image_model: None,
+        image_providers: HashMap::new(),
+        default_vision_model: None,
+    }
+}
+
+#[test]
+fn standard_surface_plus_domain_composition_per_adr_0014() {
+    let config = empty_config();
+    let skills = Arc::new(SkillRegistry::new(vec![], &[]));
+    let mut registry = create_tools_from_config_with(&config, skills, None);
+
+    // 条件件缺席（无 image provider / 无 vision 配置）；记忆四件 file 模式不注册
+    assert!(!registry.contains("generate_image"), "无 key 不应注册 generate_image");
+    assert!(!registry.contains("read_image"), "无 vision 配置不应注册 read_image");
+    for m in ["memorize", "recall", "forget", "list_memories"] {
+        assert!(!registry.contains(m), "file 模式不应注册记忆工具 {m}");
+    }
+
+    register_domain_tools(&mut registry, AgentDeps::new(seeded_store(), FakeApi::arc()));
+    let names = registry.tool_names();
+    for t in [
+        "read", "write", "edit", "ls", "find", "grep", "bash", "load_skill", "search_history",
+        "query_task",
+    ] {
+        assert!(names.contains(&t), "标准面缺 {t}，实有 {names:?}");
+    }
+    for t in zimu_agent::tools::DOMAIN_TOOL_NAMES {
+        assert!(names.contains(&t), "领域面缺 {t}，实有 {names:?}");
+    }
+    assert_eq!(names.len(), 24, "空配置下应恰 10 标准 + 14 领域，实有 {names:?}");
 }

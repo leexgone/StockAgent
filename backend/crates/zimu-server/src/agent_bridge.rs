@@ -13,12 +13,15 @@
 //!   → `WebBridge::send_user_text` → `Agent::run`；调度器复盘走同一个包装，同源留痕；
 //! * 工具确认：`confirm_request` 事件推给前端，`POST /api/chat/confirm` 经
 //!   `WebBridge::resolve_confirm` 回填；responder 被 drop 一律按拒绝处理。
+//!   ADR-0014 起确认关闭（config auto_approve=true），本回路保留为将来重开预留
+//!   （重开须先补 docs/07 C13 两洞）。
 //!
 //! 复活（T3）：启动时从档案取 user/assistant 文本对喂 `Agent::with_history`
 //! （robit 内部 sanitize+truncate，喂全量即可）；空档案退化为 `Agent::new`
 //! 原语义。工具轨迹不回灌（陈旧数字不进上下文，03「派生数字现算」）。
 //!
-//! 领域工具（14 个注册，含写账本五件 ADR-0012/0013）与 Skill 模板（仓库根 `skills/`）都在 `zimu-agent` crate；
+//! 工具面（领域 14 件含写账本五件 ADR-0012/0013 + robit 标准面 ADR-0014，注册 25–27 随配置）
+//! 与 Skill 模板（仓库根 `skills/`）都在 `zimu-agent` crate；
 //! 工具与 HTTP API 共用同一 store/market 句柄——`refresh_quotes` 工具与
 //! `POST /api/market/refresh` 是同一条链（`zimu_agent::service`）。
 //!
