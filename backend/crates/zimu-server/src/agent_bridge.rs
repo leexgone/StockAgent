@@ -179,6 +179,7 @@ pub fn spawn_agent(
                 auto_approve,
                 HashMap::new(),
                 memory,
+                None, // custom_prompt（0.2.0/H6）：Web 桥维持 agent.md 查找路径，人格注入另案拍板
             )
         } else {
             Agent::with_history(
@@ -194,6 +195,7 @@ pub fn spawn_agent(
                 new_session_id(),
                 history,
                 memory,
+                None, // custom_prompt（0.2.0/H6）：同上
             )
         };
         agent.run(message_rx).await;
@@ -251,6 +253,7 @@ fn load_history(store: &SharedStore) -> anyhow::Result<Vec<ChatCompletionRequest
             tool_name: None,
             tool_call_id: None,
             tool_info: None,
+            source: None, // Web 档案行无 IM 来源标记（0.2.0 schema v6 新列）
             created_at: r.ts.clone(),
         };
         match message_to_chat_message(&data) {

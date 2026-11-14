@@ -55,7 +55,7 @@ crate（见下节）。找不到 robit 配置时服务照常起、静态首页�
 Web 通道仍是单会话（多 Web 会话不是本轮义务），IM 通道按 chat_id 独立会话。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.1.29 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.2.0 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
@@ -328,13 +328,23 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.1.29`（0.1.29 = R9 chatbot 思考日志刷屏收口：
-ThinkingDelta 每帧一条 trace → 回合收口汇总计数，子木 QQ 真机走查反馈，无 API
-变化；含 P7-T2 起新消费的 `robit-chatbot`/`robit-qq`；共同演进回路第三轮：
-子木 R7 思考过程输出需求文档 → robit `feat/thinking-output` 落地发布 2026-11-05——
-robit-ai 双路径捕获 `reasoning_content`（模型级 `thinking = auto|on|off`）、
-`AgentEvent::ThinkingDelta`、robit-web `thinking_delta` wire 帧、R6 空白 text_delta
-发射端收口；连带 rusqlite 0.40→0.41 对齐，zimu-agent-cli 穷举 match 补臂）。
+robit 全家消费 crates.io 正式版 `0.2.0`（0.2.0 = 子木第四轮移交全量落地，
+2026-11-14 发版：R10 附件批 M1–M7 + R8 宿主形态 H1–H6，交接件
+`robit/docs/robit-rfc-qq-media-and-host-feedback.md`——附件本地路径注入 +
+vision 本地优先、标注恰一份、文件名消毒去重、20MB 缺省上限、media 保留策略、
+`inject_message` 注入 API、source 参数化、cleanup 实装 + 僵尸自愈、
+`(source, namespace)` 会话隔离、memory 跟随 global_storage、custom_prompt
+人格注入；robit-web 零 diff，wire 不变。子木最小适配：Agent 两构造补
+`custom_prompt=None`、`MessageData.source=None`、`ToolContext.memory_dir`、
+BoundOnly/MockPlatform 补 `platform_name()` 转发；连带 rusqlite 0.41→0.42
+对齐。新能力 inject_message/人格注入/保留策略本轮不消费，另案拍板）。
+上一版 0.1.29（R9 chatbot 思考日志刷屏收口：ThinkingDelta 每帧一条 trace →
+回合收口汇总计数，子木 QQ 真机走查反馈，无 API 变化；含 P7-T2 起新消费的
+`robit-chatbot`/`robit-qq`；共同演进回路第三轮：子木 R7 思考过程输出需求文档 →
+robit `feat/thinking-output` 落地发布 2026-11-05——robit-ai 双路径捕获
+`reasoning_content`（模型级 `thinking = auto|on|off`）、`AgentEvent::ThinkingDelta`、
+robit-web `thinking_delta` wire 帧、R6 空白 text_delta 发射端收口；连带
+rusqlite 0.40→0.41 对齐，zimu-agent-cli 穷举 match 补臂）。
 CLI 的 ThinkingDelta 以 ANSI 暗体流式渲染（调试 REPL 兼作链路人工核验面）。
 上一版 0.1.27（2026-10-31，回路第二轮：子木
 R2–R5 宿主形态需求 → robit `feat/host-ergonomics-r2-r5` 落地发布）。子木切换情况：
@@ -404,7 +414,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.1.29 正式版，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.2.0 正式版，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

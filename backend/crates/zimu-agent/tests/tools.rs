@@ -142,6 +142,7 @@ fn test_ctx() -> ToolContext {
     let (done_tx, _done_rx) = tokio::sync::mpsc::channel(1);
     ToolContext {
         working_dir: std::path::PathBuf::from("."),
+        memory_dir: std::path::PathBuf::from("."), // 0.2.0/H5：领域工具不触 memory 库，测试占位即可
         session_id: "test-session".into(),
         tool_call_id: "test-call".into(),
         frontend: Arc::new(DummyFrontend),

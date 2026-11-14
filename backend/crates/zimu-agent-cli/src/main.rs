@@ -120,6 +120,7 @@ fn main() -> anyhow::Result<()> {
         core.auto_approve,
         HashMap::new(),
         memory,
+        None, // custom_prompt（0.2.0/H6）：调试 REPL 维持 agent.md 查找路径
     );
 
     let rt = tokio::runtime::Runtime::new()?;

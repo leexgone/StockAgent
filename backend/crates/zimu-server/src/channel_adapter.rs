@@ -57,6 +57,12 @@ impl<T: PlatformAdapter + 'static> PlatformAdapter for BoundOnly<T> {
         T::capabilities()
     }
 
+    fn platform_name() -> &'static str {
+        // 静态转发（0.2.0/H2）：source 归真实平台，装饰器不改名——
+        // ChatbotManager 用它落 sessions.source，白名单装饰不产生新平台身份
+        T::platform_name()
+    }
+
     async fn recv_event(&self) -> Result<PlatformEvent> {
         loop {
             let ev = self.inner.recv_event().await?;
@@ -151,6 +157,9 @@ mod tests {
     impl PlatformAdapter for MockPlatform {
         fn capabilities() -> PlatformCaps {
             caps()
+        }
+        fn platform_name() -> &'static str {
+            "mock"
         }
         async fn recv_event(&self) -> Result<PlatformEvent> {
             self.events
