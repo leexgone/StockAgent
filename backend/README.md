@@ -55,7 +55,7 @@ crate（见下节）。找不到 robit 配置时服务照常起、静态首页�
 Web 通道仍是单会话（多 Web 会话不是本轮义务），IM 通道按 chat_id 独立会话。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.2.0 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.2.1 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
@@ -328,8 +328,11 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.2.0`（0.2.0 = 子木第四轮移交全量落地，
-2026-11-14 发版：R10 附件批 M1–M7 + R8 宿主形态 H1–H6，交接件
+robit 全家消费 crates.io 正式版 `0.2.1`（0.2.1 = M1 收尾，同日发版：附件
+标注行携带本地保存路径——`describe_with_local` 相对 working_dir 显示，
+非图数据文件对模型从「能发现、够不着」变为路径可见；内容读取仍需宿主
+注册收读工具，子木另案。纯 additive 无签名变化，子木纯升版）。
+上一版 0.2.0（子木第四轮移交全量落地，2026-11-14 发版：R10 附件批 M1–M7 + R8 宿主形态 H1–H6，交接件
 `robit/docs/robit-rfc-qq-media-and-host-feedback.md`——附件本地路径注入 +
 vision 本地优先、标注恰一份、文件名消毒去重、20MB 缺省上限、media 保留策略、
 `inject_message` 注入 API、source 参数化、cleanup 实装 + 僵尸自愈、
@@ -414,7 +417,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.2.0 正式版，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.2.1 正式版，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

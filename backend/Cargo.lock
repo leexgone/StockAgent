@@ -2242,9 +2242,9 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d286388089fdc45e6bf86912e85a98eca9faedefed37ee9e4c52ff15c9b53dbc"
+checksum = "f618c87f42be45f2677789100260c548ca5e5b88d8d23069079925dfc155e514"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2273,9 +2273,9 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdc2232ebd1917864743a52a882e7dedfcbbf324aed11a32e911dbe4f221fc60"
+checksum = "e98ad3525fc1898c77333866fbb8832021ab26591c4ac2f6f73a4e8c7cfdac58"
 dependencies = [
  "async-openai",
  "bytes",
@@ -2295,9 +2295,9 @@ dependencies = [
 
 [[package]]
 name = "robit-chatbot"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7edc5ab9df7cb172db30b04ff9516c73f6de76e4cf865143e8c822896125c9f"
+checksum = "4244dc4067eab4ee3580bd884037317fb70191df7a866867fc860d835f71a371"
 dependencies = [
  "async-trait",
  "pulldown-cmark",
@@ -2314,9 +2314,9 @@ dependencies = [
 
 [[package]]
 name = "robit-qq"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb2081b83727decb5bea25a6b90d472c4b90bffe1d4e87078f3f1e25cb00cbd3"
+checksum = "a16680f2ad12895a7e05e6e95b826a1aeba090b6d11c94b2278129f669a1c976"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2338,9 +2338,9 @@ dependencies = [
 
 [[package]]
 name = "robit-web"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875390038a658d2bd53522a4d7b11a67478accf6fc25209bda09a862060a8e2f"
+checksum = "4a9a13cdd3f0fce0221f31e5391ef820fea9798eb6ca6c0cc54bc396a2390d9b"
 dependencies = [
  "async-trait",
  "robit-agent",

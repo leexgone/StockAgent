@@ -7,6 +7,10 @@ version = "0.0.1"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.2.1（2026-11-14）= M1 收尾：附件标注行携带本地保存路径
+# （describe_with_local，相对 working_dir 显示）——非图数据文件对模型从
+# 「能发现、够不着」变为路径可见；内容读取仍需宿主注册收读工具（另案）。
+# 纯 additive：无签名/字段/枚举变化，robit-web 零 diff，子木纯升版。
 # 0.2.0（2026-11-14）= 子木第四轮移交全量落地（R10 附件批 M1–M7 + R8 宿主形态
 # H1–H6，交接件 robit/docs/robit-rfc-qq-media-and-host-feedback.md）：附件本地
 # 路径注入 + vision 本地优先三级兜底 / 标注恰一份 / 文件名消毒去重 / 20MB 缺省
@@ -27,14 +31,14 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.2.0"
-robit-agent = "0.2.0"
-robit-web = "0.2.0"
+robit-ai = "0.2.1"
+robit-agent = "0.2.1"
+robit-web = "0.2.1"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。
 # rusqlite 0.42 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.2.0"
-robit-qq = "0.2.0"
+robit-chatbot = "0.2.1"
+robit-qq = "0.2.1"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "0.8"

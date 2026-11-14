@@ -9,7 +9,7 @@ zimu-domain = { path = "../zimu-domain" }
 zimu-store = { path = "../zimu-store" }
 zimu-market = { path = "../zimu-market" }
 robit-agent.workspace = true
-# T1 唯一装配线：LlmClient/RobitConfig/ContextConfig 在 robit-ai（与 server 同款版本，0.2.0）
+# T1 唯一装配线：LlmClient/RobitConfig/ContextConfig 在 robit-ai（与 server 同款版本，0.2.1）
 robit-ai.workspace = true
 async-trait.workspace = true
 serde.workspace = true
