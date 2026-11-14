@@ -53,3 +53,4 @@ B …
 | [0011](./0011-agent-channels-and-server-side-history.md) | 智能体接入模块：通道独立会话、服务端真值、QQ 验证通道与配置分界 | 接受 |
 | [0012](./0012-agent-ledger-write-tools.md) | 智能体写账本工具面：自动落账 + 读回，流水只增不改 | 接受 |
 | [0013](./0013-agent-holding-snapshot-tools.md) | 智能体持仓快照校正工具：初始化与定期校准 | 接受 |
+| [0014](./0014-agent-standard-tools.md) | 智能体启用 robit 标准工具面：全套消费、确认关闭自动执行（推翻 R2） | 接受 |
