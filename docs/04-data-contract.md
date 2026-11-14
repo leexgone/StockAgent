@@ -118,7 +118,9 @@ Web 通道会话的生产数据边界（IM 通道会话历史归 robit 自持库
 - **存什么**：`zimu.db` v4 `chat_messages`——user 行（**先落库再注入**，含调度器
   `/复盘` 注入，如实入档）、assistant 定稿文本、tool 展示行（`tool_json` =
   `{name,arguments,result,is_error}`，仅供「依据来源」回看）。**不存**：thinking
-  段（框架「不写回 history」同口径）、通知/确认/连接类条目。
+  段（框架「不写回 history」同口径）、通知/确认/连接类条目。Web 上传附件
+  （ADR-0015）的标注行（`describe_with_local`）随 user text 入档——档案存标注版、
+  模型收原文 + attachments，零 schema 改动（QQ 同款）。
 - **怎么用**：启动复活只取 user/assistant 文本对喂 `Agent::with_history`——
   **工具轨迹不回灌**（行情/持仓陈旧数字不进模型上下文，03「派生数字现算」）；
   `GET /api/chat/history?limit=&before_id=`（升序 + 游标翻页，不依赖 agent
@@ -285,9 +287,13 @@ HTTP 调用。要点：
   相等）；前端 `npm run gen:api`（openapi-typescript）生成
   `src/api/schema.d.ts`——P5-T1 的 API client 直接消费该类型面，不再手写。
 - **bin 侧端点**（health / chat，依赖 robit 装配与静态目录状态）：契约在
-  `openapi.rs` 以 doc-stub 声明，请求/响应类型（`Health`/`ChatRequest`/
+  `openapi.rs` 以 doc-stub 声明，请求/响应类型（`Health`/`ChatUploadForm`/
   `ConfirmRequest`）定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化
-  键集 == schema 键集（doc-stub 不留漂移盲区）。SSE 事件流的 wire schema
+  键集 == schema 键集（doc-stub 不留漂移盲区）。**`POST /api/chat` 自 ADR-0015
+  起为 `multipart/form-data`**（`text` 字段 + `files` 二进制文件字段，
+  `ChatUploadForm` 以 utoipa `content_type="multipart/form-data"` +
+  `format=Binary` 表达）；contract 只校验 JSON **响应**，multipart 请求体不在
+  校验面（上传链路集成测试见 `tests/chat_upload.rs`）。SSE 事件流的 wire schema
   归 robit-web（`WebEvent`，v0.1.26），本文档只声明端点与降级语义。
 - **错误契约**：全端点统一 `ApiError`（`error` 机器码 + `message` 中文可直接
   展示；422 拒绝按需带 `limit_down/limit_up/decimals` 或 `cash_after`）。

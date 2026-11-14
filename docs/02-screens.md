@@ -111,6 +111,16 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 技能约定：持仓内裸代码、非持仓带 sh/sz 前缀）；agent 离线时停留预填态，上线后补发，
 每个 nonce 只发一次不重放。
 
+生产侧文件上传口径（ADR-0015，2026-11-14）：输入区 📎 按钮（多选）+ 拖拽文件到对话区 +
+输入框粘贴截图/文件，三入口共用一套校验与 chips。选中文件先在输入区上方显示 chips
+（文件名 + 大小 + 移除，中性色不占 `--accent` 预算，`data-od-id="chat-attachments"`），
+点发送才真正上传——`POST /api/chat` 走 `multipart/form-data`（`text` + `files`），
+服务端原子落盘 `media/`（消毒 + 防覆盖 + `max_media_bytes` 缺省 20MB 守卫，超限 413）
+后注入 Agent：图像走 vision、非图像标注本地路径由标准工具 read/bash 自动解析（ADR-0014）。
+空 text 仅文件可发；发送失败保留 text + files 供重试。对话流 user 气泡渲染附件 chips，
+服务端档案水合经 `parseFileAnnotations` 解析标注行还原 chips（失败降级纯文本）——
+档案存「原文 + 标注行」、模型收原文 + attachments（QQ 同款，零 schema 改动）。
+
 生产侧展示口径（ADR-0010）：助手消息按 GFM Markdown 渲染（react-markdown + remark-gfm，
 原始 HTML 不渲染、`javascript:` 等不安全链接剥除、图片不渲染、链接新标签页 + noopener、
 表格外套横向滚动）；用户消息、通知与工具条目保持纯文本。样式作用域 `.chat-md`，全走
