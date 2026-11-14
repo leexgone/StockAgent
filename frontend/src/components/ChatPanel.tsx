@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { formatFileSize, MAX_FILE_BYTES, MAX_FILES, type FileMeta } from "../lib/fileAnnotations";
 
 /**
  * 子木会话面板 —— 真实 Agent SSE 线程（P2-T3 验证链路；P5-T2 起即 chat 屏的
@@ -28,7 +29,7 @@ type SseEvent =
   | { type: "error"; message: string };
 
 type Entry =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; files?: FileMeta[] }
   | { kind: "assistant"; text: string; done: boolean }
   /** 思考段（R7）：closed=false 流式展开中，true=已折叠（头行可点开回看）；不持久化 */
   | { kind: "thinking"; text: string; closed: boolean }
@@ -123,8 +124,11 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
   const [pending, setPending] = useState<Pending>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  /** 待发送附件（ADR-0015）：选中即显示 chips，点发送才真正上传（multipart） */
+  const [files, setFiles] = useState<File[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** 已自动发送过的 prefill nonce（send=1 深链只发一次，busy/离线恢复后不重放） */
   const autoSent = useRef(0);
   // onConnected 走 ref：SSE effect 只依赖 agentOnline，宿主换回调不重连事件流
@@ -211,19 +215,29 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries, pending]);
 
-  /** 发送核心：手动提交与 send=1 深链自动发送共用（入口不同，链路与留痕完全一致） */
+  /** 发送核心：手动提交与 send=1 深链自动发送共用（入口不同，链路与留痕完全一致）。
+   *  ADR-0015：multipart/form-data（text + files），浏览器自设 boundary 不手设
+   *  Content-Type；失败保留输入与附件供重试，成功才清空（乐观条目含附件 chips）。 */
   const submit = useCallback(
-    async (raw: string) => {
+    async (raw: string, attach: File[] = []) => {
       const text = raw.trim();
-      if (!text || busy) return;
-      setEntries((prev) => [...prev, { kind: "user", text }]);
-      setInput("");
+      if ((!text && attach.length === 0) || busy) return;
+      const metas: FileMeta[] = attach.map((f) => ({ name: f.name, size: f.size }));
       setBusy(true);
-      const r = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+      const fd = new FormData();
+      fd.append("text", text);
+      for (const f of attach) fd.append("files", f);
+      let r: Response;
+      try {
+        r = await fetch("/api/chat", { method: "POST", body: fd });
+      } catch (e) {
+        setBusy(false);
+        setEntries((prev) => [
+          ...prev,
+          { kind: "notice", level: "error", text: `发送失败：${String(e)}` },
+        ]);
+        return;
+      }
       if (!r.ok) {
         setBusy(false);
         const body = await r.text();
@@ -231,14 +245,21 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
           ...prev,
           { kind: "notice", level: "error", text: `发送失败：HTTP ${r.status} ${body}` },
         ]);
+        return; // 保留 input + files 供重试
       }
+      setEntries((prev) => [
+        ...prev,
+        { kind: "user", text, ...(metas.length ? { files: metas } : {}) },
+      ]);
+      setInput("");
+      setFiles([]);
     },
     [busy],
   );
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    await submit(input);
+    await submit(input, files);
   };
 
   // send=1 深链（如「去问答触发 /建议」）：等 agent 上线且空闲时自动发送一次；
@@ -270,8 +291,51 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
     await fetch("/api/chat/cancel", { method: "POST" });
   };
 
+  /** 收附件（📎 选择 / 拖拽 / 粘贴共用）：客户端预检大小与数量、去重；
+   *  服务端是最终裁判（超限 413）。拒绝走 notice 条目（组件内错误惯例）。 */
+  const addFiles = useCallback(
+    (list: FileList | File[] | null) => {
+      const incoming = Array.from(list ?? []);
+      if (incoming.length === 0) return;
+      const next = [...files];
+      const rejected: string[] = [];
+      for (const f of incoming) {
+        if (next.length >= MAX_FILES) {
+          rejected.push(`${f.name}（超出 ${MAX_FILES} 个上限）`);
+          continue;
+        }
+        if (f.size > MAX_FILE_BYTES) {
+          rejected.push(`${f.name}（超过 ${formatFileSize(MAX_FILE_BYTES)}）`);
+          continue;
+        }
+        if (next.some((x) => x.name === f.name && x.size === f.size)) continue;
+        next.push(f);
+      }
+      setFiles(next);
+      if (rejected.length) {
+        setEntries((prev) => [
+          ...prev,
+          { kind: "notice", level: "error", text: `已拒绝附件：${rejected.join("；")}` },
+        ]);
+      }
+    },
+    [files],
+  );
+
+  const removeFile = (idx: number) => setFiles((prev) => prev.filter((_, j) => j !== idx));
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (agentOnline) addFiles(e.dataTransfer.files);
+  };
+
   return (
-    <section className="card chat" data-od-id="home-chat">
+    <section
+      className="card chat"
+      data-od-id="home-chat"
+      onDrop={onDrop}
+      onDragOver={(e) => e.preventDefault()}
+    >
       <h2 className="chat-title">
         子木会话
         <span className="chat-sub">实时 Agent · 流式回答 · 工具调用可见</span>
@@ -318,17 +382,62 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
             )}
           </div>
 
+          {files.length > 0 && (
+            <div className="chat-attachments" data-od-id="chat-attachments">
+              {files.map((f, i) => (
+                <span className="pill plain chat-file-chip" key={`${f.name}-${i}`}>
+                  📎 {f.name}
+                  {f.size > 0 && <span className="chat-file-size">{formatFileSize(f.size)}</span>}
+                  <button
+                    type="button"
+                    className="chat-file-remove"
+                    aria-label={`移除 ${f.name}`}
+                    onClick={() => removeFile(i)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <form className="chat-input-row" onSubmit={send} data-od-id="home-chat-input">
+            <button
+              type="button"
+              className="icon-btn chat-attach-btn"
+              aria-label="上传文件"
+              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              📎
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                addFiles(e.target.files);
+                e.target.value = ""; // 允许再次选择同一文件
+              }}
+            />
             <input
               type="text"
               ref={inputRef}
               value={input}
-              placeholder={busy ? "等待本轮回复…" : "对子木说点什么…"}
+              placeholder={busy ? "等待本轮回复…" : "对子木说点什么…（可拖拽/粘贴文件）"}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={(e) => {
+                if (e.clipboardData.files.length > 0) addFiles(e.clipboardData.files);
+              }}
               disabled={busy}
               autoComplete="off"
             />
-            <button type="submit" className="btn btn-primary" disabled={busy || !input.trim()}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy || (!input.trim() && files.length === 0)}
+            >
               发送
             </button>
             <button type="button" className="btn" onClick={() => void cancel()} disabled={!busy}>
@@ -344,7 +453,21 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
 function EntryView({ entry }: { entry: Entry }) {
   switch (entry.kind) {
     case "user":
-      return <p className="chat-user">我：{entry.text}</p>;
+      return (
+        <div className="chat-user-wrap">
+          <p className="chat-user">我：{entry.text}</p>
+          {entry.files && entry.files.length > 0 && (
+            <div className="chat-user-files" data-od-id="chat-user-files">
+              {entry.files.map((f, i) => (
+                <span className="pill plain" key={i}>
+                  📎 {f.name}
+                  {f.size > 0 ? ` · ${formatFileSize(f.size)}` : ""}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      );
     case "assistant":
       return (
         <div className="chat-assistant">

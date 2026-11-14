@@ -29,10 +29,12 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 utoipa.workspace = true # openapi.rs：ApiDoc 汇编 + 响应结构体 ToSchema（P4-T5）
+uuid.workspace = true # ADR-0015 chat_upload：消毒空名/防覆盖兜底
 
 [dev-dependencies]
 # 集成测试（tests/market_api.rs）：真实 HTTP 打本机回环临时端口 + 日期构造
-reqwest.workspace = true
+# multipart：上传集成测试（tests/chat_upload.rs）构造 multipart 请求体（ADR-0015）
+reqwest = { workspace = true, features = ["multipart"] }
 chrono.workspace = true
 # 契约测试（tests/contract.rs）：实时响应与 fixtures/api 样例过 OpenAPI schema 校验
 jsonschema.workspace = true

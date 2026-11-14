@@ -11,6 +11,7 @@
 
 import type { components } from "../api/schema";
 import type { ChatEntry } from "../components/ChatPanel";
+import { parseFileAnnotations } from "./fileAnnotations";
 
 export type ChatMessageRow = components["schemas"]["ChatMessageRow"];
 
@@ -26,9 +27,12 @@ export function hydrateEntries(rows: ChatMessageRow[]): ChatEntry[] {
   const out: ChatEntry[] = [];
   for (const r of rows) {
     switch (r.role) {
-      case "user":
-        out.push({ kind: "user", text: r.text });
+      case "user": {
+        // ADR-0015：档案 user 行含附件标注行 → 剥离正文、还原 chips（与 live 同形态）
+        const { body, files } = parseFileAnnotations(r.text);
+        out.push({ kind: "user", text: body, ...(files.length ? { files } : {}) });
         break;
+      }
       case "assistant":
         out.push({ kind: "assistant", text: r.text, done: true });
         break;

@@ -24,6 +24,7 @@ pub mod channel_adapter;
 pub mod channel_bindings;
 pub mod chat_api;
 pub mod chat_record;
+pub mod chat_upload;
 pub mod config_flags;
 pub mod holdings_api;
 pub mod market_api;

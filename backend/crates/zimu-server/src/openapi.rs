@@ -9,9 +9,10 @@
 //! - `holdings` / `market`：`#[utoipa::path]` 直接标注在 lib 的 handler 上，
 //!   文档与实现同一函数，不会漂；
 //! - `system`（health / chat）：实现在 bin（`main.rs`，依赖 robit 装配与静态
-//!   目录状态），这里以 doc-stub 声明契约——`Health`/`ChatRequest`/
+//!   目录状态），这里以 doc-stub 声明契约——`Health`/`ChatUploadForm`/
 //!   `ConfirmRequest` 类型定义在本模块供 bin 消费，bin 侧单测断言序列化键集
-//!   与 schema 键集一致，漂移没有盲区。
+//!   与 schema 键集一致，漂移没有盲区。`POST /api/chat` 自 ADR-0015 起为
+//!   multipart/form-data（`chat_upload` 接收），请求体不在 contract JSON 响应校验面。
 //!
 //! 验收（P4-T5「样例响应过 schema 校验」）：`tests/contract.rs` 用
 //! `fixtures/api/` 样例 +  seeded 测试服务的实时响应逐端点过 jsonschema 校验。
@@ -109,11 +110,16 @@ pub struct Health {
     pub market_url: String,
 }
 
-/// `POST /api/chat` 请求体（实现在 bin）
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct ChatRequest {
-    /// 用户消息（非空；回复经 SSE 流出）
+/// `POST /api/chat` 请求体（multipart/form-data，ADR-0015；接收在 lib `chat_upload`，
+/// bin 接线）。`text` 可为空（仅发附件时）；`files` 落盘 media/ 后注入 Agent——
+/// 图像走 vision、非图像标注本地路径由标准工具 read/bash 自动解析（ADR-0014）。
+#[derive(Debug, ToSchema)]
+pub struct ChatUploadForm {
+    /// 用户消息文本（可为空——仅发附件时；回复经 SSE 流出）
     pub text: String,
+    /// 上传文件（多选，二进制；单文件 ≤ max_media_bytes 缺省 20MB，超限 413）
+    #[schema(format = Binary)]
+    pub files: Vec<String>,
 }
 
 /// `POST /api/chat/confirm` 请求体（实现在 bin）
@@ -159,11 +165,13 @@ fn chat_stream_doc() {}
     path = "/api/chat",
     operation_id = "chat_send",
     tag = "system",
-    request_body = ChatRequest,
+    request_body(content = ChatUploadForm, content_type = "multipart/form-data",
+        description = "multipart 表单：text 字段（可空）+ files 文件字段（多选，二进制）。落盘 media/ 后注入 Agent（ADR-0015）"),
     responses(
         (status = 202, description = "已接受，回复经 SSE 流出"),
-        (status = 400, description = "消息为空（text/plain）"),
-        (status = 503, description = "Agent 未启动（text/plain）"),
+        (status = 400, description = "消息为空（无文本且无附件）/ 附件超数量 / 空文件 / 表单解析失败（text/plain）"),
+        (status = 413, description = "文件超过大小上限 max_media_bytes（text/plain）"),
+        (status = 503, description = "Agent 未启动或会话受理失败（text/plain）"),
     )
 )]
 fn chat_doc() {}
@@ -249,7 +257,7 @@ fn chat_cancel_doc() {}
         crate::watchlist_api::remove_watchlist,
     ),
     components(schemas(
-        ApiError, Health, ChatRequest, ConfirmRequest,
+        ApiError, Health, ChatUploadForm, ConfirmRequest,
         ChatHistory, ChatResetResult, ChatMessageRow,
         BindingRequest, ChannelBindingRow, UnbindResult,
         AccountPatch,

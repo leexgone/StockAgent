@@ -9,8 +9,10 @@
 //! * 事件下行：AgentEvent → `WebEvent`（官方 JSON schema）→ broadcast 扇出，
 //!   多浏览器连接可同时观看；SSE 编码在宿主 `main.rs`；**同流分一支进 recorder**
 //!   落 `chat_messages`（T3：档案状态机在 `chat_record`，thinking/通知不入库）；
-//! * 输入上行：`POST /api/chat` → `AgentBridge::submit_user_text`（**先落库再注入**）
-//!   → `WebBridge::send_user_text` → `Agent::run`；调度器复盘走同一个包装，同源留痕；
+//! * 输入上行：`POST /api/chat`（multipart，ADR-0015）→ `chat_upload` 落盘 media/ →
+//!   `AgentBridge::submit_user_input`（**先落库再注入**，档案存标注版 text）→
+//!   `WebBridge::send_message(UserInput{text, attachments})` → `Agent::run`；
+//!   调度器复盘走 `submit_user_text` 薄包装（attachments 恒空），同源留痕；
 //! * 工具确认：`confirm_request` 事件推给前端，`POST /api/chat/confirm` 经
 //!   `WebBridge::resolve_confirm` 回填；responder 被 drop 一律按拒绝处理。
 //!   ADR-0014 起确认关闭（config auto_approve=true），本回路保留为将来重开预留
@@ -29,13 +31,13 @@
 //! 档案端点（`chat_api`）在同一 AgentCore 上继续演进（ADR-0011）。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use robit_agent::event::new_session_id;
 use robit_agent::storage::{message_to_chat_message, MessageData};
-use robit_agent::Agent;
+use robit_agent::{Agent, MediaAttachment};
 use robit_ai::{ChatCompletionRequestMessage, RobitConfig};
 use robit_web::{WebBridge, WebEvent};
 use tokio::sync::broadcast;
@@ -56,8 +58,10 @@ use zimu_server::chat_record::{ts_now, RecorderCore, RowSpec, WEB_SESSION};
 pub struct AgentBridge {
     /// 事件订阅 / 消息注入 / 确认回填都在 WebBridge 上
     pub web: WebBridge,
-    /// 会话档案写入口（与 HTTP API 同一份 store；submit_user_text 先落库后注入）
+    /// 会话档案写入口（与 HTTP API 同一份 store；submit_user_input 先落库后注入）
     pub store: SharedStore,
+    /// 工作目录（ADR-0015：附件标注 `describe_with_local` 的 base，相对路径显示）
+    pub working_dir: PathBuf,
     /// 装配三件套的公共句柄（T5：QQ 通道 ChatbotManager 与 Web 共用同一
     /// LlmClient/ToolRegistry/SkillRegistry——共享 Arc 多 Agent 是框架自家姿势）
     pub client: Arc<robit_ai::LlmClient>,
@@ -74,19 +78,44 @@ pub struct AgentBridge {
 }
 
 impl AgentBridge {
-    /// 注入一条用户消息：**先落档案再进通道**。
+    /// 注入一条纯文本用户消息（调度器复盘 / reset 走这里）： attachments 恒空。
+    pub async fn submit_user_text(&self, text: String) -> anyhow::Result<()> {
+        self.submit_user_input(text, Vec::new()).await
+    }
+
+    /// 注入用户消息 + 附件（ADR-0015）：**先落档案再进通道**。
+    /// - 档案存「原文 + 每附件标注行」（QQ `annotated_text` 同款，零 schema 改动）；
+    ///   模型收**原文 + attachments**——Agent `build_user_message` 恰好标注一次，
+    ///   不双重（图像走本地优先 vision，非图像追加路径标注由标准工具读）。
     /// - 档案写失败 → 不注入（拒绝"模型记得、档案没有"的分叉）；
     /// - 档案成功、通道失败（agent 刚退出）→ 行留在档案里，重启复活时经
-    ///   `with_history` 回灌——档案即队列，语义诚实。
-    pub async fn submit_user_text(&self, text: String) -> anyhow::Result<()> {
+    ///   `with_history` 回灌（标注随 r.text 留存）——档案即队列，语义诚实。
+    pub async fn submit_user_input(
+        &self,
+        text: String,
+        attachments: Vec<MediaAttachment>,
+    ) -> anyhow::Result<()> {
+        let archive_text = annotated_text(&text, &attachments, &self.working_dir);
         lock(&self.store)
-            .append_chat_message(WEB_SESSION, "user", &text, None, &ts_now())
+            .append_chat_message(WEB_SESSION, "user", &archive_text, None, &ts_now())
             .context("会话档案写入失败，消息未注入")?;
         self.web
-            .send_user_text(text)
+            .send_message(robit_agent::FrontendMessage::UserInput { text, attachments })
             .await
             .map_err(|_| anyhow!("Agent 已退出，消息未注入"))
     }
+}
+
+/// 档案标注版文本（照 robit-chatbot manager.rs:839-856 `annotated_text`）：
+/// 原文 + 每附件一行 `describe_with_local(Some(working_dir))`（相对路径显示）。
+/// 只供档案/复活回灌；模型侧标注由 Agent 追加一次，这里不重复进模型。
+fn annotated_text(text: &str, attachments: &[MediaAttachment], working_dir: &Path) -> String {
+    let mut out = text.to_string();
+    for att in attachments {
+        out.push('\n');
+        out.push_str(&att.describe_with_local(Some(working_dir)));
+    }
+    out
 }
 
 /// 装配并启动 Web 通道 Agent（原料 = `AgentCore`，与 CLI/IM 通道同一装配线）。
@@ -132,6 +161,8 @@ pub fn spawn_agent(
     let context_config = core.context_config();
     let context_window = core.context_window();
     let working_dir = core.working_dir.clone();
+    // ADR-0015：bridge 留一份 working_dir 供附件标注 base（本体 move 进 Agent 构造）
+    let working_dir_for_bridge = working_dir.clone();
     let auto_approve = core.auto_approve;
     // 三件套公共句柄（T5 QQ 通道消费；Arc clone 廉价）
     let client_arc = core.client.clone();
@@ -208,6 +239,7 @@ pub fn spawn_agent(
     Ok(AgentBridge {
         web,
         store,
+        working_dir: working_dir_for_bridge,
         client: client_arc,
         registry: tools_arc,
         skills_registry: skills_arc,

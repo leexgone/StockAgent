@@ -51,9 +51,11 @@ tokio = { version = "1.53", features = [
     "io-std",   # stdin（REPL）
     "io-util",  # AsyncBufReadExt
     "time",     # 探测超时（P4-T4：status 端点有界降级；此前经 reqwest 间接启用，显式声明）
+    "fs",       # 上传落盘（ADR-0015：chat_upload 流式写 media/；此前经 robit-agent 间接启用，显式声明）
 ] }
 async-trait = "0.1"
-axum = "0.8"
+# multipart：Web 对话框文件上传（ADR-0015，POST /api/chat 改 multipart/form-data）
+axum = { version = "0.8", features = ["multipart"] }
 tokio-stream = { version = "0.1", features = ["sync"] } # BroadcastStream（SSE 事件扇出）
 tower-http = { version = "0.6", features = ["fs", "trace"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -77,3 +79,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 utoipa = "5"
 # P4-T5 契约测试（仅 zimu-server dev-dep）：实时响应与样例过 schema 校验。
 jsonschema = "0.60"
+# ADR-0015 上传落盘：文件名消毒空名兜底 + 防覆盖 100 次后兜底（复刻 robit media.rs
+# 私有规则，R12 已诉求上游公开）；与 robit-agent 内部 uuid 同 crate 实例。
+uuid = { version = "1", features = ["v4"] }

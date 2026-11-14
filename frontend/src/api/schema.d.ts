@@ -764,17 +764,23 @@ export interface components {
             /** @description 上海时刻 YYYY-MM-DD HH:MM（与 push_log/trades 同格式） */
             ts: string;
         };
-        /** @description `POST /api/chat` 请求体（实现在 bin） */
-        ChatRequest: {
-            /** @description 用户消息（非空；回复经 SSE 流出） */
-            text: string;
-        };
         /** @description `POST /api/chat/reset` 响应。 */
         ChatResetResult: {
             /** @description 是否已通知在线 agent 清内存历史（false = agent 离线，档案照常已清） */
             agent_signaled: boolean;
             /** @description 清掉的档案行数 */
             cleared: number;
+        };
+        /**
+         * @description `POST /api/chat` 请求体（multipart/form-data，ADR-0015；接收在 lib `chat_upload`，
+         *     bin 接线）。`text` 可为空（仅发附件时）；`files` 落盘 media/ 后注入 Agent——
+         *     图像走 vision、非图像标注本地路径由标准工具 read/bash 自动解析（ADR-0014）。
+         */
+        ChatUploadForm: {
+            /** @description 上传文件（多选，二进制；单文件 ≤ max_media_bytes 缺省 20MB，超限 413） */
+            files: string[];
+            /** @description 用户消息文本（可为空——仅发附件时；回复经 SSE 流出） */
+            text: string;
         };
         /** @description `POST /api/chat/confirm` 请求体（实现在 bin） */
         ConfirmRequest: {
@@ -1574,9 +1580,10 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
+        /** @description multipart 表单：text 字段（可空）+ files 文件字段（多选，二进制）。落盘 media/ 后注入 Agent（ADR-0015） */
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChatRequest"];
+                "multipart/form-data": components["schemas"]["ChatUploadForm"];
             };
         };
         responses: {
@@ -1587,14 +1594,21 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 消息为空（text/plain） */
+            /** @description 消息为空（无文本且无附件）/ 附件超数量 / 空文件 / 表单解析失败（text/plain） */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Agent 未启动（text/plain） */
+            /** @description 文件超过大小上限 max_media_bytes（text/plain） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Agent 未启动或会话受理失败（text/plain） */
             503: {
                 headers: {
                     [name: string]: unknown;

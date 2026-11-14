@@ -60,7 +60,7 @@ use anyhow::Context;
 use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
 use zimu_market::MarketApi as _; // base_url() 是 trait 方法
 use zimu_server::holdings_api::SharedStore;
-use zimu_server::openapi::{ChatRequest, ConfirmRequest, Health};
+use zimu_server::openapi::{ConfirmRequest, Health};
 use zimu_server::{api_router, market_api};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -176,28 +176,6 @@ fn sse_json(event: &impl Serialize) -> Result<Event, Infallible> {
             Event::default()
                 .data(format!(r#"{{"type":"error","message":"SSE 序列化失败: {e}"}}"#))
         }))
-}
-
-async fn chat(State(state): State<AppState>, Json(req): Json<ChatRequest>) -> Response {
-    let Some(agent) = state.agent.clone() else {
-        return agent_offline();
-    };
-    let text = req.text.trim().to_string();
-    if text.is_empty() {
-        return (StatusCode::BAD_REQUEST, "消息为空").into_response();
-    }
-    // T3：经 AgentBridge::submit_user_text——先落 chat_messages 再注入（档案即队列）
-    match agent.submit_user_text(text).await {
-        Ok(()) => StatusCode::ACCEPTED.into_response(),
-        Err(e) => {
-            tracing::warn!("/api/chat 受理失败：{e:#}");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "会话受理失败：agent 已退出或档案写入失败（详情见服务日志）",
-            )
-                .into_response()
-        }
-    }
 }
 
 async fn chat_confirm(State(state): State<AppState>, Json(req): Json<ConfirmRequest>) -> Response {
@@ -387,6 +365,12 @@ async fn main() -> anyhow::Result<()> {
     // 领域工具与 HTTP API 共用同一份句柄，spawn_agent 需要它们。
     let robit_config = robit_ai::load_config(None);
     let app_config = robit_config.as_ref().ok().and_then(|c| c.app.as_ref());
+    // ADR-0015：上传单文件上限复用 robit 官方键 [app.context] max_media_bytes
+    //（缺省 20MB，0=不限，QQ 同款）；config 随后 move 进 spawn_agent，先取出来。
+    let max_media_bytes = app_config
+        .and_then(|a| a.context.as_ref())
+        .and_then(|ctx| ctx.max_media_bytes)
+        .unwrap_or(robit_agent::context::DEFAULT_MAX_MEDIA_BYTES);
     let filter = robit_ai::build_log_filter(
         app_config,
         &["zimu_server", "zimu_agent", "zimu_market"],
@@ -589,10 +573,30 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
+    // 上传注入钩子（chat_upload，ADR-0015）：agent 在线则 submit_user_input（档案
+    // 标注版 text + 原文注入 attachments），离线 Err → 503。照 chat_reset 的 clone 范式。
+    let upload_hook: zimu_server::chat_upload::UploadHook = {
+        let bridge_opt = agent.clone();
+        Arc::new(move |text, attachments| {
+            let b = bridge_opt.clone();
+            Box::pin(async move {
+                match b {
+                    Some(bridge) => bridge.submit_user_input(text, attachments).await,
+                    None => Err(anyhow::anyhow!("Agent 未启动")),
+                }
+            })
+        })
+    };
+    let upload_state = zimu_server::chat_upload::UploadState {
+        media_dir: working_dir.join("media"),
+        max_bytes: max_media_bytes,
+        max_files: zimu_server::chat_upload::DEFAULT_MAX_FILES,
+        hook: upload_hook,
+    };
+
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/chat/stream", get(chat_stream))
-        .route("/api/chat", post(chat))
         .route("/api/chat/confirm", post(chat_confirm))
         .route("/api/chat/cancel", post(chat_cancel))
         .with_state(AppState {
@@ -602,6 +606,8 @@ async fn main() -> anyhow::Result<()> {
             shutdown_rx: sse_shutdown_rx,
             qq_online,
         })
+        // Web 上传（ADR-0015）：POST /api/chat multipart，自带 UploadState（与 AppState 解耦）
+        .merge(zimu_server::chat_upload::router(upload_state))
         // 业务路由（持仓 P4-T1 + 行情 P4-T4 + 会话档案 T3）在库目标装配，各自带独立状态
         .merge(api_router(store, market, chat_reset))
         // SPA 回落：dist 里不存在的路径返回 index.html。
@@ -637,8 +643,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     //! health/chat 实现在 bin、契约 doc-stub 在 lib（openapi.rs）——这里断言
-    //! 两边没有漂移：bin 构造的 `Health` 序列化键集 == OpenAPI schema 键集。
-    //!（chat 请求体直接消费 lib 类型，天然同源无需断言。）
+    //! 两边没有漂移：bin 构造的 `Health` 序列化键集 == OpenAPI schema 键集；
+    //! chat multipart 表单字段名（chat_upload 手动解析）== ChatUploadForm schema 键集。
 
     #[test]
     fn health_shape_matches_openapi_schema() {
@@ -676,5 +682,24 @@ mod tests {
             schema_keys, actual_keys,
             "main.rs 的 Health 构造与 openapi.rs 契约 schema 键集不一致"
         );
+    }
+
+    /// ADR-0015：multipart 表单字段名（bin chat_upload 手动解析 "text"/"files"）
+    /// 与契约 ChatUploadForm schema 键集一致——multipart 不走 serde 自动同源，补断言。
+    #[test]
+    fn chat_upload_form_shape_matches_openapi_schema() {
+        let doc: serde_json::Value =
+            serde_json::from_str(&zimu_server::openapi::openapi_json()).expect("契约文档可解析");
+        let schema = doc
+            .pointer("/components/schemas/ChatUploadForm")
+            .expect("契约里必须有 ChatUploadForm schema");
+        let mut keys: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("ChatUploadForm schema 是对象")
+            .keys()
+            .map(|s| s.as_str())
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["files", "text"], "chat_upload 解析的字段名须与契约一致");
     }
 }

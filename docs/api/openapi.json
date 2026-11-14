@@ -374,10 +374,11 @@
         ],
         "operationId": "chat_send",
         "requestBody": {
+          "description": "multipart 表单：text 字段（可空）+ files 文件字段（多选，二进制）。落盘 media/ 后注入 Agent（ADR-0015）",
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/ChatRequest"
+                "$ref": "#/components/schemas/ChatUploadForm"
               }
             }
           },
@@ -388,10 +389,13 @@
             "description": "已接受，回复经 SSE 流出"
           },
           "400": {
-            "description": "消息为空（text/plain）"
+            "description": "消息为空（无文本且无附件）/ 附件超数量 / 空文件 / 表单解析失败（text/plain）"
+          },
+          "413": {
+            "description": "文件超过大小上限 max_media_bytes（text/plain）"
           },
           "503": {
-            "description": "Agent 未启动（text/plain）"
+            "description": "Agent 未启动或会话受理失败（text/plain）"
           }
         }
       }
@@ -2208,19 +2212,6 @@
           }
         }
       },
-      "ChatRequest": {
-        "type": "object",
-        "description": "`POST /api/chat` 请求体（实现在 bin）",
-        "required": [
-          "text"
-        ],
-        "properties": {
-          "text": {
-            "type": "string",
-            "description": "用户消息（非空；回复经 SSE 流出）"
-          }
-        }
-      },
       "ChatResetResult": {
         "type": "object",
         "description": "`POST /api/chat/reset` 响应。",
@@ -2237,6 +2228,28 @@
             "type": "integer",
             "description": "清掉的档案行数",
             "minimum": 0
+          }
+        }
+      },
+      "ChatUploadForm": {
+        "type": "object",
+        "description": "`POST /api/chat` 请求体（multipart/form-data，ADR-0015；接收在 lib `chat_upload`，\nbin 接线）。`text` 可为空（仅发附件时）；`files` 落盘 media/ 后注入 Agent——\n图像走 vision、非图像标注本地路径由标准工具 read/bash 自动解析（ADR-0014）。",
+        "required": [
+          "text",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "description": "上传文件（多选，二进制；单文件 ≤ max_media_bytes 缺省 20MB，超限 413）"
+          },
+          "text": {
+            "type": "string",
+            "description": "用户消息文本（可为空——仅发附件时；回复经 SSE 流出）"
           }
         }
       },

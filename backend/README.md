@@ -54,6 +54,14 @@ crate（见下节）。找不到 robit 配置时服务照常起、静态首页�
 复活回灌；`GET /api/chat/history` + `POST /api/chat/reset` 进契约。边界更新：
 Web 通道仍是单会话（多 Web 会话不是本轮义务），IM 通道按 chat_id 独立会话。
 
+Web 文件上传（ADR-0015）：`POST /api/chat` 走 multipart/form-data，`chat_upload.rs`
+流式落盘 `working_dir/media/`（与 QQ 同根；消毒文件名 + 防覆盖 `-1/-2` 后缀 +
+`[app.context] max_media_bytes` 缺省 20MB 守卫，超限 413 删半截），经
+`AgentBridge::submit_user_input` 注入——档案存「原文 + 标注行」、模型收原文 +
+attachments（**robit 零改动**：图像本地优先 vision、非图像路径标注由标准工具
+read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent media.rs 私有 fn
+（R12 诉求上游公开）；axum 因此启用 `multipart` feature。
+
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
 挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.2.1 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
@@ -64,7 +72,7 @@ robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定�
 | 端点 | 说明 |
 |---|---|
 | `GET /api/chat/stream` | SSE 事件流：首帧 `connected`，随后 `text_delta` / `tool_call` / `tool_result` / `confirm_request` / `turn_complete` / `error`（形状见 `agent_bridge.rs` 的 `SseEvent`） |
-| `POST /api/chat` | `{"text":"…"}` → 202，回复经 SSE 流出 |
+| `POST /api/chat` | multipart/form-data（`text` 字段可空 + `files` 文件字段多选）→ 202，回复经 SSE 流出；附件落盘 media/ 注入 Agent（ADR-0015），超限 413 |
 | `POST /api/chat/confirm` | `{"tool_call_id":"…","approved":true}` 回填工具确认 |
 | `POST /api/chat/cancel` | 取消当前轮次 |
 
@@ -76,9 +84,12 @@ curl 冒烟——**Windows 终端里中文 payload 必须走 UTF-8 文件**，�
 （服务端报 `invalid unicode code point`）：
 
 ```powershell
-'{"text":"请调用 echo 工具回显:你好子木"}' | Out-File -Encoding utf8NoBOM payload.json
+'请调用 echo 工具回显:你好子木' | Out-File -Encoding utf8NoBOM msg.txt
 curl.exe -sN http://127.0.0.1:8080/api/chat/stream   # 另开窗口看事件流
-curl.exe -s -X POST http://127.0.0.1:8080/api/chat -H "Content-Type: application/json" --data-binary "@payload.json"
+# 纯文本（multipart 仅 text 字段；< 从 UTF-8 文件读字段值，避免 Windows 内联编码问题）
+curl.exe -s -X POST http://127.0.0.1:8080/api/chat -F "text=<msg.txt"
+# 带附件（ADR-0015：text + files，落盘 media/ 后 Agent 自动解析）
+curl.exe -s -X POST http://127.0.0.1:8080/api/chat -F "text=<msg.txt" -F "files=@positions.csv;type=text/csv"
 ```
 
 ## zimu-agent（P4-T6/T7 agent 应用层：领域工具 + Skill 模板 + 调度引擎）
