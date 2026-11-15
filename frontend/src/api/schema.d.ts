@@ -891,8 +891,8 @@ export interface components {
          *     create → before 为 null；delete → after 为 null。
          */
         HoldingEditRow: {
-            after?: null | components["schemas"]["HoldingSnapshot"];
-            before?: null | components["schemas"]["HoldingSnapshot"];
+            after?: components["schemas"]["HoldingSnapshot"] | null;
+            before?: components["schemas"]["HoldingSnapshot"] | null;
             code: string;
             /** Format: int64 */
             id: number;
@@ -1145,7 +1145,7 @@ export interface components {
          */
         QuoteStatus: "ok" | "halted_or_delisted" | "empty_or_delisted" | "no_data" | "unknown";
         RecordReceipt: {
-            holding_after?: null | components["schemas"]["HoldingRow"];
+            holding_after?: components["schemas"]["HoldingRow"] | null;
             preview: components["schemas"]["SimPreview"];
             /** @description 本笔卖出是否导致清仓移除持仓行 */
             removed: boolean;
@@ -1244,7 +1244,7 @@ export interface components {
         };
         TradeRequest: {
             code: string;
-            meta?: null | components["schemas"]["NewHoldingMeta"];
+            meta?: components["schemas"]["NewHoldingMeta"] | null;
             note?: string;
             /** Format: double */
             price: number;

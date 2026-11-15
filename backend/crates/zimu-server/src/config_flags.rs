@@ -49,7 +49,10 @@ pub fn config_path(working_dir: &Path) -> Option<PathBuf> {
 /// 纯函数：从 raw TOML 文本提取开关（单测面——不碰文件系统）。
 /// 坏 TOML / 缺节 / 非 bool 值一律回落到缺省停用；`Err` 只在文件本身读不到时由调用方处理。
 pub fn parse_flags(raw: &str) -> ChannelFlags {
-    let Ok(doc) = raw.parse::<toml::Value>() else {
+    // toml 1.2 的 `Value::from_str`（`.parse()`）走 ValueDeserializer 单值路径，
+    // 解析整份文档（表头 + 键值）会报「unexpected content」——必须用 `toml::from_str`
+    // 走文档反序列化（f2ea4d5 升 toml 1.2 后的适配，否则通道开关恒回落停用）。
+    let Ok(doc) = toml::from_str::<toml::Value>(raw) else {
         tracing::warn!("config.toml 无法按 TOML 解析，通道开关按缺省（全停用）处理");
         return ChannelFlags::default();
     };

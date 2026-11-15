@@ -2488,20 +2488,20 @@
           "after": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/HoldingSnapshot"
               },
               {
-                "$ref": "#/components/schemas/HoldingSnapshot"
+                "type": "null"
               }
             ]
           },
           "before": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/HoldingSnapshot"
               },
               {
-                "$ref": "#/components/schemas/HoldingSnapshot"
+                "type": "null"
               }
             ]
           },
@@ -3225,11 +3225,11 @@
           "holding_after": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/HoldingRow",
                 "description": "清仓后为 null（持仓行已移除）"
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -3481,11 +3481,11 @@
           "meta": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/NewHoldingMeta",
                 "description": "首笔建仓必带；标的已存在于 holdings 时可省略"
+              },
+              {
+                "type": "null"
               }
             ]
           },
