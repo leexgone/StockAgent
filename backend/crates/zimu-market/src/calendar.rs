@@ -156,6 +156,9 @@ mod tests {
                 None => Err(MarketError::Unavailable("sidecar 挂了".into())),
             }
         }
+        async fn sector_map(&self) -> MarketResult<crate::models::SectorMapPayload> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]

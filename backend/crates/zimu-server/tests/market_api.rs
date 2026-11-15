@@ -235,6 +235,100 @@ async fn refresh_writes_limit_pct_only_when_unconfigured() {
     assert_eq!(h["holdings"][0]["price"], json!(4.1));
 }
 
+#[tokio::test]
+async fn refresh_fills_sectors_and_response_carries_them() {
+    // P7-T6：刷新链顺带补空串 sector（股票查映射、ETF 按 kind），响应 portfolio 自带新 sector
+    let fake = FakeApi::new();
+    let today = today();
+    fake.set_quote(Ok(qpayload(vec![
+        qrow("sh600519", "stock", Some(1500.0), Some(1490.0), QuoteStatus::Ok, Some(&today)),
+        qrow("sh510300", "etf", Some(4.1), Some(4.05), QuoteStatus::Ok, Some(&today)),
+    ])));
+    fake.set_sector_map(Ok(zimu_market::models::SectorMapPayload {
+        as_of: "2026-11-15T10:00:00+08:00".into(),
+        count: 1,
+        source: Some("sina_sector".into()),
+        degraded: false,
+        attempts: vec![],
+        sectors: [("600519".to_string(), "酿酒行业".to_string())].into_iter().collect(),
+    }));
+    let s = Store::in_memory().unwrap();
+    s.set_account(&AccountRow { cash: 300_000.0, ..Default::default() }).unwrap();
+    for (code, name, kind, qty, price) in [
+        ("600519", "贵州茅台", Kind::Stock, 100, 1500.0),
+        ("510300", "沪深300ETF", Kind::Etf, 1000, 4.0),
+    ] {
+        s.record_trade(&TradeRequest {
+            code: code.into(),
+            side: Side::Buy,
+            qty,
+            price,
+            note: String::new(),
+            meta: Some(NewHoldingMeta {
+                name: name.into(),
+                mkt: "SH".into(),
+                kind,
+                sector: "".into(),
+                prev: None,
+                limit_pct: None,
+            }),
+        })
+        .unwrap();
+    }
+    let base = spawn_api(fake, s).await;
+    let http = reqwest::Client::new();
+    let r = http.post(format!("{base}/api/market/refresh")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let v: Value = r.json().await.unwrap();
+    assert_eq!(v["updated"], json!(2));
+    let hs = v["portfolio"]["holdings"].as_array().unwrap();
+    let sec = |code: &str| {
+        hs.iter().find(|h| h["code"] == code).unwrap()["sector"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(sec("600519"), "酿酒行业", "空串股票查映射补全");
+    assert_eq!(sec("510300"), "基金", "ETF 按 kind 单列");
+    let agg_sectors = v["portfolio"]["agg"]["sectors"].as_array().unwrap();
+    assert!(agg_sectors.iter().any(|x| x["name"] == "酿酒行业"));
+}
+
+#[tokio::test]
+async fn refresh_sector_map_down_still_returns_200() {
+    // 映射源挂（sector_map 缺省不可达）→ 行情照写、refresh 200，股票 sector 留空不伪造
+    let fake = FakeApi::new();
+    let today = today();
+    fake.set_quote(Ok(qpayload(vec![qrow(
+        "sh600519", "stock", Some(1500.0), Some(1490.0), QuoteStatus::Ok, Some(&today),
+    )])));
+    let s = Store::in_memory().unwrap();
+    s.set_account(&AccountRow { cash: 300_000.0, ..Default::default() }).unwrap();
+    s.record_trade(&TradeRequest {
+        code: "600519".into(),
+        side: Side::Buy,
+        qty: 100,
+        price: 1500.0,
+        note: String::new(),
+        meta: Some(NewHoldingMeta {
+            name: "贵州茅台".into(),
+            mkt: "SH".into(),
+            kind: Kind::Stock,
+            sector: "".into(),
+            prev: None,
+            limit_pct: None,
+        }),
+    })
+    .unwrap();
+    let base = spawn_api(fake, s).await;
+    let http = reqwest::Client::new();
+    let r = http.post(format!("{base}/api/market/refresh")).send().await.unwrap();
+    assert_eq!(r.status(), 200, "映射失败不阻断行情刷新");
+    let v: Value = r.json().await.unwrap();
+    assert_eq!(v["updated"], json!(1));
+    assert_eq!(v["portfolio"]["holdings"][0]["sector"], json!(""));
+}
+
 // ============================================================================
 // 降级：sidecar 挂了主程序不瘫
 // ============================================================================

@@ -48,10 +48,14 @@ pub struct QuoteRow {
     pub source: Option<String>,
 }
 
+// sidecar wire 键是 `error`（errors.py `attempt()`），本结构体字段名 `reason`
+// （Rust→前端契约沿用 reason）——`alias` 桥接两者，真实降级响应方可反序列化。
+// 用普通注释而非 ///：避免改动 OpenAPI 的 Attempt description（alias 本身 schema 中性）。
 /// 降级明细：逐源原因（disabled/熔断/异常），04 附录 B「降级可观测」。
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Attempt {
     pub source: String,
+    #[serde(alias = "error")]
     pub reason: String,
 }
 
@@ -174,6 +178,21 @@ pub struct CalendarPayload {
     pub attempts: Vec<Attempt>,
 }
 
+/// sidecar `/sector_map`（P7-T6/ADR-0016）：6 位代码 → 新浪行业板名全量映射。
+/// 内部探测类型（SidecarHealth 同款）：不经主程序 REST 透出，**不 derive ToSchema、
+/// 不进 OpenAPI**（wire 契约零改动）。ETF/转债有意缺席——kind 归类（基金/转债）
+/// 是 Rust 侧业务口径，sidecar 不推断。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectorMapPayload {
+    pub as_of: String,
+    pub count: usize,
+    pub source: Option<String>,
+    pub degraded: bool,
+    #[serde(default)]
+    pub attempts: Vec<Attempt>,
+    pub sectors: std::collections::HashMap<String, String>,
+}
+
 /// sidecar `/healthz`：只取 ok/version 强类型，其余（breakers/cache/
 /// disabled_sources）原样透传——运维排查用，不参与业务判断。
 /// 内部探测类型，不进 API 契约（status 端点响应是 server 侧的 SidecarStatus）。
@@ -279,6 +298,23 @@ mod tests {
         }"#;
         let r: QuoteRow = serde_json::from_str(raw).unwrap();
         assert_eq!(r.status, QuoteStatus::Unknown);
+    }
+
+    #[test]
+    fn deserialize_sector_map_with_degraded_attempts() {
+        // 部分板降级：attempts 用 sidecar 真实 wire 键 `error`（alias 桥接 reason）
+        let raw = r#"{
+          "as_of": "2026-11-15T10:00:00+08:00", "count": 2, "source": "sina_sector",
+          "degraded": true,
+          "attempts": [{"source": "sina_sector", "error": "板块成分缺失：new_xxx: ConnectionError"}],
+          "sectors": {"600519": "酿酒行业", "600011": "电力行业"}
+        }"#;
+        let p: SectorMapPayload = serde_json::from_str(raw).unwrap();
+        assert_eq!(p.count, 2);
+        assert!(p.degraded);
+        assert_eq!(p.attempts[0].reason, "板块成分缺失：new_xxx: ConnectionError");
+        assert_eq!(p.sectors.get("600519").map(String::as_str), Some("酿酒行业"));
+        assert_eq!(p.sectors.get("999999"), None);
     }
 
     #[test]

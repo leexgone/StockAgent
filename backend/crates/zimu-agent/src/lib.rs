@@ -32,6 +32,7 @@ pub mod tools;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use zimu_market::calendar::CalendarCache;
+use zimu_market::sector::SectorMapCache;
 use zimu_market::MarketApi;
 use zimu_store::Store;
 
@@ -52,6 +53,9 @@ pub struct AgentDeps {
     /// 日历缓存（1h TTL）：market_status 工具的时钟输入。与 server HTTP 侧
     /// MarketState 的缓存各自独立——多打一次 sidecar 无害，换来 crate 间零耦合。
     pub calendar: CalendarCache,
+    /// 行业映射缓存（24h TTL，P7-T6）：刷新链顺带补空串 sector 的映射输入。
+    /// 与 server HTTP 侧 MarketState 的缓存各自独立（同 calendar 的零耦合取舍）。
+    pub sector_map: SectorMapCache,
 }
 
 impl AgentDeps {
@@ -60,6 +64,7 @@ impl AgentDeps {
             store,
             market,
             calendar: CalendarCache::default(),
+            sector_map: SectorMapCache::default(),
         })
     }
 }

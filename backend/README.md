@@ -13,7 +13,8 @@ P4-T6 换装与 server 相同的领域工具面与 Skill）、`zimu-domain`（P3
 `zimu-store`（P4-T1/T2 存储层：SQLite schema + 迁移 + 录入事务 + 建议/预警/
 快照/推送日志读写，校验复用 zimu-domain，`cargo test -p zimu-store`）与
 `zimu-market`（P4-T4 行情适配器：datafetch sidecar 的**唯一消费入口**——类型化
-契约、降级三分类、市场时钟、当日 bar 合成，`cargo test -p zimu-market`）。
+契约、降级三分类、市场时钟、当日 bar 合成、行业映射缓存 `SectorMapCache`（P7-T6），
+`cargo test -p zimu-market`）。
 
 ## 运行 zimu-server
 
@@ -112,7 +113,7 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `get_holdings` | 只读 | 组合全景（store.portfolio → recalc）+ 纪律四条 |
 | `calc_discipline` | 只读 | 03 §6 四条体检；单票超限附 `reduce_hint`（sell_to 降仓股数） |
 | `simulate_trade` | 只读 | 试算（费用/摊薄/整手/涨跌停拦截，03 §1–§4），不落库 |
-| `refresh_quotes` | 写行情字段 | 与 `POST /api/market/refresh` **同一条链**（`service::refresh_portfolio`，P4-T6 抽取，契约 wire 零变化） |
+| `refresh_quotes` | 写行情字段 + 补空串行业 | 与 `POST /api/market/refresh` **同一条链**（`service::refresh_portfolio`，P4-T6 抽取；行业补全 P7-T6/ADR-0016，契约 wire 零变化） |
 | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice::score_advice`（03 §10 生产口径）出数 → 数字列直接留档（B9：`generated_at` + `data_version=adv-v1\|k=…\|q=…`）→ 返回 advice_id 与全部数字；日线拿不到**拒绝出建议** |
 | `finalize_advice` | 写 advice_history 文案列 | 模型文案只回填 reason/risks（risks 至少一条，03 §10）——**数字不经模型转写**（ADR-0007 结构性保证） |
 | `echo` | 只读 | P2-T2 链路验证保留（网关排查不依赖数据） |
@@ -252,7 +253,7 @@ sidecar（`datafetch/`，默认 `http://127.0.0.1:8300`）的**唯一消费入�
 | `GET /api/market/kline/{symbol}?kind&start&end&with_today` | 日线透传；`with_today=true` 用实时行情合成当日 bar（响应带 `today_synthesized`，盘中该 bar 随行就市非定稿） |
 | `GET /api/market/cb_list` | 转债列表（现券 + 强赎）透传 |
 | `GET /api/market/calendar?start&end` | 交易日历透传（默认窗口今天 ±180 天，适配层缓存 1h） |
-| `POST /api/market/refresh` | 拉全部持仓实时行情 → 回写 `price/prev/name` + `limit_pct` 推断（仅未配置时，ETF 不推断）→ `recalc()` 全量重算并返回组合全景；无行情标的（停牌/no_data）保持库存旧值并进 `skipped` |
+| `POST /api/market/refresh` | 拉全部持仓实时行情 → 回写 `price/prev/name` + `limit_pct` 推断（仅未配置时，ETF 不推断）→ **补空串行业**（P7-T6：遍历全部持仓含停牌退市，股票查 `/sector_map`、ETF=基金/转债=转债，手工值不覆盖、映射失败不阻断）→ `recalc()` 全量重算并返回组合全景；无行情标的（停牌/no_data）保持库存旧值并进 `skipped` |
 
 数字口径链路：`/api/market/refresh` 与 `/api/holdings` 的 `per/agg` 只出自
 `zimu-domain::recalc`（黄金向量锁死）；无行情降级按 `03` §5（`prev` 缺失视为
@@ -272,8 +273,8 @@ cargo test -p zimu-market -p zimu-server   # 适配器 29 项 + server（集成 
 
 **前后端类型同源**：API 响应/请求全部是类型化 serde 结构体（`json!` 临时拼装
 已清除），在定义处 `#[derive(ToSchema)]`（zimu-domain / zimu-store /
-zimu-market / zimu-server 四 crate），`src/openapi.rs` 的 `ApiDoc`（utoipa 5）
-汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（42 schema、23 路径；文档
+zimu-market / zimu-server 四 crate），`src/openapi.rs` 的 `ApiDoc`（utoipa 6）
+汇编成 OpenAPI 3.1 → **`docs/api/openapi.json`**（52 schema、29 路径；文档
 永不手改）。前端 `npm run gen:api`（openapi-typescript）生成
 `src/api/schema.d.ts`，P5-T1 的 API client 直接消费。运行时
 `GET /api/openapi.json` 提供同一文档。
@@ -285,7 +286,7 @@ draft 2020-12）三连：
    会直接红）；
 2. seeded 测试服务（FakeApi 注入，`tests/common/` 共享装置）全端点**实时
    响应**过其声明的响应 schema，含 422/404/400/503 错误契约；
-3. **`fixtures/api/` 25 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
+3. **`fixtures/api/` 35 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
 
 health/chat 实现在 bin（依赖 robit 装配），契约在 `openapi.rs` 以 doc-stub
 声明、类型定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化键集 == schema

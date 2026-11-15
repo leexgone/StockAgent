@@ -26,6 +26,7 @@ pub struct FakeApi {
     kline: Shared<MarketResult<KlinePayload>>,
     cb: Shared<MarketResult<CbListPayload>>,
     calendar: Shared<MarketResult<CalendarPayload>>,
+    sector_map: Shared<MarketResult<SectorMapPayload>>,
     health: Shared<MarketResult<SidecarHealth>>,
     calls: Shared<Vec<String>>,
 }
@@ -41,6 +42,7 @@ impl FakeApi {
             kline: Arc::new(Mutex::new(down())),
             cb: Arc::new(Mutex::new(down())),
             calendar: Arc::new(Mutex::new(down())),
+            sector_map: Arc::new(Mutex::new(down())),
             health: Arc::new(Mutex::new(down())),
             calls: Arc::new(Mutex::new(Vec::new())),
         }
@@ -56,6 +58,9 @@ impl FakeApi {
     }
     pub fn set_calendar(&self, r: MarketResult<CalendarPayload>) {
         *self.calendar.lock().unwrap() = r;
+    }
+    pub fn set_sector_map(&self, r: MarketResult<SectorMapPayload>) {
+        *self.sector_map.lock().unwrap() = r;
     }
     pub fn set_health(&self, r: MarketResult<SidecarHealth>) {
         *self.health.lock().unwrap() = r;
@@ -102,6 +107,10 @@ impl MarketApi for FakeApi {
     ) -> MarketResult<CalendarPayload> {
         self.log("calendar");
         self.calendar.lock().unwrap().clone()
+    }
+    async fn sector_map(&self) -> MarketResult<SectorMapPayload> {
+        self.log("sector_map");
+        self.sector_map.lock().unwrap().clone()
     }
 }
 

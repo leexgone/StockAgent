@@ -4,8 +4,8 @@
 //! P4-T6 抽到这里——`POST /api/market/refresh` 与 agent 的 `refresh_quotes` 工具
 //! 走同一条链，口径不分叉：symbol 拼装（B7 显式 mkt）→ 行情过滤（04 附录 B：
 //! 仅 status=ok 且 price>0 回写；limit_pct 仅数据层未配置时推断，走
-//! `zimu-domain::price_limit`）→ `apply_quotes` → `store.portfolio()`
-//! （`zimu-domain::recalc` 全量重算）。
+//! `zimu-domain::price_limit`）→ `apply_quotes` → **行业补全 pass（P7-T6）** →
+//! `store.portfolio()`（`zimu-domain::recalc` 全量重算）。
 //!
 //! 响应类型（`SkippedRow` / `RefreshResponse`）随迁移进本 crate，wire 形状与
 //! OpenAPI 组件名不变（server 侧 `pub use` 再导出，契约文档逐字节一致）。
@@ -18,9 +18,10 @@ use utoipa::ToSchema;
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::MarketError;
 use zimu_market::models::{Attempt, QuoteStatus};
+use zimu_market::sector::SectorMapCache;
 use zimu_market::symbols::symbol_of;
 use zimu_market::MarketApi;
-use zimu_store::{PortfolioView, QuoteUpdate};
+use zimu_store::{HoldingRow, PortfolioView, QuoteUpdate};
 
 use crate::{lock, SharedStore};
 
@@ -61,8 +62,11 @@ pub enum RefreshError {
 pub async fn refresh_portfolio(
     store: &SharedStore,
     api: &dyn MarketApi,
+    sectors: &SectorMapCache,
 ) -> Result<RefreshResponse, RefreshError> {
-    refresh_portfolio_detailed(store, api).await.map(|(r, _)| r)
+    refresh_portfolio_detailed(store, api, sectors)
+        .await
+        .map(|(r, _)| r)
 }
 
 /// 与 [`refresh_portfolio`] 同一条链，额外返回本轮 quote 原始行——调度器
@@ -71,6 +75,7 @@ pub async fn refresh_portfolio(
 pub async fn refresh_portfolio_detailed(
     store: &SharedStore,
     api: &dyn MarketApi,
+    sectors: &SectorMapCache,
 ) -> Result<(RefreshResponse, Vec<zimu_market::models::QuoteRow>), RefreshError> {
     let holdings = lock(store).holdings().map_err(store_err)?;
 
@@ -154,6 +159,10 @@ pub async fn refresh_portfolio_detailed(
     }
 
     let updated = lock(store).apply_quotes(&updates).map_err(store_err)?;
+    // 行业补全（P7-T6/ADR-0016）：顺带挂刷新链，遍历全量持仓（含停牌退市），仅补
+    // 空串 sector。永不 Err——映射/写库失败都不阻断行情回写（recalc 在补全后跑，
+    // 响应 portfolio 自带新 sector）。
+    fill_missing_sectors(store, api, sectors, &holdings).await;
     let view = lock(store).portfolio().map_err(store_err)?;
 
     let resp = RefreshResponse {
@@ -169,4 +178,62 @@ pub async fn refresh_portfolio_detailed(
 
 fn store_err(e: impl std::fmt::Display) -> RefreshError {
     RefreshError::Store(e.to_string())
+}
+
+/// ETF/转债单列类别（ADR-0016/03 §6）：按 kind 判定，不查行业映射。
+const SECTOR_ETF: &str = "基金";
+const SECTOR_CB: &str = "转债";
+
+/// 行业补全 pass（P7-T6/ADR-0016）：遍历**全部持仓**（含停牌/退市，不被 quote
+/// 状态门控——sector 是标的属性），仅补空串 sector。ETF/转债按 kind 归类；股票查
+/// `SectorMapCache`（失败退 stale，仍无则跳过股票补全）。手工非空值永不覆盖
+/// （store `fill_sectors` 的 `WHERE sector=''` 承接）。**永不 Err**：内部吞错记日志，
+/// 行情回写不受影响；不写 holding_edits（数据层富化非用户校正，行情回写同款）。
+async fn fill_missing_sectors(
+    store: &SharedStore,
+    api: &dyn MarketApi,
+    sectors: &SectorMapCache,
+    holdings: &[HoldingRow],
+) {
+    use zimu_domain::Kind;
+    let mut fills: Vec<(String, String)> = Vec::new();
+    let mut need_map = false;
+    for h in holdings {
+        if !h.sector.is_empty() {
+            continue; // 只补空串：手工/已补值永不覆盖
+        }
+        match h.kind {
+            Kind::Etf => fills.push((h.code.clone(), SECTOR_ETF.into())),
+            Kind::Cb => fills.push((h.code.clone(), SECTOR_CB.into())),
+            Kind::Stock => need_map = true,
+        }
+    }
+    if need_map {
+        let map = match sectors.get(api).await {
+            Ok(p) => Some(p),
+            Err(e) => {
+                tracing::warn!("行业映射获取失败，本轮跳过股票 sector 补全：{e}");
+                sectors.stale().map(|(p, _)| p)
+            }
+        };
+        if let Some(p) = map {
+            for h in holdings
+                .iter()
+                .filter(|h| matches!(h.kind, Kind::Stock) && h.sector.is_empty())
+            {
+                if let Some(sec) = p.sectors.get(&h.code) {
+                    fills.push((h.code.clone(), sec.clone()));
+                } // 未映射（新股/退市）：留空串，不伪造
+            }
+        }
+    }
+    if fills.is_empty() {
+        return;
+    }
+    let ts = now_shanghai().format("%Y-%m-%d %H:%M").to_string();
+    match lock(store).fill_sectors(&fills, &ts) {
+        Ok(n) if n > 0 => tracing::info!("sector 自动补全 {n} 行（P7-T6）"),
+        Err(e) => tracing::warn!("sector 补全写库失败（行情回写不受影响）：{e}"),
+        _ => {}
+    }
 }

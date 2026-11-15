@@ -11,7 +11,7 @@
    调用方（P4-T4 Rust 适配器）能区分「主源正常」与「凑合活着」。
 
 源链与签名：`/quote` fn(symbols)；`/kline` fn(symbol, start, end)；
-`/cb_list` fn()；`/calendar` fn(start, end)。测试从构造函数注入假源，
+`/cb_list` fn()；`/calendar` fn(start, end)；`/sector_map` fn(gap)。测试从构造函数注入假源，
 不打网络；生产缺省即用 `DEFAULT_*_CHAIN`（`create_app()` 装配）。
 
 口径边界：这里只做**通道路由与原始行归一**，不定义任何业务口径——
@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
@@ -39,6 +40,7 @@ from .config import (
     SINA_ETF_DAILY,
     SINA_HQ,
     SINA_INDEX_DAILY,
+    SINA_SECTOR,
     SINA_STOCK_DAILY,
     TENCENT_QT,
     Settings,
@@ -80,6 +82,8 @@ DEFAULT_CALENDAR_CHAIN: list[tuple[str, Callable]] = [
     (SINA_CALENDAR, SRC.calendar_sina),
     (BAOSTOCK_CALENDAR, SRC.calendar_baostock),
 ]
+# 行业映射（P7-T6）：新浪单源（东财被拦/baostock 粗分类不用，ADR-0016）；全败 502 诚实降级
+DEFAULT_SECTOR_CHAIN: list[tuple[str, Callable]] = [(SINA_SECTOR, SRC.sina_sector_map)]
 
 
 def _now_iso() -> str:
@@ -98,6 +102,7 @@ class MarketService:
         cb_spot_sources=None,
         cb_redeem_sources=None,
         calendar_sources=None,
+        sector_sources=None,
     ):
         self.s = settings or Settings.from_env()
         self.cache = TTLCache()
@@ -108,6 +113,8 @@ class MarketService:
         self.cb_spot_sources = cb_spot_sources or DEFAULT_CB_SPOT_CHAIN
         self.cb_redeem_sources = cb_redeem_sources or DEFAULT_CB_REDEEM_CHAIN
         self.calendar_sources = calendar_sources or DEFAULT_CALENDAR_CHAIN
+        self.sector_sources = sector_sources or DEFAULT_SECTOR_CHAIN
+        self._sector_build_lock = threading.Lock()  # singleflight：建映射重（1+49 外呼），防并发重复建
 
     # ---------- 治理 ----------
 
@@ -289,6 +296,38 @@ class MarketService:
         }
         self.cache.set("cb:list", payload, self.s.cb_ttl)
         return payload
+
+    # ---------- /sector_map ----------
+
+    def sector_map(self) -> dict:
+        """全量「6 位代码→新浪行业板名」映射（P7-T6/ADR-0016）。日级 TTL + singleflight。
+
+        建映射重（1+49 次外呼 30–90s），并发请求不得重复建——锁内双检缓存。
+        部分板失败 → 降级缓存部分映射（缺码留空次日 TTL 再补）；spot 失败或映射空
+        → 502。ETF/转债有意缺席（kind 归类在 Rust 侧）。低频标的属性，不进分钟级轮询。
+        """
+        hit = self.cache.get("sector:map")
+        if hit is not None:
+            return hit
+        with self._sector_build_lock:
+            hit = self.cache.get("sector:map")
+            if hit is not None:
+                return hit
+            (mapping, failed), used, attempts = self._chain(
+                self.sector_sources,
+                lambda fn: fn(self.s.gates.get(SINA_SECTOR, self.s.gate_default)),
+            )
+            if not mapping:
+                raise all_failed(attempts + [attempt(
+                    used or SINA_SECTOR, "全部板块成分获取失败（映射为空）")])
+            attempts = attempts + [attempt(used, f"板块成分缺失：{m}") for m in failed]
+            payload = {
+                "as_of": _now_iso(), "count": len(mapping), "source": used,
+                "degraded": bool(attempts), "attempts": attempts,
+                "sectors": mapping,
+            }
+            self.cache.set("sector:map", payload, self.s.sector_ttl)
+            return payload
 
     # ---------- /calendar ----------
 

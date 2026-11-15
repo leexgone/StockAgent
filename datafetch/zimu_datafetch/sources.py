@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 
 import akshare as ak
 import pandas as pd
@@ -351,6 +352,32 @@ def cb_redeem_jsl() -> dict[str, dict]:
             "redeem_hint": _strip_html(r["强赎天计数"]),
         }
     return out
+
+
+# ---------- 行业映射（P7-T6） ----------
+
+def sina_sector_map(gap: float) -> tuple[dict[str, str], list[str]]:
+    """新浪行业板全量映射：1 次 spot（49 板）+ N 次 detail（成分股）。
+
+    返回 (code→板名, 失败板明细)。`gap` = 板间最小间隔——RateGate 只管源函数级
+    间隔，函数内 N 次外呼的 pacing 在这里自行执行（礼貌限频）。单板 detail 失败
+    跳过该板（记 failed）不整链失败；spot 失败即抛 → 兜底链。ETF/转债不在股票
+    行业板内，有意缺席（kind 归类是 Rust 侧业务口径，sidecar 不推断）。
+    """
+    spot = ak.stock_sector_spot(indicator="新浪行业")
+    out: dict[str, str] = {}
+    failed: list[str] = []
+    for label, name in zip(spot["label"], spot["板块"]):
+        if gap > 0:
+            time.sleep(gap)
+        try:
+            detail = ak.stock_sector_detail(sector=str(label))
+        except Exception as e:  # noqa: BLE001 —— 单板失败降级，不拖垮整张映射
+            failed.append(f"{label}: {type(e).__name__}: {e}")
+            continue
+        for c in detail["code"]:
+            out[str(c).zfill(6)] = str(name)
+    return out, failed
 
 
 # ---------- 交易日历 ----------

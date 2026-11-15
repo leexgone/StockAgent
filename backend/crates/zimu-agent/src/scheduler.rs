@@ -214,7 +214,7 @@ impl SchedulerCore {
         // 1) 行情刷新（与 HTTP refresh 同链）。失败 → 本轮不判定：
         //    不用库存旧价判——不伪造（03 §12）
         let (resp, quotes) =
-            match service::refresh_portfolio_detailed(&self.deps.store, &*self.deps.market).await {
+            match service::refresh_portfolio_detailed(&self.deps.store, &*self.deps.market, &self.deps.sector_map).await {
                 Ok(v) => v,
                 Err(RefreshError::Market(e)) => {
                     rep.notes
@@ -551,7 +551,7 @@ impl SchedulerCore {
             }
         }
         // 最终刷新（15:00 后行情冻结为收盘价）；失败 → 整链顺延下一轮，宁缺不写旧数
-        let view = match service::refresh_portfolio(&self.deps.store, &*self.deps.market).await {
+        let view = match service::refresh_portfolio(&self.deps.store, &*self.deps.market, &self.deps.sector_map).await {
             Ok(r) => r.portfolio,
             Err(RefreshError::Market(e)) => {
                 rep.notes

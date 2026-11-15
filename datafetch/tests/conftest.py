@@ -16,6 +16,7 @@ from zimu_datafetch.config import (
     SINA_CB_SPOT,
     SINA_CALENDAR,
     SINA_HQ,
+    SINA_SECTOR,
     Settings,
 )
 from zimu_datafetch.app import create_app
@@ -64,6 +65,7 @@ def make_settings(**over) -> Settings:
     from zimu_datafetch.config import DEFAULT_GATES
 
     base = dict(quote_ttl=30.0, kline_ttl=300.0, cb_ttl=300.0, calendar_ttl=600.0,
+                sector_ttl=600.0,
                 breaker_threshold=3, breaker_cooloff=60.0, disabled=frozenset(),
                 max_quote_symbols=50,
                 # 测试环境不等限频闸（真实节奏由生产默认值承担，见 config.DEFAULT_GATES）
@@ -77,7 +79,7 @@ def build_service(settings: Settings | None = None, *,
                   stock_a=None, stock_b=None, stock_c=None,
                   etf_a=None, index_a=None, cb_a=None,
                   cb_spot=None, cb_redeem=None,
-                  cal_a=None, cal_b=None):
+                  cal_a=None, cal_b=None, sector=None):
     """全类目假源服务。未显式传入的类目用「恒成功单源链」占位。
 
     注意：假源必须在函数内构造——可变的 Fake 做默认参数会跨用例共享计数。
@@ -125,6 +127,8 @@ def build_service(settings: Settings | None = None, *,
                        "redeem_hint": "临近到期 2026-10-28 最后交易"},
         }))],
         calendar_sources=cal,
+        sector_sources=[(SINA_SECTOR, sector or Fake((
+            {"600519": "酿酒行业", "600011": "电力行业"}, [])))],
     )
 
 

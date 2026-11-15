@@ -34,7 +34,7 @@ use zimu_market::clock::now_shanghai;
 use zimu_market::error::{MarketError, MarketResult};
 use zimu_market::models::{
     CalendarPayload, CbListPayload, KlineBar, KlinePayload, QuotePayload, QuoteRow, QuoteStatus,
-    SidecarHealth,
+    SectorMapPayload, SidecarHealth,
 };
 use zimu_market::MarketApi;
 use zimu_domain::Side;
@@ -49,6 +49,7 @@ struct FakeApi {
     quote: Mutex<Option<QuotePayload>>,
     kline: Mutex<Option<KlinePayload>>,
     calendar: Mutex<Option<CalendarPayload>>,
+    sector_map: Mutex<Option<SectorMapPayload>>,
     /// sidecar 整机开关：true = 全部端点 Unavailable（模拟 sidecar 挂了）
     down: AtomicBool,
 }
@@ -62,6 +63,9 @@ impl FakeApi {
     }
     fn set_kline(&self, p: KlinePayload) {
         *self.kline.lock().unwrap() = Some(p);
+    }
+    fn set_sector_map(&self, p: SectorMapPayload) {
+        *self.sector_map.lock().unwrap() = Some(p);
     }
     fn set_down(&self, down: bool) {
         self.down.store(down, Ordering::SeqCst);
@@ -119,6 +123,12 @@ impl MarketApi for FakeApi {
         match self.calendar.lock().unwrap().clone() {
             Some(p) if !self.down.load(Ordering::SeqCst) => Ok(p),
             _ => self.unavailable("calendar"),
+        }
+    }
+    async fn sector_map(&self) -> MarketResult<SectorMapPayload> {
+        match self.sector_map.lock().unwrap().clone() {
+            Some(p) if !self.down.load(Ordering::SeqCst) => Ok(p),
+            _ => self.unavailable("sector_map"),
         }
     }
 }
@@ -524,6 +534,123 @@ async fn refresh_quotes_writes_and_recalculates() {
     let tool2 = RefreshQuotesTool { deps: deps_with(store.clone(), fake2) };
     let err = exec_err(&tool2, json!({})).await;
     assert!(err.contains("不可达"), "{err}");
+}
+
+// ---- 行业补全（P7-T6/ADR-0016）----
+
+fn sector_quote_row(symbol: &str, code: &str, kind: &str) -> QuoteRow {
+    QuoteRow {
+        symbol: symbol.into(),
+        code: code.into(),
+        mkt: "SH".into(),
+        kind: kind.into(),
+        name: Some(format!("标的{code}")),
+        price: Some(10.0),
+        prev: Some(9.5),
+        open: None,
+        high: None,
+        low: None,
+        volume: Some(1000.0),
+        amount: None,
+        chg_pct: None,
+        date: Some("2026-11-15".into()),
+        time: Some("15:00:00".into()),
+        status: QuoteStatus::Ok,
+        source: Some("fake_hq".into()),
+    }
+}
+
+fn sector_test_quote() -> QuotePayload {
+    QuotePayload {
+        as_of: "2026-11-15T15:00:00+08:00".into(),
+        count: 4,
+        degraded: false,
+        attempts: vec![],
+        quotes: vec![
+            sector_quote_row("sh600519", "600519", "stock"),
+            sector_quote_row("sh510300", "510300", "etf"),
+            sector_quote_row("sh113050", "113050", "cb"),
+            sector_quote_row("sh601166", "601166", "stock"),
+        ],
+    }
+}
+
+/// 四持仓：空串股票/ETF/转债 + 手工非空股票（601166）
+fn sector_test_store() -> SharedStore {
+    let s = Store::in_memory().unwrap();
+    s.set_account(&AccountRow { cash: 1_000_000.0, ..AccountRow::default() }).unwrap();
+    for (code, kind, sector) in [
+        ("600519", zimu_domain::Kind::Stock, ""),
+        ("510300", zimu_domain::Kind::Etf, ""),
+        ("113050", zimu_domain::Kind::Cb, ""),
+        ("601166", zimu_domain::Kind::Stock, "手工银行"),
+    ] {
+        s.record_trade(&TradeRequest {
+            code: code.into(),
+            side: Side::Buy,
+            qty: 100,
+            price: 10.0,
+            note: String::new(),
+            meta: Some(NewHoldingMeta {
+                name: format!("标的{code}"),
+                mkt: "SH".into(),
+                kind,
+                sector: sector.into(),
+                prev: None,
+                limit_pct: None,
+            }),
+        })
+        .unwrap();
+    }
+    Arc::new(Mutex::new(s))
+}
+
+#[tokio::test]
+async fn refresh_quotes_fills_empty_sectors() {
+    let store = sector_test_store();
+    let fake = FakeApi::arc();
+    fake.set_quote(sector_test_quote());
+    fake.set_sector_map(SectorMapPayload {
+        as_of: "2026-11-15T10:00:00+08:00".into(),
+        count: 2,
+        source: Some("sina_sector".into()),
+        degraded: false,
+        attempts: vec![],
+        sectors: [
+            ("600519".to_string(), "酿酒行业".to_string()),
+            ("601166".to_string(), "金融行业".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+    });
+    let tool = RefreshQuotesTool { deps: deps_with(store.clone(), fake) };
+    let out = exec(&tool, json!({})).await;
+    assert_eq!(out["updated"], 4);
+    let hs = zimu_agent::lock(&store).holdings().unwrap();
+    let sec = |code: &str| hs.iter().find(|h| h.code == code).unwrap().sector.clone();
+    assert_eq!(sec("600519"), "酿酒行业", "空串股票查映射补全");
+    assert_eq!(sec("510300"), "基金", "ETF 按 kind 单列");
+    assert_eq!(sec("113050"), "转债", "转债按 kind 单列");
+    assert_eq!(sec("601166"), "手工银行", "手工非空值不被映射覆盖");
+    // 响应 portfolio 自带补全后的 sector（recalc 在补全后跑）
+    let agg_sectors = out["portfolio"]["agg"]["sectors"].as_array().unwrap();
+    assert!(agg_sectors.iter().any(|s| s["name"] == "酿酒行业"));
+}
+
+#[tokio::test]
+async fn refresh_quotes_sector_map_down_still_writes_quotes() {
+    let store = sector_test_store();
+    let fake = FakeApi::arc();
+    fake.set_quote(sector_test_quote());
+    // sector_map 未配置 → unavailable；行情照写，股票 sector 留空，ETF/转债仍按 kind 补
+    let tool = RefreshQuotesTool { deps: deps_with(store.clone(), fake) };
+    let out = exec(&tool, json!({})).await; // 工具不报错
+    assert_eq!(out["updated"], 4, "行情回写不受映射失败影响");
+    let hs = zimu_agent::lock(&store).holdings().unwrap();
+    let sec = |code: &str| hs.iter().find(|h| h.code == code).unwrap().sector.clone();
+    assert_eq!(sec("600519"), "", "映射失败股票留空不伪造");
+    assert_eq!(sec("510300"), "基金", "ETF 不依赖映射仍补");
+    assert_eq!(sec("113050"), "转债", "转债不依赖映射仍补");
 }
 
 #[tokio::test]

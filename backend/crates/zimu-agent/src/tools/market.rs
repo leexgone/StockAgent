@@ -238,7 +238,7 @@ impl Tool for RefreshQuotesTool {
     }
 
     fn description(&self) -> &str {
-        "拉取全部持仓的实时行情并回写数据库，然后按 03 §5 口径全量重算组合（与界面顶栏刷新、POST /api/market/refresh 同一条链）。返回 as_of、updated 回写行数、skipped 未回写明细（停牌/退市等，保持库存旧值）、degraded/attempts 降级明细与重算后的组合全景 portfolio。生成盘后复盘、建议或任何组合级数字**之前**先调用本工具，确保数字是最新的；sidecar 不可达时如实报错，不写库、不动旧数字。"
+        "拉取全部持仓的实时行情并回写数据库，然后按 03 §5 口径全量重算组合（与界面顶栏刷新、POST /api/market/refresh 同一条链）。返回 as_of、updated 回写行数、skipped 未回写明细（停牌/退市等，保持库存旧值）、degraded/attempts 降级明细与重算后的组合全景 portfolio。顺带补全空串行业（P7-T6/ADR-0016：股票查新浪行业板映射、ETF=基金/转债=转债，遍历全部持仓含停牌退市，手工非空值不覆盖；映射失败不阻断行情回写）。生成盘后复盘、建议或任何组合级数字**之前**先调用本工具，确保数字是最新的；sidecar 不可达时如实报错，不写库、不动旧数字。"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -254,7 +254,7 @@ impl Tool for RefreshQuotesTool {
         _args: Value,
         _ctx: &ToolContext,
     ) -> robit_agent::error::Result<ToolResult> {
-        match service::refresh_portfolio(&self.deps.store, &*self.deps.market).await {
+        match service::refresh_portfolio(&self.deps.store, &*self.deps.market, &self.deps.sector_map).await {
             Ok(r) => Ok(ok_json(&r)),
             Err(RefreshError::Store(m)) => {
                 tracing::error!("刷新链存储错误：{m}");

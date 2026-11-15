@@ -17,6 +17,7 @@ pub mod client;
 pub mod clock;
 pub mod error;
 pub mod models;
+pub mod sector;
 pub mod symbols;
 pub mod synth;
 

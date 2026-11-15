@@ -22,7 +22,7 @@
 //! | `get_trades` | 只读（流水账本，最新在前） | `store.trades` |
 //! | `upsert_holding` | **写账本**（快照校正：整行覆盖 + holding_edits 留痕，三不动） | `store.upsert_holding`（03 §13，ADR-0013） |
 //! | `remove_holding` | **写账本**（删持仓行：流水保留、已实现不回滚、现金不动） | `store.remove_holding`（03 §13，ADR-0013） |
-//! | `refresh_quotes` | 写行情字段 | `service::refresh_portfolio`（与 HTTP API 同一条链） |
+//! | `refresh_quotes` | 写行情字段 + 补空串行业 | `service::refresh_portfolio`（与 HTTP API 同一条链；行业补全 P7-T6/ADR-0016） |
 //! | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice`（03 §10 生产口径，ADR-0007） |
 //! | `finalize_advice` | 写 advice_history 文案列 | risks 非空校验（03 §10） |
 //! | `echo` | 只读 | 链路验证（P2-T2） |

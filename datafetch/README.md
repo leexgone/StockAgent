@@ -4,7 +4,7 @@
 `zimu-server`**（P4-T4 起经 Rust 适配器接入），监听 `127.0.0.1`，不开公网入站。
 
 P2-T1 spike 的通道结论全部沿用（`docs/04` 附录）；本阶段把「能跑通」变成「坏了不崩」：
-兜底链 + 熔断 + 限频 + 缓存 + 错误契约，端点补齐 `/quote` `/kline` `/cb_list` `/calendar`。
+兜底链 + 熔断 + 限频 + 缓存 + 错误契约，端点补齐 `/quote` `/kline` `/cb_list` `/calendar` `/sector_map`。
 
 ## 运行
 
@@ -27,6 +27,7 @@ Windows 日常启动可直接用 `start_sidecar.ps1`（右键「使用 PowerShel
 | `GET /kline/{symbol}` | `kind=stock\|etf\|index\|cb`（可缺省，仅内部路由）、`start`/`end`（YYYYMMDD 或 YYYY-MM-DD，默认 400 天内） | 日线；股票 qfq、其余不复权；空结果 `200 count=0` 不是错 |
 | `GET /cb_list` | — | 转债全表：新浪现券 × 集思录强赎 join（字段见下）；集思录挂 → 强赎字段置 null 并标 `redeem_source: null`，不 502 |
 | `GET /calendar` | `start`/`end`（默认今天 ±180 天，**含未来交易日**） | `trade_dates[]`，`marketClock` 节假日/「下一交易日」的数据源 |
+| `GET /sector_map` | — | 行业映射（P7-T6/ADR-0016）：全量「6 位代码→新浪行业板名」`sectors` dict；ETF/转债有意缺席（kind 归类在 Rust 侧）；日级缓存 + singleflight，部分板失败降级缓存 |
 | `GET /healthz` | — | 版本、熔断器状态、缓存命中数、当前禁用源清单 |
 
 **代码必须带显式市场前缀**（`sh/sz/bj` + 6 位数字）——B7 在 sidecar 侧的落实：
@@ -60,11 +61,12 @@ Windows 日常启动可直接用 `start_sidecar.ps1`（右键「使用 PowerShel
 | ETF/转债日线 | 仅新浪系（baostock 不覆盖场内 ETF/转债） | 全链挂即 502，诚实降级 |
 | 转债列表 | 新浪现券表（北交所定转按沪深覆盖范围过滤） × 集思录强赎表（低频，可缺） | 集思录字段全：转股价/触发价/正股价/强赎状态/最后交易日/剩余规模等 |
 | 交易日历 | akshare 新浪全量(1990 起，含未来) → baostock 区间 | |
+| 行业映射 | 新浪 `stock_sector_spot`(49 板) + 逐板 `stock_sector_detail` 成分股 | P7-T6/ADR-0016：东财被拦不用、baostock 证监会粗分类不用；建映射 1+49 外呼 30–90s，日级缓存 + singleflight；单板失败跳过该板降级（缺码留空次日再补） |
 
 - **缓存 TTL**（进程内，重启清零——权威数据在上游，这里丢的只是缓存）：
   `/quote` 按标的 3s（一次上游批量请求扇出多个调用方）；`/kline` 按 symbol+区间 300s；
-  `/cb_list` 整表 300s；`/calendar` 半天。全市场快照类重接口**不进分钟级轮询**，
-  靠缓存 + 限频闸双保险。
+  `/cb_list` 整表 300s；`/calendar` 半天；`/sector_map` 整表日级 86400s（板成员变化慢）。
+  全市场快照类重接口**不进分钟级轮询**，靠缓存 + 限频闸双保险。
 - **限频闸**：同源两次外呼强制最小间隔（新浪 hq 0.2s、东财直连 0.5s、集思录 2s 等，
   逐项可用 `ZIMU_DF_GATE_<源名大写>` 覆盖）。
 - **熔断**：按源连续失败 ≥3 → open 冷却 60s（期间直接跳下一源，不空等）；
@@ -83,7 +85,7 @@ curl "http://127.0.0.1:8300/kline/sh600519"                  # → 200：另一�
 curl "http://127.0.0.1:8300/healthz"                         # → 200
 ```
 
-单测（41 项，`uv run pytest`）覆盖兜底顺序、逐标的补齐（B14）、熔断跳源、
+单测（48 项，`uv run pytest`）覆盖兜底顺序、逐标的补齐（B14）、熔断跳源、
 注入、缓存、`no_data` 归一、错误契约形状、cb_list 降级、日历兜底、新浪/腾讯
 解析器纯函数（真实抓包样本）。退市回归样本：`sh110074`（定格价 →
 `halted_or_delisted`）、`sz127022`（空行 → `empty_or_delisted`）；新浪未收录
@@ -95,6 +97,7 @@ curl "http://127.0.0.1:8300/healthz"                         # → 200
 |---|---|---|
 | `ZIMU_DF_DISABLE` | 空 | 故障注入：逗号分隔源名（如 `sina_hq,tencent_qt,em_push2,sina_calendar`），链上直接跳过并记 attempt |
 | `ZIMU_DF_QUOTE_TTL` / `ZIMU_DF_KLINE_TTL` / `ZIMU_DF_CB_TTL` / `ZIMU_DF_CALENDAR_TTL` | 3 / 300 / 300 / 21600（秒） | 各类目缓存时长 |
+| `ZIMU_DF_SECTOR_TTL` | 86400（秒） | 行业映射缓存时长（P7-T6） |
 | `ZIMU_DF_BREAKER_THRESHOLD` / `ZIMU_DF_BREAKER_COOLOFF` | 3 / 60（秒） | 熔断阈值与冷却 |
 | `ZIMU_DF_GATE_<源名大写>` | 见 `config.DEFAULT_GATES` | 单源限频闸间隔 |
 | `ZIMU_DF_MAX_QUOTE_SYMBOLS` | 50 | 单次 `/quote` 合并上限 |
@@ -105,7 +108,9 @@ sidecar 只做**通道与行归一**，不定义任何业务口径：涨跌停�
 `zimu-domain`（`03` 唯一来源）；ETF 的 `limit_pct` 属标的属性，由数据层（holdings
 meta）配置携带，**不在 sidecar 推断**。成交量单位：股票/ETF 统一到股/份（东财通道
 ×100），指数成交量沿用源口径且契约不消费；转债日线成交量为源侧「张」口径，
-P4-T4 适配器接 `03` 时如需量比再校准。
+P4-T4 适配器接 `03` 时如需量比再校准。行业（`sector`）同属标的属性：`/sector_map`
+只供「代码→新浪板名」原始映射，ETF/转债的类别归类（基金/转债）与「只补空串、
+手工值优先」的业务口径在 Rust 刷新链（ADR-0016），sidecar 不推断。
 
 ## 文件
 
@@ -119,7 +124,7 @@ P4-T4 适配器接 `03` 时如需量比再校准。
 | `zimu_datafetch/config.py` | 源名（契约字符串）与全部默认参数（env 可覆盖） |
 | `zimu_datafetch/errors.py` | `DfError` 与错误契约表 |
 | `zimu_datafetch/server.py` | uvicorn 入口 |
-| `tests/` | 36 项离线单测（假源注入，不打网络） |
+| `tests/` | 48 项离线单测（假源注入，不打网络） |
 | `spike_probe*.py` | P2-T1 三轮探测脚本（保留：通道结论的复现入口） |
 
 `pyproject.toml` / `uv.lock` 由 uv 管理（lock 入库）。spike 版 `app.py` 已由本包取代删除。

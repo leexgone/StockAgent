@@ -413,6 +413,120 @@ fn apply_quotes_unknown_code_skipped_silently() {
 }
 
 // ============================================================================
+// 行业补全（P7-T6/ADR-0016）
+// ============================================================================
+
+fn upsert_row(s: &Store, code: &str, sector: &str) {
+    s.upsert_holding(
+        &HoldingUpsert {
+            code: code.into(),
+            name: format!("标的{code}"),
+            mkt: "SH".into(),
+            kind: Kind::Stock,
+            sector: sector.into(),
+            shares: 100,
+            cost: 10.0,
+            limit_pct: None,
+            note: String::new(),
+        },
+        "2026-11-15 10:00",
+    )
+    .unwrap();
+}
+
+#[test]
+fn fill_sectors_fills_empty_only() {
+    let s = seed_store(100_000.0);
+    upsert_row(&s, "600519", ""); // 空串 → 应补
+    upsert_row(&s, "601166", "手工行业"); // 手工非空 → 永不覆盖
+    let n = s
+        .fill_sectors(
+            &[
+                ("600519".into(), "酿酒行业".into()),
+                ("601166".into(), "金融行业".into()),
+            ],
+            "2026-11-15 12:00",
+        )
+        .unwrap();
+    assert_eq!(n, 1, "只补空串行");
+    let hs = s.holdings().unwrap();
+    let h519 = hs.iter().find(|h| h.code == "600519").unwrap();
+    let h166 = hs.iter().find(|h| h.code == "601166").unwrap();
+    assert_eq!(h519.sector, "酿酒行业");
+    assert_eq!(h166.sector, "手工行业", "手工非空值不被自动覆盖");
+}
+
+#[test]
+fn fill_sectors_unknown_code_skipped_silently() {
+    let s = seed_store(100_000.0);
+    upsert_row(&s, "600519", "");
+    let n = s
+        .fill_sectors(
+            &[
+                ("600519".into(), "酿酒行业".into()),
+                ("999999".into(), "未知".into()),
+            ],
+            "2026-11-15 12:00",
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(s.holdings().unwrap().len(), 1);
+}
+
+#[test]
+fn fill_sectors_idempotent_second_call_zero() {
+    let s = seed_store(100_000.0);
+    upsert_row(&s, "600519", "");
+    let fills = [("600519".into(), "酿酒行业".into())];
+    assert_eq!(s.fill_sectors(&fills, "2026-11-15 12:00").unwrap(), 1);
+    assert_eq!(
+        s.fill_sectors(&fills, "2026-11-15 13:00").unwrap(),
+        0,
+        "二次幂等 0 行"
+    );
+}
+
+#[test]
+fn fill_sectors_touches_updated_at() {
+    let s = seed_store(100_000.0);
+    upsert_row(&s, "600519", "");
+    s.fill_sectors(&[("600519".into(), "酿酒行业".into())], "2026-11-15 12:00")
+        .unwrap();
+    assert_eq!(s.holdings().unwrap()[0].updated_at, "2026-11-15 12:00");
+}
+
+#[test]
+fn upsert_after_autofill_manual_wins() {
+    let s = seed_store(100_000.0);
+    upsert_row(&s, "600519", "");
+    s.fill_sectors(&[("600519".into(), "酿酒行业".into())], "2026-11-15 12:00")
+        .unwrap();
+    // 手工 upsert 整行覆盖（带新 sector）→ 手工恒赢
+    upsert_row(&s, "600519", "主人自定义");
+    assert_eq!(s.holdings().unwrap()[0].sector, "主人自定义");
+    // 此后自动补全不再碰（非空）
+    let n = s
+        .fill_sectors(&[("600519".into(), "酿酒行业".into())], "2026-11-15 14:00")
+        .unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(s.holdings().unwrap()[0].sector, "主人自定义");
+}
+
+#[test]
+fn upsert_clearing_sector_reenables_autofill() {
+    let s = seed_store(100_000.0);
+    upsert_row(&s, "600519", "酿酒行业");
+    // 用户把 sector 改回空串 = 重新请求自动分类（03 §13）
+    upsert_row(&s, "600519", "");
+    assert_eq!(s.holdings().unwrap()[0].sector, "");
+    let n = s
+        .fill_sectors(&[("600519".into(), "电力行业".into())], "2026-11-15 12:00")
+        .unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(s.holdings().unwrap()[0].sector, "电力行业");
+}
+
+// ============================================================================
 // 建议留档（P4-T6：B9 正式解的写入侧，ADR-0007 数字归规则/文字归模型）
 // ============================================================================
 

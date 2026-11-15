@@ -28,7 +28,7 @@ def create_app(settings=None, service: MarketService | None = None) -> FastAPI:
     app = FastAPI(
         title="zimu-datafetch",
         version=__version__,
-        description="子木行情 sidecar：/quote /kline /cb_list /calendar（契约见 README 与 docs/04 附录）",
+        description="子木行情 sidecar：/quote /kline /cb_list /calendar /sector_map（契约见 README 与 docs/04 附录）",
     )
     app.state.service = svc
 
@@ -68,6 +68,10 @@ def create_app(settings=None, service: MarketService | None = None) -> FastAPI:
     @app.get("/cb_list")
     def cb_list():
         return svc.cb_list()
+
+    @app.get("/sector_map")
+    def sector_map():
+        return svc.sector_map()
 
     @app.get("/calendar")
     def calendar(start: str | None = Query(None, description="默认今天-180 天"),

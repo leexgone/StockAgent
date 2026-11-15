@@ -991,6 +991,36 @@ impl Store {
             }
         }
     }
+
+    /// 批量补全行业（P7-T6/ADR-0016）——**仅写 sector='' 的行**（手工非空值永不
+    /// 被自动覆盖）。单事务全成或全不成；`code` 不存在静默跳过；返回实际写入行数。
+    /// 调用方保证 sector 非空。触 `updated_at`（行确实变了，apply_quotes 同款）；
+    /// **不写 holding_edits**（数据层富化非用户校正，行情回写同款）。
+    /// `WHERE sector=''` 天然幂等（二次调用 0 行），不用 CASE WHEN（避免白触非空行）。
+    pub fn fill_sectors(&self, fills: &[(String, String)], ts: &str) -> Result<usize> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| -> Result<usize> {
+            let mut n = 0;
+            for (code, sector) in fills {
+                n += self.conn.execute(
+                    "UPDATE holdings SET sector=?1, updated_at=?2
+                     WHERE code=?3 AND sector=''",
+                    params![sector, ts, code],
+                )?;
+            }
+            Ok(n)
+        })();
+        match result {
+            Ok(n) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(n)
+            }
+            Err(e) => {
+                self.conn.execute_batch("ROLLBACK").ok();
+                Err(e)
+            }
+        }
+    }
 }
 
 // ============================================================================

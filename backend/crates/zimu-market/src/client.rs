@@ -15,7 +15,8 @@ use serde::de::DeserializeOwned;
 
 use crate::error::{MarketError, MarketResult};
 use crate::models::{
-    CalendarPayload, CbListPayload, ErrorBody, KlinePayload, QuotePayload, SidecarHealth,
+    CalendarPayload, CbListPayload, ErrorBody, KlinePayload, QuotePayload, SectorMapPayload,
+    SidecarHealth,
 };
 
 /// sidecar 缺省地址（datafetch/README：`uv run uvicorn ... --port 8300`）
@@ -23,6 +24,9 @@ pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8300";
 /// 缺省整请求超时：quote 合并请求 ~0.3s、kline 单标的 ~1s，10s 足够宽又不至于
 /// 把 /api/market/* 挂死；sidecar 侧还有自己的限频排队。
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+/// `/sector_map` 单请求超时（P7-T6）：冷建映射 1+49 次新浪外呼可达 30–90s，
+/// 默认 10s 必超时——单请求覆盖客户端超时（reqwest per-request timeout）。
+pub const SECTOR_MAP_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[async_trait]
 pub trait MarketApi: Send + Sync {
@@ -45,6 +49,9 @@ pub trait MarketApi: Send + Sync {
         start: Option<&str>,
         end: Option<&str>,
     ) -> MarketResult<CalendarPayload>;
+    /// 全量「6 位代码→新浪行业板名」映射（P7-T6）。冷建可达分钟级，
+    /// 实现侧自带长超时（`SECTOR_MAP_TIMEOUT`）；调用方宜缓存（SectorMapCache）。
+    async fn sector_map(&self) -> MarketResult<SectorMapPayload>;
 }
 
 pub struct HttpMarketClient {
@@ -80,15 +87,27 @@ impl HttpMarketClient {
         path: &str,
         query: &[(&str, Option<&str>)],
     ) -> MarketResult<T> {
+        self.get_json_with_timeout(path, query, None).await
+    }
+
+    /// `timeout` Some = 单请求覆盖客户端缺省超时（sector_map 冷建用）；
+    /// None = 用客户端缺省。错误三分类逻辑两条路径共用。
+    async fn get_json_with_timeout<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, Option<&str>)],
+        timeout: Option<Duration>,
+    ) -> MarketResult<T> {
         let url = format!("{}{}", self.base, path);
         let pairs: Vec<(&str, &str)> = query
             .iter()
             .filter_map(|(k, v)| v.map(|v| (*k, v)))
             .collect();
-        let resp = self
-            .http
-            .get(&url)
-            .query(&pairs)
+        let mut req = self.http.get(&url).query(&pairs);
+        if let Some(t) = timeout {
+            req = req.timeout(t);
+        }
+        let resp = req
             .send()
             .await
             .map_err(|e| {
@@ -164,6 +183,11 @@ impl MarketApi for HttpMarketClient {
             &[("start", start), ("end", end)],
         )
         .await
+    }
+
+    async fn sector_map(&self) -> MarketResult<SectorMapPayload> {
+        self.get_json_with_timeout("/sector_map", &[], Some(SECTOR_MAP_TIMEOUT))
+            .await
     }
 }
 
@@ -264,6 +288,19 @@ mod tests {
         let c = HttpMarketClient::new(&base, Duration::from_secs(5)).unwrap();
         let err = c.quote(&["sh600519".into()]).await.unwrap_err();
         assert!(matches!(err, MarketError::Contract(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn sector_map_deserializes_typed_payload() {
+        let body = r#"{"as_of":"2026-11-15T10:00:00+08:00","count":2,"source":"sina_sector",
+          "degraded":false,"attempts":[],
+          "sectors":{"600519":"酿酒行业","600011":"电力行业"}}"#;
+        let base = spawn_fake(http_response("200 OK", body)).await;
+        let c = HttpMarketClient::new(&base, Duration::from_secs(5)).unwrap();
+        let p = c.sector_map().await.unwrap();
+        assert_eq!(p.count, 2);
+        assert_eq!(p.sectors.get("600519").map(String::as_str), Some("酿酒行业"));
+        assert!(!p.degraded);
     }
 
     #[tokio::test]

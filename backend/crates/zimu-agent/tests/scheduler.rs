@@ -26,7 +26,7 @@ use zimu_domain::Side;
 use zimu_market::error::{MarketError, MarketResult};
 use zimu_market::models::{
     CalendarPayload, CbItem, CbListPayload, KlineBar, KlinePayload, QuotePayload, QuoteRow,
-    QuoteStatus, SidecarHealth,
+    QuoteStatus, SectorMapPayload, SidecarHealth,
 };
 use zimu_market::MarketApi;
 use zimu_store::{AccountRow, NewAdvice, NewHoldingMeta, NewWatchlist, Store, TradeRequest};
@@ -41,10 +41,12 @@ struct FakeApi {
     kline: Mutex<Option<KlinePayload>>,
     cb: Mutex<Option<CbListPayload>>,
     calendar: Mutex<Option<CalendarPayload>>,
+    sector_map: Mutex<Option<SectorMapPayload>>,
     down: AtomicBool,
     quote_calls: AtomicUsize,
     kline_calls: AtomicUsize,
     cb_calls: AtomicUsize,
+    sector_calls: AtomicUsize,
 }
 
 impl FakeApi {
@@ -125,6 +127,17 @@ impl MarketApi for FakeApi {
             .unwrap()
             .clone()
             .ok_or_else(|| MarketError::Unavailable("calendar 未配置（测试）".into()))
+    }
+    async fn sector_map(&self) -> MarketResult<SectorMapPayload> {
+        self.sector_calls.fetch_add(1, Ordering::SeqCst);
+        if self.down.load(Ordering::SeqCst) {
+            return self.down_err();
+        }
+        self.sector_map
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| MarketError::Unavailable("sector_map 未配置（测试）".into()))
     }
 }
 
@@ -424,6 +437,54 @@ async fn simulated_intraday_triggers_alerts_and_dedups() {
     assert_eq!(fake.quote_calls.load(Ordering::SeqCst), 2); // 每分钟一轮
     // 日线量窗口当日缓存：第二轮不再拉 kline
     assert_eq!(fake.kline_calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn poll_fills_sectors_once() {
+    // P7-T6：空串 sector 股票经刷新链补全；sector_map 至多打一次（需求驱动 + Rust 缓存）
+    let s = Store::in_memory().unwrap();
+    s.set_account(&AccountRow { cash: 300_000.0, ..AccountRow::default() }).unwrap();
+    s.record_trade(&TradeRequest {
+        code: "600519".into(),
+        side: Side::Buy,
+        qty: 100,
+        price: 110.0,
+        note: String::new(),
+        meta: Some(NewHoldingMeta {
+            name: "贵州茅台".into(),
+            mkt: "SH".into(),
+            kind: zimu_domain::Kind::Stock,
+            sector: "".into(),
+            prev: None,
+            limit_pct: None,
+        }),
+    })
+    .unwrap();
+    let store: SharedStore = Arc::new(Mutex::new(s));
+
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 112.0, 110.0, 1000.0,
+    )]));
+    *fake.sector_map.lock().unwrap() = Some(SectorMapPayload {
+        as_of: "2026-10-29T10:00:00+08:00".into(),
+        count: 1,
+        source: Some("sina_sector".into()),
+        degraded: false,
+        attempts: vec![],
+        sectors: [("600519".to_string(), "酿酒行业".to_string())].into_iter().collect(),
+    });
+    let core = core_with(store.clone(), fake.clone(), None);
+
+    let rep = core.tick(sh(29, 10, 30)).await;
+    assert!(rep.polled);
+    assert_eq!(lock(&store).holdings().unwrap()[0].sector, "酿酒行业");
+    assert_eq!(fake.sector_calls.load(Ordering::SeqCst), 1);
+
+    // 第二轮：sector 已补（非空）→ 不再打 sector_map
+    let rep2 = core.tick(sh(29, 10, 31)).await;
+    assert!(rep2.polled);
+    assert_eq!(fake.sector_calls.load(Ordering::SeqCst), 1, "sector_map 至多一次");
 }
 
 #[tokio::test]

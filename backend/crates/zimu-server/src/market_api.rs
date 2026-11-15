@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use zimu_market::calendar::CalendarCache;
 use zimu_market::clock::{market_clock, now_shanghai, MarketClock};
+use zimu_market::sector::SectorMapCache;
 use zimu_market::error::MarketError;
 use zimu_market::models::{CalendarPayload, CbListPayload, KlinePayload, QuotePayload};
 use zimu_market::{synth, MarketApi};
@@ -47,6 +48,8 @@ pub struct MarketState {
     pub api: Arc<dyn MarketApi>,
     /// 日历缓存（1h；status 每秒被轮也不打 sidecar）
     pub calendar: CalendarCache,
+    /// 行业映射缓存（24h，P7-T6）：refresh 顺带补空串 sector 的映射输入
+    pub sector_map: SectorMapCache,
 }
 
 pub type SharedMarket = Arc<MarketState>;
@@ -55,6 +58,7 @@ pub fn new_market(api: Arc<dyn MarketApi>) -> SharedMarket {
     Arc::new(MarketState {
         api,
         calendar: CalendarCache::default(),
+        sector_map: SectorMapCache::default(),
     })
 }
 
@@ -401,7 +405,7 @@ pub(crate) async fn calendar(State(m): State<SharedMarket>, Query(q): Query<Cale
 )]
 pub(crate) async fn refresh(State((store, m)): State<(SharedStore, SharedMarket)>) -> Response {
     use zimu_agent::service::{refresh_portfolio, RefreshError};
-    match refresh_portfolio(&store, &*m.api).await {
+    match refresh_portfolio(&store, &*m.api, &m.sector_map).await {
         Ok(r) => Json(r).into_response(),
         Err(RefreshError::Store(msg)) => {
             tracing::error!("存储层错误：{msg}");

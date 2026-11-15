@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P4-T3 联网冒烟：真实通道走一遍四端点 + 故障注入验收「主源故障时降级不崩」。
+"""P4-T3 联网冒烟：真实通道走一遍五端点 + 故障注入验收「主源故障时降级不崩」。
 
 用法（在 datafetch/ 目录）：
     uv run python live_smoke.py
@@ -70,28 +70,46 @@ def main() -> int:
     fut = [d for d in cal["trade_dates"] if d > "2026-10-28"]
     check("/calendar 含未来交易日", cal["count"] > 20 and fut, f"count={cal['count']} 未来={fut[:3]}")
 
+    print("\n== A2. 行业映射（P7-T6，建映射 1+49 外呼，约 30–60s） ==")
+    sm = c.get("/sector_map").json()
+    check("/sector_map 全量映射", sm["count"] > 2000 and sm["source"] == "sina_sector",
+          f"count={sm['count']} degraded={sm['degraded']}")
+    check("行业板名映射正确", sm["sectors"].get("600519") == "酿酒行业"
+          and sm["sectors"].get("600011") == "电力行业",
+          f"600519={sm['sectors'].get('600519')} 600011={sm['sectors'].get('600011')}")
+    sm2 = c.get("/sector_map").json()
+    check("/sector_map 缓存命中", sm2["sectors"] == sm["sectors"])
+
     print("\n== B. 主源故障注入（ZIMU_DF_DISABLE=sina_hq） ==")
     c2 = app_with("sina_hq")
     q2 = c2.get("/quote", params={"codes": "sh600519,sh510300,sh000001"}).json()
-    ok = q2["count"] == 3 and q2["degraded"] and q2["quotes"][0]["source"] == "em-push2"
-    check("降级到东财不崩", ok, f"attempts={q2['attempts']}")
-    em, sina = q2["quotes"][0], q["quotes"][0]
-    if em["price"] and sina["price"]:
-        dev = abs(em["price"] - sina["price"]) / sina["price"]
-        check("东财 fltt=2 缩放与新浪一致", dev < 0.02, f"em={em['price']} sina={sina['price']} dev={dev:.4f}")
+    ok = q2["count"] == 3 and q2["degraded"] and q2["quotes"][0]["source"] == "tencent-qt"
+    check("降级到腾讯不崩（B14 二通道）", ok, f"attempts={q2['attempts']}")
+    bk, sina = q2["quotes"][0], q["quotes"][0]
+    if bk["price"] and sina["price"]:
+        dev = abs(bk["price"] - sina["price"]) / sina["price"]
+        check("备份通道价格与新浪一致", dev < 0.02, f"tencent={bk['price']} sina={sina['price']} dev={dev:.4f}")
 
-    print("\n== C. 实时链路全挂（disable sina_hq,em_push2） ==")
-    c3 = app_with("sina_hq,em_push2")
+    print("\n== C. 实时链路全挂（disable sina_hq,tencent_qt,em_push2） ==")
+    c3 = app_with("sina_hq,tencent_qt,em_push2")
     r = c3.get("/quote", params={"codes": "sh600519"})
     body = r.json()
     check("502 错误契约", r.status_code == 502 and body["error"]["code"] == "UPSTREAM_ALL_FAILED"
-          and len(body["error"]["detail"]["attempts"]) == 2)
+          and len(body["error"]["detail"]["attempts"]) == 3)
     k3 = c3.get("/kline/sh600519").json()
     check("日线链不受影响", k3["count"] > 0, f"source={k3['source']}")
     check("服务进程无恙", c3.get("/healthz").status_code == 200)
 
     bad = c3.get("/quote", params={"codes": "600519"})
     check("裸代码仍 400（B7）", bad.status_code == 400 and bad.json()["error"]["code"] == "BAD_SYMBOL")
+
+    print("\n== D. 行业源故障注入（ZIMU_DF_DISABLE=sina_sector） ==")
+    c4 = app_with("sina_sector")
+    r4 = c4.get("/sector_map")
+    check("行业源挂 502 契约", r4.status_code == 502
+          and r4.json()["error"]["code"] == "UPSTREAM_ALL_FAILED")
+    check("行情端点不受行业源影响",
+          c4.get("/quote", params={"codes": "sh600519"}).status_code == 200)
 
     n_ok = sum(1 for _, ok, _ in CHECKS if ok)
     print(f"\n汇总：{n_ok}/{len(CHECKS)} PASS")

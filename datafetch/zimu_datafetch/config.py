@@ -27,6 +27,7 @@ SINA_CB_SPOT = "sina_cb_spot"        # 转债全量实时表（akshare 新浪系
 JSL_CB_REDEEM = "jsl_cb_redeem"      # 集思录强赎表（低频）
 SINA_CALENDAR = "sina_calendar"
 BAOSTOCK_CALENDAR = "baostock_calendar"
+SINA_SECTOR = "sina_sector"          # 行业映射（P7-T6）：新浪行业板 spot + 逐板 detail（低频标的属性）
 
 # 上游最小请求间隔（秒）：同源两次外呼之间强制等待（spike 风险清单第 5 条）。
 # 新浪系与集思录按实测/礼貌值给；全市场快照类本就不进分钟级轮询（缓存兜住）。
@@ -45,6 +46,7 @@ DEFAULT_GATES: dict[str, float] = {
     JSL_CB_REDEEM: 2.0,
     SINA_CALENDAR: 5.0,
     BAOSTOCK_CALENDAR: 1.0,
+    SINA_SECTOR: 0.5,
 }
 
 
@@ -71,6 +73,7 @@ class Settings:
     kline_ttl: float = 300.0      # 日线（含当日 bar）：5 分钟够新
     cb_ttl: float = 300.0         # 转债列表：全表重接口，不进分钟级轮询
     calendar_ttl: float = 21600.0 # 交易日历：半天缓存
+    sector_ttl: float = 86400.0   # 行业映射（P7-T6）：日级缓存，板成员变化慢（建映射 1+49 次外呼 30–90s）
 
     # 熔断：连续失败 N 次 → open 冷却 T 秒，期间直接跳源（东财被拦时快速失败，适合切源而非等待）
     breaker_threshold: int = 3
@@ -99,6 +102,7 @@ class Settings:
             kline_ttl=_env_f("ZIMU_DF_KLINE_TTL", 300.0),
             cb_ttl=_env_f("ZIMU_DF_CB_TTL", 300.0),
             calendar_ttl=_env_f("ZIMU_DF_CALENDAR_TTL", 21600.0),
+            sector_ttl=_env_f("ZIMU_DF_SECTOR_TTL", 86400.0),
             breaker_threshold=_env_i("ZIMU_DF_BREAKER_THRESHOLD", 3),
             breaker_cooloff=_env_f("ZIMU_DF_BREAKER_COOLOFF", 60.0),
             gates=gates,
