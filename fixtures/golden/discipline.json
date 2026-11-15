@@ -82,6 +82,46 @@
       }
     },
     {
+      "id": "dc-unclassified-all",
+      "fn": "check",
+      "desc": "全空串行业（P7-T6/ADR-0016 口径）：U1/U2 sector='' 聚一无名桶 = 2000/2000×100 = 100% > 35 已触及（空串参与集中度，保守 fail-safe——不知道行业就当一坨集中）；单票最大 1000/10000 = 10% ≤ 25 安全；无转债 0 安全；现金 8000/10000 = 80% ≥ 10 安全",
+      "tags": ["boundary"],
+      "input": {
+        "cash": 8000.0,
+        "holdings": [
+          { "code": "U1", "kind": "stock", "sector": "", "shares": 100, "cost": 10.0, "price": 10.0, "prev": 10.0 },
+          { "code": "U2", "kind": "stock", "sector": "", "shares": 100, "cost": 10.0, "price": 10.0, "prev": 10.0 }
+        ]
+      },
+      "expect": {
+        "single_stock": { "value": 10.0, "threshold": 25.0, "pass": true },
+        "sector": { "value": 100.0, "threshold": 35.0, "pass": false },
+        "cb_total": { "value": 0.0, "threshold": 12.0, "pass": true },
+        "cash_reserve": { "value": 80.0, "threshold": 10.0, "pass": true }
+      }
+    },
+    {
+      "id": "dc-unclassified-mixed",
+      "fn": "check",
+      "desc": "空串桶小、具名行业最大且压线（P7-T6/ADR-0016 口径）：银行/电力各 1400/4000×100 = 35% 压线 pass（含边界）；空串桶 600/4000 = 15%、基金 600/4000 = 15% 参与但非最大 → sector value=35 pass。空串不跳过也不自动 fail，按真实市值占比判定；单票最大 1400/10000 = 14% 安全；现金 60% 安全",
+      "tags": ["boundary"],
+      "input": {
+        "cash": 6000.0,
+        "holdings": [
+          { "code": "S1", "kind": "stock", "sector": "银行", "shares": 100, "cost": 14.0, "price": 14.0, "prev": 14.0 },
+          { "code": "S2", "kind": "stock", "sector": "电力", "shares": 100, "cost": 14.0, "price": 14.0, "prev": 14.0 },
+          { "code": "U1", "kind": "stock", "sector": "", "shares": 100, "cost": 6.0, "price": 6.0, "prev": 6.0 },
+          { "code": "E1", "kind": "etf", "sector": "基金", "shares": 600, "cost": 1.0, "price": 1.0, "prev": 1.0 }
+        ]
+      },
+      "expect": {
+        "single_stock": { "value": 14.0, "threshold": 25.0, "pass": true },
+        "sector": { "value": 35.0, "threshold": 35.0, "pass": true },
+        "cb_total": { "value": 0.0, "threshold": 12.0, "pass": true },
+        "cash_reserve": { "value": 60.0, "threshold": 10.0, "pass": true }
+      }
+    },
+    {
       "id": "st-normal",
       "fn": "sell_to",
       "desc": "超出目标较多但不足一手：excess = 1500 − 10000×10/100 = 500；500/15 = 33.33 股；ceil(33.33/100)×100 = 100；max(100, 100) = 100",

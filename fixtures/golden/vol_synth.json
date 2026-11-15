@@ -63,6 +63,19 @@
       "tags": ["empty"],
       "input": { "items": [] },
       "expect": { "ann_vol": 0.0 }
+    },
+    {
+      "id": "vs-empty-sector",
+      "fn": "vol_synth",
+      "desc": "两空串标的视为同行业（ρ=0.62，空串==空串，P7-T6/ADR-0016 口径钉死）：与 vs-two-same-sector 同数——对角 2×(0.5²×0.02²)=0.0002、交叉 2×(0.5×0.5×0.02×0.02×0.62)=0.000124、方差 0.000324 → √=0.018；ann_vol=1.8×√244≈28.116899。空串互 ρ=0.62 是保守假设",
+      "tags": ["boundary"],
+      "input": {
+        "items": [
+          { "code": "A", "sector": "", "w": 0.5, "sigma": 0.02 },
+          { "code": "B", "sector": "", "w": 0.5, "sigma": 0.02 }
+        ]
+      },
+      "expect": { "ann_vol": 28.116899 }
     }
   ]
 }

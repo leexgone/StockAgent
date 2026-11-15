@@ -147,7 +147,7 @@ Web 通道会话的生产数据边界（IM 通道会话历史归 robit 自持库
 | 转债强赎/到期预警 | akshare `bond_cb_redeem_jsl`（集思录） | — | ✅ 字段全 |
 | 交易日历 | akshare `tool_trade_date_hist_sina`（1990 起 8797 天） | — | ✅ |
 | 代码-名称表 | akshare `stock_info_a_code_name`（~17s 分页） | — | ✅ |
-| 个股→行业（`sector`） | 新浪 `stock_sector_spot`（49 板块）+ `stock_sector_detail(label)` 成分股 → 建 code→sector 映射，周更存 SQLite | 东财个股信息（被拦，不用） | ✅ 已验证；成分股附带 PE/PB/市值/换手率，可作将来基本面原料 |
+| 个股→行业（`sector`） | 新浪 `stock_sector_spot`（49 板块）+ `stock_sector_detail(label)` 成分股 → 建 code→sector 映射 | 东财个股信息（被拦，不用）；baostock 证监会粗分类（不用） | ✅ 已验证（P7-T6/ADR-0016 落地）：sidecar `GET /sector_map` 无参全量、日级 TTL 缓存 + singleflight + 部分板降级；**无独立持久化**——落库在 Rust 侧 `holdings.sector`，刷新链顺带补空串（ETF=基金/转债=转债 按 kind）；成分股附带 PE/PB/市值/换手率可作将来基本面原料 |
 | baostock 兜底（日线） | — | — | ❌ 登录失败（错误码 10002007「网络接收错误」）；兜底次序改为 **新浪系 → 东财直连**，baostock 是否保留 P4 复测再定 |
 
 ### 关键风险（P4-T3 生产化必须处理）
@@ -226,6 +226,13 @@ Web 通道会话的生产数据边界（IM 通道会话历史归 robit 自持库
 - **口径边界重申**：sidecar 不定义业务口径；ETF `limit_pct` 等标的属性由数据层
   （holdings meta）携带。成交量单位：股票/ETF 归一到股/份（东财 ×100），转债日线
   为源侧「张」口径（量比若需校准留给 P4-T4）。
+- **行业映射 `/sector_map`（P7-T6/ADR-0016，2026-11-15）**：无参返回全量「6 位代码→
+  新浪行业板名」映射（`sectors` dict，ETF/转债有意缺席——kind 归类是 Rust 侧业务）；
+  新浪单源（spot 49 板 + 逐板 detail），日级 TTL（`ZIMU_DF_SECTOR_TTL` 缺省 86400s）
+  + singleflight 防并发重复建 + 部分板失败降级缓存（缺码留空次日再补）；spot 失败或
+  映射空 → 502。建映射 1+49 次外呼 30–90s，消费侧 `sector_map` 单请求超时 180s +
+  Rust 24h 缓存 stale 回落。**低频标的属性，不进分钟级轮询**——刷新链需求驱动
+  （无空串 sector 则跳过 sidecar 调用）。
 - **活券布局补测**（spike 盲区）：新浪 hq 转债行与股票同为 33/34 位布局——spike 冒烟
   的两只转债恰是退市样本，未覆盖活券；P4-T3 用 `sh110076/sz128136/sz127025` 补测确认，
   统一解析器成立。
@@ -263,7 +270,10 @@ HTTP 调用。要点：
   （`03` §9 生产口径），`POST /api/market/refresh` 拒绝刷新但返回契约化错误。
 - 行情回写只更新 `holdings.price/prev/name` 与 COALESCE `limit_pct`（推断走
   `zimu-domain::price_limit::limit_pct`，`st=false`——ST 识别依赖行情字段，
-  03 §2；ETF 推断为 None → 保持数据层配置不被覆盖）。回写后组合数字一律
+  03 §2；ETF 推断为 None → 保持数据层配置不被覆盖）。**行业补全（P7-T6）顺带挂在本链**：
+  `apply_quotes` 之后、recalc 之前遍历全部持仓（含停牌退市，不被 quote 状态门控），
+  仅补空串 `sector`（股票查 `/sector_map`、ETF=基金/转债=转债），手工非空值不覆盖、
+  不写 `holding_edits`；映射失败仅跳过股票补全不阻断行情回写。回写后组合数字一律
   重新过 `zimu-domain::recalc`（服务端 `recalc()` 等价链，03 §5 口径）。
 
 ## 附录 C · REST API 机器可读契约（P4-T5，2026-10-28）

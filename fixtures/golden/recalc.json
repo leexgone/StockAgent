@@ -113,6 +113,39 @@
           "hhi": 1.0, "top3_sector": 100.0
         }
       }
+    },
+    {
+      "id": "rc-empty-sector",
+      "fn": "recalc",
+      "desc": "空串行业聚一桶（P7-T6/ADR-0016 口径）：U1/U2 sector='' 聚为无名桶 v=1000+500=1500 w=1500/2500×100=60，S1 银行 v=1000 w=40；sectors 按市值降序 [空桶60, 银行40]；hhi=(60²+40²)/10000=5200/10000=0.52；top3=60+40=100（仅两桶）。空串参与集中度不跳过（保守 fail-safe）；weight=mv/total_assets：U1=40 U2=20 S1=40",
+      "tags": ["boundary"],
+      "input": {
+        "cash": 0.0,
+        "holdings": [
+          { "code": "U1", "kind": "stock", "sector": "", "shares": 100, "cost": 10.0, "price": 10.0, "prev": 10.0 },
+          { "code": "U2", "kind": "stock", "sector": "", "shares": 100, "cost": 5.0, "price": 5.0, "prev": 5.0 },
+          { "code": "S1", "kind": "stock", "sector": "银行", "shares": 100, "cost": 10.0, "price": 10.0, "prev": 10.0 }
+        ]
+      },
+      "expect": {
+        "per": [
+          { "code": "U1", "day_chg": 0.0, "day_val": 0.0, "mv": 1000.0, "pnl": 0.0, "pnl_pct": 0.0, "weight": 40.0 },
+          { "code": "U2", "day_chg": 0.0, "day_val": 0.0, "mv": 500.0, "pnl": 0.0, "pnl_pct": 0.0, "weight": 20.0 },
+          { "code": "S1", "day_chg": 0.0, "day_val": 0.0, "mv": 1000.0, "pnl": 0.0, "pnl_pct": 0.0, "weight": 40.0 }
+        ],
+        "agg": {
+          "cash": 0.0, "mv_stocks": 2500.0, "mv_etf": 0.0, "mv_cb": 0.0,
+          "total_mv": 2500.0, "total_assets": 2500.0,
+          "day_pnl": 0.0, "day_pnl_pct": 0.0,
+          "total_pnl": 0.0, "cost_total": 2500.0, "total_pnl_pct": 0.0,
+          "exposure": 100.0,
+          "sectors": [
+            { "name": "", "v": 1500.0, "w": 60.0 },
+            { "name": "银行", "v": 1000.0, "w": 40.0 }
+          ],
+          "hhi": 0.52, "top3_sector": 100.0
+        }
+      }
     }
   ]
 }

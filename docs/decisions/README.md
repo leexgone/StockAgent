@@ -55,3 +55,4 @@ B …
 | [0013](./0013-agent-holding-snapshot-tools.md) | 智能体持仓快照校正工具：初始化与定期校准 | 接受 |
 | [0014](./0014-agent-standard-tools.md) | 智能体启用 robit 标准工具面：全套消费、确认关闭自动执行（推翻 R2） | 接受 |
 | [0015](./0015-web-attachment-upload.md) | Web 对话框文件上传识别：multipart 随消息发送，robit 零改动 | 接受 |
+| [0016](./0016-holdings-sector-sina-source.md) | 持仓行业数据源：新浪行业板，挂刷新链顺带补 sector | 接受 |
