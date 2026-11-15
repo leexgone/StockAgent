@@ -41,7 +41,7 @@ robit-chatbot = "0.2.1"
 robit-qq = "0.2.1"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
-toml = "0.8"
+toml = "1.2"
 tokio = { version = "1.53", features = [
     "rt-multi-thread",
     "macros",
@@ -57,7 +57,7 @@ async-trait = "0.1"
 # multipart：Web 对话框文件上传（ADR-0015，POST /api/chat 改 multipart/form-data）
 axum = { version = "0.8", features = ["multipart"] }
 tokio-stream = { version = "0.1", features = ["sync"] } # BroadcastStream（SSE 事件扇出）
-tower-http = { version = "0.6", features = ["fs", "trace"] }
+tower-http = { version = "0.7", features = ["fs", "trace"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
@@ -76,9 +76,9 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # P4-T5 契约同源：serde 结构体在定义处 derive ToSchema，编译期生成 OpenAPI 3.1
 # 文档（docs/api/openapi.json 由测试保证与代码一致）；前端类型自该文档生成。
-utoipa = "5"
+utoipa = "6.0"
 # P4-T5 契约测试（仅 zimu-server dev-dep）：实时响应与样例过 schema 校验。
-jsonschema = "0.60"
+jsonschema = "0.61"
 # ADR-0015 上传落盘：文件名消毒空名兜底 + 防覆盖 100 次后兜底（复刻 robit media.rs
 # 私有规则，R12 已诉求上游公开）；与 robit-agent 内部 uuid 同 crate 实例。
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1.29", features = ["v4"] }
