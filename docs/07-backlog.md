@@ -61,6 +61,7 @@ P5-T2 index 屏冒烟发现：sina spot 不 carry 中证转债指数（回空名
 | C11 | `design/README.md` 与 `docs/` 收敛 | ✅ 已决（2026-10-28，P1-T8）：README 只保留原型定位、打开方式、指向 `docs/` 的导引表与许可；业务规则/数据契约/设计约定/本地状态/已知边界全部删除，规格单一来源 = `docs/` |
 | C12 | 现金校正无审计留痕表 | `adjust_cash`/`POST /api/account` 直接覆盖 `account.cash`：持仓侧校正有 `holding_edits` 留痕（ADR-0009），现金侧没有对应表。现阶段最低痕迹 = 工具返回的 before/after/delta 随 tool 行进会话档案（ADR-0012）。候选：`cash_edits` 表（op + before/after + note，与现金写入同事务）+ 界面「维护记录」卡露出；界面调整入口同样受益 |
 | C13 | 启用逐笔确认门禁的前置补丁 | ADR-0012 拍板写账本工具自动落账（requires_confirmation=false），逐笔确认机制三端健在、翻回一行；但启用前须先补两个已知洞：① Web `confirm_request` 无超时——刷新/关闭页面会无限期冻结 agent 循环（宿主需接 `reject_pending_confirms` 或超时策略）；② QQ Confirmer 关键词是整句全等匹配、答非关键词当普通消息注入（绑定会话内的注入诱导面）。若真实使用中出现错账事故，此项优先级上调。**2026-11-14 状态变更（ADR-0014）**：确认经用户拍板关闭（`auto_approve=true`），标准面 write/edit/bash/generate_image 工具层 requires_confirmation=true 被 agent 层覆盖，两洞**暂不承重**；将来若重开确认（config 翻 false）须先补两洞——robit 修复登记保留（与 R11 同批移交） |
+| C14 | 持仓行业数据源选型与行业口径（P7-T6，2026-11-15 用户拍板走**方案 3** 接行业数据源） | 方向已决（接数据源自动补 `sector`，替代手工指定/智能体常识标注两条轻方案）；**实施期待拍板**：① **数据源**——akshare 东财行业板块（`stock_board_industry_name_em` + 成分股 `stock_board_industry_cons_em`）vs 个股信息（`stock_individual_info_em`）vs 申万行业，字段/限频/稳定性须 spike 验证（候选名仅供起点，不预设）；② **行业命名与粒度**——东财一级 vs 申万一级，是否需统一映射表；③ **ETF/转债归属**——ETF 按跟踪指数行业还是单列「基金」、转债按正股行业还是单列「转债」（直接影响 §6 行业集中度与 diagnosis 分组）；④ **补全时机**——导入时一次性 vs 刷新链定期回写 vs 两者（sector 是标的属性非行情，回写策略区别于 price/prev）；⑤ **用户明示优先级**——手工指定 sector 是否锁定不被自动覆盖（参照 limit_pct「仅未配置时推断」语义）；⑥ §6 单一行业 ≤35% 与 §13 校正口径是否随真实行业细化。届时补 ADR + `03` 口径先行，再两边实现 |
 
 ## 框架反馈（R 系列）
 
