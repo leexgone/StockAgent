@@ -484,17 +484,7 @@ function EntryView({ entry }: { entry: Entry }) {
     case "thinking":
       return <ThinkingView text={entry.text} closed={entry.closed} />;
     case "tool":
-      return (
-        <div className="chat-tool">
-          <p className="chat-tool-name">🔧 {entry.name}</p>
-          <p className="chat-tool-args">{briefArgs(entry.args)}</p>
-          {entry.result && (
-            <p className={entry.result.ok ? "chat-tool-ok" : "chat-tool-err"}>
-              {entry.result.ok ? "✓" : "✗"} {entry.result.content}
-            </p>
-          )}
-        </div>
-      );
+      return <ToolView entry={entry} />;
     case "notice":
       return (
         <p className={entry.level === "error" ? "chat-notice chat-notice-err" : "chat-notice"}>
@@ -502,6 +492,55 @@ function EntryView({ entry }: { entry: Entry }) {
         </p>
       );
   }
+}
+
+/* ---------- 工具调用卡片（折叠展开，对齐思考段三态取舍） ----------
+   执行中（result 未到）：恒展开——工具名 + 参数摘要 + 「⏳ 执行中…」进行指示，
+   让用户看到在跑什么；执行完成（result 到达）：默认折叠为头行「▸ 🔧 名称 ✓/✗」，
+   点击头行展开看参数与完整结果（结果原文纯文本、限高内滚，不走 Markdown）。
+   折叠/展开是纯 UI 态（userOpen），不写回 entries——与思考段回看同款；完成态由
+   result 是否存在派生，无需新增 SSE 事件或条目字段（水合的历史工具行恒带 result，
+   读回即默认折叠）。wire 契约与会话档案 schema 零改动。 */
+function ToolView({ entry }: { entry: Extract<Entry, { kind: "tool" }> }) {
+  const [userOpen, setUserOpen] = useState(false);
+  const result = entry.result;
+
+  // 执行中：恒展开（无折叠按钮），参数 + 进行指示
+  if (!result) {
+    return (
+      <div className="chat-tool">
+        <p className="chat-tool-name">
+          🔧 {entry.name} <span className="chat-tool-running">⏳ 执行中…</span>
+        </p>
+        <p className="chat-tool-args">{briefArgs(entry.args)}</p>
+      </div>
+    );
+  }
+
+  // 完成：默认折叠头行（名称 + ✓/✗），点击展开参数与完整结果
+  const statusCls = result.ok ? "chat-tool-ok" : "chat-tool-err";
+  return (
+    <div className="chat-tool">
+      <button
+        type="button"
+        className="chat-tool-head chat-tool-toggle"
+        aria-expanded={userOpen}
+        onClick={() => setUserOpen((o) => !o)}
+      >
+        <span className="chat-tool-caret" aria-hidden="true">
+          {userOpen ? "▾" : "▸"}
+        </span>
+        <span className="chat-tool-name">🔧 {entry.name}</span>
+        <span className={`chat-tool-status ${statusCls}`}>{result.ok ? "✓" : "✗"}</span>
+      </button>
+      {userOpen && (
+        <div className="chat-tool-body">
+          <p className="chat-tool-args">{briefArgs(entry.args)}</p>
+          <p className={`chat-tool-result ${statusCls}`}>{result.content}</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ---------- 思考过程段（R7，robit 0.1.28 thinking_delta；2026-11-06 拍板对齐

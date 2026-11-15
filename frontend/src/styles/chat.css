@@ -171,6 +171,33 @@
 .chat-tool-ok { color: var(--ok); word-break: break-all; }
 .chat-tool-err { color: var(--danger); word-break: break-all; }
 
+/* 工具卡片折叠展开（对齐思考段三态）：执行中展开看参数 + 进行指示；完成后默认折叠
+   为头行（名称 + ✓/✗），点击展开看参数与完整结果。折叠态是纯 UI，不写回条目；
+   头行按钮中性色不占 --accent 预算（容器左侧 accent 细线为既有样式，保持不变）。 */
+.chat-tool-head { display: flex; align-items: center; gap: 6px; width: 100%; }
+.chat-tool-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg);
+  text-align: left;
+  transition: color .14s;
+}
+.chat-tool-toggle:hover { color: var(--fg-2); }
+.chat-tool-caret { flex: none; color: var(--muted); font-size: 11px; }
+.chat-tool-status { margin-left: auto; flex: none; }
+.chat-tool-running { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.chat-tool-body { display: grid; gap: 2px; padding-top: 2px; }
+.chat-tool-result {
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .chat-confirm {
   border: 1px solid var(--warn);
   background: var(--warn-soft);
