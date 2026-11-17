@@ -151,3 +151,12 @@ docker compose pull && docker compose up -d
 - **升级**：`.env` 改 `ZIMU_VERSION=vX.Y.Z` → `docker compose pull && docker compose up -d`；回滚改回旧 tag 同命令。数据卷原样，人格不自动覆盖（§6）。
 - **备份**：NAS 快照/备份工具直接覆盖 `data/` 目录即可（含账本/人格/记忆/微信 state）；一致性要求高时先 `docker compose stop zimu` 再备（§5 同理）。微信 state 含凭据，备份按密钥纪律保管。
 - UGOS Docker 界面「项目/Compose」粘贴模板亦可，但 `.env` 须位于项目目录（env_file 相对路径）；SSH 方式目录自主、更直观。
+- **国内网络加速（ghcr.io 直拉慢）**：Docker `registry-mirrors`/UGOS 镜像加速**只代理 Docker Hub，不覆盖 ghcr.io**——配加速器无效。正路 = 镜像源前缀拉取 + retag 回原名（2026-11-17 实测南大/DaoCloud 源存活）：
+  ```bash
+  docker pull ghcr.nju.edu.cn/leexgone/zimu:v0.1.0   # 备选前缀 docker.m.daocloud.io/ghcr.io/
+  docker pull ghcr.nju.edu.cn/leexgone/zimu-datafetch:v0.1.0
+  docker tag ghcr.nju.edu.cn/leexgone/zimu:v0.1.0 ghcr.io/leexgone/zimu:v0.1.0
+  docker tag ghcr.nju.edu.cn/leexgone/zimu-datafetch:v0.1.0 ghcr.io/leexgone/zimu-datafetch:v0.1.0
+  docker compose up -d   # 本地已有镜像不再直拉 ghcr（pull_policy 缺省 missing）；勿跑 compose pull
+  ```
+  升级同法（新 tag 镜像源拉 + retag + up -d）。有代理者给 dockerd 配 HTTPS_PROXY 更彻底。信任注：镜像源转发 manifest/layers，layer digest 由 docker 校验，tag→manifest 映射信任镜像源——个人使用可接受。
