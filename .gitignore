@@ -65,3 +65,6 @@ shots/
 # ── Claude Code：本机设置含个人路径与权限，不提交（CLAUDE.md 要提交）──
 .claude/settings.local.json
 .claude/*.local.json
+
+# ── Docker 本机运行时偏好（restart 策略等覆盖，产品缺省在 compose.yaml）──
+compose.override.yaml
