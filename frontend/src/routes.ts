@@ -20,7 +20,7 @@ export const SCREEN_ROUTES: ScreenRoute[] = [
   { path: "/analysis", crumb: "AI 分析建议", ported: true },
   { path: "/chat", crumb: "智能问答", ported: true },
   { path: "/diagnosis", crumb: "组合诊断", ported: true },
-  { path: "/wechat", crumb: "微信助理接入", ported: false },
+  { path: "/wechat", crumb: "微信助理接入", ported: true },
 ];
 
 export function routeFor(path: string): ScreenRoute | undefined {

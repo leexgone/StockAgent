@@ -3,14 +3,14 @@
   "attempts": [],
   "count": 2,
   "degraded": false,
-  "end": "2026-10-30",
+  "end": "2026-11-17",
   "kind": "stock",
   "kind_routed": "explicit",
   "kline": [
     {
       "amount": 10000000.0,
       "close": 1421.0,
-      "date": "2026-10-29",
+      "date": "2026-11-16",
       "high": 1421.0,
       "low": 1421.0,
       "open": 1421.0,
@@ -19,7 +19,7 @@
     {
       "amount": 100000.0,
       "close": 1437.0,
-      "date": "2026-10-30",
+      "date": "2026-11-17",
       "high": 1437.0,
       "low": 1437.0,
       "open": 1437.0,

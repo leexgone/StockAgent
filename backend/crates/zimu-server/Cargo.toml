@@ -16,6 +16,8 @@ robit-web.workspace = true
 # T5 QQ 通道：ChatbotManager<QqPlatformAdapter> + BoundOnly decorator（lib 侧）
 robit-chatbot.workspace = true
 robit-qq.workspace = true
+# P6-T2 微信通道（ADR-0017）：ChatbotManager<BoundOnly<WechatPlatformAdapter>> 双 manager
+robit-wechat.workspace = true
 # T5 通道开关：raw 解析 [zimu.channels]（robit 类型化面看不见自有节）
 toml.workspace = true
 tokio.workspace = true

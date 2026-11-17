@@ -50,7 +50,7 @@ const PERIODS: [number, string][] = [
 /** 空持仓态收盘摘要引导（原型 renderBrief emptyState 分支原文） */
 const EMPTY_STEPS: [string, string][] = [
   ["录入第一笔持仓", "入口在持仓管理页：手工逐笔加仓，数量按整手校验、价格受当日涨跌停约束，费用与摊薄成本在预览里即时试算。"],
-  ["录入后即被监控", "助理基于同一份快照计算派生数字与净值序列；价格条件、公告事件触发时生成预警，按你的设置推送微信。"],
+  ["录入后即被监控", "助理基于同一份快照计算派生数字与净值序列；价格条件、公告事件触发时生成预警，推送绑定的微信/QQ 会话。"],
   ["收盘自动生成摘要", "15:05 归档当日盈亏、仓位提醒与下日关注点——摘要里的每个数字都可回溯到口径手册。"],
 ];
 
@@ -573,7 +573,7 @@ export default function DashboardScreen({ now }: { now: Date }) {
             Icon={IconBell}
             od="dash-alerts-empty"
             title="监控还没有启动"
-            desc="录入第一笔持仓（或添加自选）后，助理按 03 §12 判定序盯涨跌停、放量、强赎与止盈止损，触发即出现在这里；微信推送随渠道接入（C4 拍板后）。"
+            desc="录入第一笔持仓（或添加自选）后，助理按 03 §12 判定序盯涨跌停、放量、强赎与止盈止损，触发即出现在这里，并推送绑定的微信/QQ 会话。"
           />
         ) : (
           <div className="list" id="alert-list">
@@ -604,8 +604,8 @@ export default function DashboardScreen({ now }: { now: Date }) {
           </div>
         )}
         <div className="card-foot" style={{ justifyContent: "space-between" }}>
-          <span className="hint" style={{ margin: 0 }}>预警规则在「微信助理接入」里配置推送时段与方式。</span>
-          <Link className="btn btn-sm" to="/wechat">推送设置</Link>
+          <span className="hint" style={{ margin: 0 }}>预警触发即推送绑定会话；推送订阅（时段/静音）另案落地，见「微信助理接入」。</span>
+          <Link className="btn btn-sm" to="/wechat">通道接入</Link>
         </div>
       </section>
 
@@ -816,7 +816,7 @@ export default function DashboardScreen({ now }: { now: Date }) {
         <div className="card-head">
           <div>
             <div className="card-title">助理收盘摘要</div>
-            <div className="card-sub">15:05 自动生成，微信推送随渠道接入（C4 拍板后）</div>
+            <div className="card-sub">15:05 自动生成，数字摘要推送绑定的微信/QQ 会话</div>
           </div>
           <div className="head-actions">
             <span className="pill">{lastSnap ? `${lastSnap.ts} 归档` : "待首个快照"}</span>

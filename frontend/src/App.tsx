@@ -10,6 +10,7 @@ import DiagnosisScreen from "./screens/DiagnosisScreen";
 import HoldingsScreen from "./screens/HoldingsScreen";
 import HomeScreen from "./screens/HomeScreen";
 import PlaceholderScreen from "./screens/PlaceholderScreen";
+import WechatScreen from "./screens/WechatScreen";
 import { useAdvice } from "./store/advice";
 import { useAlerts } from "./store/alerts";
 import { useEquity } from "./store/equity";
@@ -21,10 +22,11 @@ import { useUi } from "./store/ui";
 
 /**
  * 子木 SPA 根组件：外壳 Chrome + react-router 路由表（P5-T1，ADR-0008）。
- * 已移植屏：/ 工作台、/dashboard 总览仪表盘、/holdings 持仓管理（含加减仓抽屉接
- * API）、/analysis AI 分析建议、/diagnosis 组合诊断、/chat Agent SSE 会话（P5-T2
- * 真实数据）；余 /wechat 渲染占位屏（gate C4 待拍板），逐屏移植后在 routes.ts 翻
- * ported 并在此挂真实屏。
+ * 七屏全移植（P5-T2 收尾 2026-11-17，ADR-0017 / C4 关闭）：/ 工作台、
+ * /dashboard 总览仪表盘、/holdings 持仓管理（含加减仓抽屉接 API）、/analysis
+ * AI 分析建议、/diagnosis 组合诊断、/chat Agent SSE 会话、/wechat 微信助理接入
+ * （通道状态/绑定管理/推送日志真实数据，订阅卡待启动态 C15 另案）。
+ * 占位屏机制保留（routes.ts ported=false 的屏自动渲染占位，当前集合为空）。
  *
  * 数据接线（P5-T2）：启动时全量拉一次；此后 60s 轮询——市场时钟恒拉，
  * 盘中（clock.live，03 §9 生产口径）才拉组合/指数/预警（与后端调度器同节奏，
@@ -95,23 +97,9 @@ export default function App() {
           <Route path="/analysis" element={<AnalysisScreen />} />
           <Route path="/diagnosis" element={<DiagnosisScreen />} />
           <Route path="/chat" element={<ChatView now={now} />} />
+          <Route path="/wechat" element={<WechatScreen />} />
           {SCREEN_ROUTES.filter((r) => !r.ported).map((r) => (
-            <Route
-              key={r.path}
-              path={r.path}
-              element={
-                r.path === "/wechat" ? (
-                  <PlaceholderScreen
-                    path={r.path}
-                    crumb={r.crumb}
-                    eyebrow="决策闸门 C4 · 微信渠道待拍板"
-                    note="微信渠道方案待拍板（docs/07 C4：① 能否双向会话 ② 是否需公网入站；QQ 侧 robit-qq 出站网关现成、不受此困）。拍板后本屏按 PushProvider 配置管理落地；密钥类字段（AppID/Token/Webhook）届时仅存本机浏览器、永不入库。定时任务留痕已可在「智能问答」的最近会话卡查看。"
-                  />
-                ) : (
-                  <PlaceholderScreen path={r.path} crumb={r.crumb} />
-                )
-              }
-            />
+            <Route key={r.path} path={r.path} element={<PlaceholderScreen path={r.path} crumb={r.crumb} />} />
           ))}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -11,6 +11,7 @@ import {
 import { perf } from "../domain";
 import { clockView, marketClock } from "../lib/clock";
 import { dirClass, fixed, fmt, money, pct } from "../lib/format";
+import { channelLabel, pushKindLabel } from "../lib/pushKind";
 import { coveredCount, useAdvice } from "../store/advice";
 import { useAlerts } from "../store/alerts";
 import { useEquity } from "../store/equity";
@@ -30,12 +31,6 @@ import { usePushLog } from "../store/push_log";
 interface HomeScreenProps {
   now: Date;
 }
-
-/* push_log.kind → 时间线文案（封闭词汇随渠道落地扩展，03 §12） */
-const KIND_LABEL: Record<string, string> = {
-  post_market_review: "盘后复盘",
-  alert_push: "预警推送",
-};
 
 /* 待决事项排序：风险（down）> 动作提醒（warn）> 信息（up）；同级新在前 */
 const LEVEL_RANK: Record<string, number> = { down: 0, warn: 1, up: 2 };
@@ -145,8 +140,8 @@ export default function HomeScreen({ now }: HomeScreenProps) {
   /* 助理最近的动作 = push_log 留痕（新在前取 5；ok=1 只表示已受理，03 §12） */
   const timeline = pushRows.slice(0, 5).map((r) => ({
     t: r.ts,
-    who: r.channel === "agent" ? "定时任务" : r.channel,
-    text: `${KIND_LABEL[r.kind] ?? r.kind} · ${r.ok ? "已受理" : "受理失败"}`,
+    who: channelLabel(r.channel),
+    text: `${pushKindLabel(r.kind)} · ${r.ok ? "已受理" : "受理失败"}`,
     reply: r.ok ? undefined : r.detail,
     read: r.ok,
   }));

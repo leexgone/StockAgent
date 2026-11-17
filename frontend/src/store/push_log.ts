@@ -1,7 +1,7 @@
 /**
  * 推送留痕 store（P5-T2 补读端点，B13）：盘后链/渠道推送写入，前端只读。
  * ok=1 只表示请求已被受理（03 §12 留档语义），界面文案不得写成「已完成推送」。
- * index 时间线消费；wechat 屏推送日志（gate C4）落地时复用。
+ * index 时间线、chat 最近会话卡、wechat 屏推送日志卡（ADR-0017）共用。
  */
 
 import { create } from "zustand";

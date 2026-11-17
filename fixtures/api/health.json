@@ -6,5 +6,8 @@
   "static_ready": true,
   "agent_online": false,
   "qq_online": false,
+  "wechat_online": false,
+  "qq_enabled": false,
+  "wechat_enabled": false,
   "market_url": "http://127.0.0.1:8300"
 }

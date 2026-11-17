@@ -845,8 +845,13 @@ export interface components {
             market_url: string;
             ok: boolean;
             /**
-             * @description QQ 通道在线状态（T5）：false = 未启用（[zimu.channels].qq 缺省停用）/
-             *     未连上/已退出——health 如实透出，不装在线
+             * @description QQ 通道启用开关快照（启动时 [zimu.channels].qq，ADR-0017 D6）：
+             *     开关本体只在服务器配置文件（拍板⑤⑥），界面只读展示
+             */
+            qq_enabled: boolean;
+            /**
+             * @description QQ 通道在线状态（T5）：false = 未启用/未连上/已退出——health 如实透出，
+             *     不装在线（「未启用」与「离线」的区分看 qq_enabled）
              */
             qq_online: boolean;
             /** @description 恒 "zimu-server" */
@@ -857,6 +862,10 @@ export interface components {
             static_ready: boolean;
             /** @description crate 版本 */
             version: string;
+            /** @description 微信通道启用开关快照（启动时 [zimu.channels].wechat）：口径同 qq_enabled */
+            wechat_enabled: boolean;
+            /** @description 微信通道在线状态（ADR-0017，iLink Bot）：口径同 qq_online */
+            wechat_online: boolean;
         };
         /**
          * @description 直接维护请求体（PUT /api/holdings/{code}）。code 以路径为准（body 不带）；

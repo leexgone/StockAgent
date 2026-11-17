@@ -6,5 +6,13 @@
     "chat_id": "private:SEED",
     "kind": "private",
     "label": "契约种子"
+  },
+  {
+    "active": true,
+    "bound_at": "2026-11-17 09:00",
+    "channel": "wechat",
+    "chat_id": "private:WXSEED",
+    "kind": "private",
+    "label": "微信契约种子"
   }
 ]

@@ -1,0 +1,42 @@
+/* wechat 屏专属样式（P5-T2 收尾 / ADR-0017，迁移自 design/wechat.html <style>）
+   原型语义作废件不迁移：.qr（演示二维码）/ .wxcard .ft（服务号卡片按钮）——
+   生产是纯文本消息（.wxmsg）与 CLI 扫码 + Web 白名单管理。
+   全走设计令牌、无新令牌；状态色 B5（在线/已绑定 = --ok 绿）；
+   --accent 每屏 ≤2（仅绑定提交 btn-primary，通用类在 ui.css）。 */
+
+.wx-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+
+/* 通道状态行（只读，无 switch/测试按钮） */
+.chan { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.chan:last-child { border-bottom: 0; }
+.chan .ic { width: 34px; height: 34px; border-radius: 9px; background: var(--surface-2); display: grid; place-items: center; color: var(--fg-2); }
+.chan .ic svg { width: 18px; height: 18px; stroke-width: 1.7; }
+
+/* 推送条目行（当前生效段与待启用占位共用；.t/.d 标题/描述） */
+.switch-row { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--border); }
+.switch-row:last-child { border-bottom: 0; }
+.switch-row .t { font-size: 13px; font-weight: 550; }
+.switch-row .d { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.5; max-width: 46ch; }
+
+/* 纯文本消息气泡（微信/iLink Bot 无 Markdown 无卡片按钮——预览即所见形态） */
+.wxmsg {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 接入配置卡：标签 + 右对齐值（chat.css 的 .rail .ctx-row 同款，作用域独立） */
+.wx-config .ctx-row { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+.wx-config .ctx-row:last-child { border-bottom: 0; }
+.wx-config .ctx-row .v { margin-left: auto; text-align: right; color: var(--fg-2); max-width: 62%; line-height: 1.55; }
+
+@media (max-width: 1100px) {
+  .wx-layout { grid-template-columns: minmax(0, 1fr); }
+}

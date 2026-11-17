@@ -8,6 +8,7 @@ import "./styles/chat.css";
 import "./styles/holdings.css";
 import "./styles/analysis.css";
 import "./styles/diagnosis.css";
+import "./styles/wechat.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -111,79 +111,20 @@ impl<T: PlatformAdapter + 'static> PlatformAdapter for BoundOnly<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use robit_agent::error::AgentError;
-    use robit_chatbot::{ChatMessage, ChatType, MarkdownFeatures, SenderInfo};
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use crate::testutil::{mock_platform, msg, tmp_store};
+    use robit_chatbot::{MarkdownFeatures, PlatformCaps};
 
-    /// 事件队列 + 出站记录（照 robit manager.rs 测试的 MockPlatform 形态）
-    struct MockPlatform {
-        events: Mutex<VecDeque<PlatformEvent>>,
-        sent: Mutex<Vec<(String, String)>>,
-    }
-
-    impl MockPlatform {
-        fn with(events: Vec<PlatformEvent>) -> Arc<Self> {
-            Arc::new(Self { events: Mutex::new(VecDeque::from(events)), sent: Mutex::new(Vec::new()) })
-        }
-    }
-
-    fn msg(chat_id: &str, text: &str) -> PlatformEvent {
-        PlatformEvent::Message(ChatMessage {
-            text: text.into(),
-            sender: SenderInfo {
-                user_id: chat_id.into(),
-                chat_id: chat_id.into(),
-                chat_type: ChatType::Private,
-            },
-            attachments: vec![],
-        })
-    }
-
-    fn caps() -> PlatformCaps {
-        PlatformCaps {
-            supports_edit: false,
-            returns_msg_id: true,
-            supports_markdown: false,
-            markdown_features: MarkdownFeatures::default(),
-            max_message_length: 100,
-            supports_images: false,
-            supports_files: false,
-            max_upload_size: 0,
-        }
-    }
-
-    #[async_trait]
-    impl PlatformAdapter for MockPlatform {
-        fn capabilities() -> PlatformCaps {
-            caps()
-        }
-        fn platform_name() -> &'static str {
-            "mock"
-        }
-        async fn recv_event(&self) -> Result<PlatformEvent> {
-            self.events
-                .lock()
-                .unwrap()
-                .pop_front()
-                .ok_or_else(|| AgentError::InternalError("事件耗尽".into()))
-        }
-        async fn send_message(&self, chat_id: &str, text: &str) -> Result<SendResult> {
-            self.sent.lock().unwrap().push((chat_id.into(), text.into()));
-            Ok(SendResult { msg_id: "mock".into() })
-        }
-    }
-
-    /// 每测试独立路径（同 pid 并发跑，共享文件会互删竞态）
-    fn tmp_store(tag: &str) -> SharedStore {
-        let dir = std::env::temp_dir().join(format!("zimu-bound-{}-{tag}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("bound.db");
-        let _ = std::fs::remove_file(&path);
-        Arc::new(Mutex::new(
-            zimu_store::Store::open(path.to_str().unwrap()).unwrap(),
-        ))
-    }
+    // 事件队列 + 出站记录（共享装置 testutil，ADR-0017 B3；caps 保持原 100 上限）
+    mock_platform!(MockPlatform, "mock", PlatformCaps {
+        supports_edit: false,
+        returns_msg_id: true,
+        supports_markdown: false,
+        markdown_features: MarkdownFeatures::default(),
+        max_message_length: 100,
+        supports_images: false,
+        supports_files: false,
+        max_upload_size: 0,
+    });
 
     #[tokio::test]
     async fn unbound_chat_silently_dropped_until_bound() {
@@ -220,5 +161,25 @@ mod tests {
 
         // 能力宣称静态转发
         assert_eq!(BoundOnly::<MockPlatform>::capabilities().max_message_length, 100);
+    }
+
+    /// 微信闸门（ADR-0017）：装饰器零改动换 channel 词汇——未绑定静默丢弃、
+    /// 绑定放行、判定键是 wechat 自己的 chat_id 命名空间（private:{ilink_user_id}）
+    #[tokio::test]
+    async fn wechat_gate_same_decorator_new_channel() {
+        let store = tmp_store("wechat-gate");
+        // QQ 绑定不放行微信会话（通道词汇隔离）
+        zimu_agent::lock(&store).bind_channel("qq", "private:WXME", "private", "跨通道同名", "2026-11-17 09:00").unwrap();
+        let mock = MockPlatform::with(vec![msg("private:WXME", "微信来消息")]);
+        let adapter = BoundOnly::new(mock, store.clone(), "wechat");
+        assert!(adapter.recv_event().await.is_err(), "qq 绑定不算 wechat 绑定 → 丢弃至耗尽");
+
+        zimu_agent::lock(&store).bind_channel("wechat", "private:WXME", "private", "本人微信", "2026-11-17 09:01").unwrap();
+        let mock = MockPlatform::with(vec![msg("private:EVE", "骚扰"), msg("private:WXME", "正主")]);
+        let adapter = BoundOnly::new(mock, store.clone(), "wechat");
+        match adapter.recv_event().await.expect("绑定会话应放行") {
+            PlatformEvent::Message(m) => assert_eq!(m.sender.chat_id, "private:WXME"),
+            other => panic!("期望 Message，得到 {other:?}"),
+        }
     }
 }

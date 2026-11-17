@@ -22,6 +22,7 @@ pub mod advice_api;
 pub mod alerts_api;
 pub mod channel_adapter;
 pub mod channel_bindings;
+pub mod channel_push;
 pub mod chat_api;
 pub mod chat_record;
 pub mod chat_upload;
@@ -30,6 +31,9 @@ pub mod holdings_api;
 pub mod market_api;
 pub mod openapi;
 pub mod watchlist_api;
+
+#[cfg(test)]
+mod testutil;
 
 use axum::routing::{delete, get, post, put};
 use axum::Router;

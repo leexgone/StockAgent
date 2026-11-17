@@ -5,6 +5,14 @@
     "id": 1,
     "kind": "post_market_review",
     "ok": true,
-    "ts": "2026-10-30 15:05"
+    "ts": "2026-11-17 15:05"
+  },
+  {
+    "channel": "wechat",
+    "detail": "预警 600519 stop_loss → private:WXSEED：已送达（契约样例种子）",
+    "id": 2,
+    "kind": "alert_push",
+    "ok": true,
+    "ts": "2026-11-17 10:00"
   }
 ]

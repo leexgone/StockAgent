@@ -10,8 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
-/// 通道开关位。新通道到货时在 `ChannelFlags` 加字段（`wechat` 词汇已就位，
-/// 本轮无实现——true 会 warn 后忽略）。
+/// 通道开关位。新通道到货时在 `ChannelFlags` 加字段（`wechat` 已随
+/// ADR-0017 接线：true 且 Web Agent 在位 → wechat_channel supervisor 启动）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelFlags {
     pub qq: bool,

@@ -313,6 +313,22 @@ async fn live_responses_and_samples_pass_schema() {
     store
         .bind_channel("qq", "private:SEED", "private", "契约种子", "2026-11-07 09:00")
         .unwrap();
+    // 微信绑定种子（ADR-0017）：channel 词汇向前兼容（无 CHECK），
+    // chat_id = private:{ilink_user_id} 形态（微信仅 1:1）
+    store
+        .bind_channel("wechat", "private:WXSEED", "private", "微信契约种子", "2026-11-17 09:00")
+        .unwrap();
+    // 微信推送留痕种子：ts 早于今日 15:05（push_logs ts DESC，b[0] 仍是
+    // agent 的 post_market_review——下方断言不动）
+    store
+        .insert_push_log(
+            &format!("{today} 10:00"),
+            "wechat",
+            "alert_push",
+            true,
+            "预警 600519 stop_loss → private:WXSEED：已送达（契约样例种子）",
+        )
+        .unwrap();
     let base = spawn_api(fake.clone(), store).await;
     let http = reqwest::Client::new();
 
@@ -589,7 +605,7 @@ async fn live_responses_and_samples_pass_schema() {
     // ---- 通道绑定（T5/拍板⑤）：列表 → 绑定 → 非法 kind → 解绑 → 幂等 404 ----
     let (s, b) = get(&http, &base, "/api/channel_bindings").await;
     assert_eq!(s, 200);
-    assert_eq!(b.as_array().unwrap().len(), 1, "种子绑定可见");
+    assert_eq!(b.as_array().unwrap().len(), 2, "qq + wechat 种子绑定可见");
     check(&doc, "channel_bindings", "get", "/api/channel_bindings", 200, &b);
 
     let (s, b) = post(
@@ -624,6 +640,34 @@ async fn live_responses_and_samples_pass_schema() {
     assert_eq!(s, 404);
     assert_eq!(b["error"], json!("no_binding"));
     check(&doc, "error_no_binding", "delete", "/api/channel_bindings/{channel}/{chat_id}", 404, &b);
+
+    // ---- 微信绑定回环（ADR-0017）：端点零改动消费 wechat 词汇，kind 恒 private ----
+    let (s, b) = post(
+        &http,
+        &base,
+        "/api/channel_bindings",
+        json!({"channel": "wechat", "chat_id": "private:WXNEW", "kind": "private", "label": "微信回环"}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    assert_eq!(b["channel"], json!("wechat"));
+    assert_eq!(b["active"], json!(true));
+    check(&doc, "channel_binding_wechat", "post", "/api/channel_bindings", 200, &b);
+
+    // channel 过滤：只回微信行（WXSEED + WXNEW），不串 qq
+    let (s, b) = get(&http, &base, "/api/channel_bindings?channel=wechat").await;
+    assert_eq!(s, 200);
+    let rows = b.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| r["channel"] == json!("wechat")));
+
+    // 解绑 + 幂等 404（chat_id 含 private: 前缀的 path 参数回环）
+    let (s, b) = delete(&http, &base, "/api/channel_bindings/wechat/private:WXNEW").await;
+    assert_eq!(s, 200);
+    assert_eq!(b["unbound"], json!(true));
+    let (s, b) = delete(&http, &base, "/api/channel_bindings/wechat/private:WXNEW").await;
+    assert_eq!(s, 404);
+    assert_eq!(b["error"], json!("no_binding"));
 
     // 契约文档自身也可在线取（与仓库文件同内容）
     let (s, b) = get(&http, &base, "/api/openapi.json").await;

@@ -45,7 +45,9 @@
 //! 公网入站（ADR-0005）。
 
 mod agent_bridge;
+mod channel;
 mod qq_channel;
+mod wechat_channel;
 
 use std::convert::Infallible;
 use std::path::PathBuf;
@@ -55,8 +57,10 @@ use std::task::Poll;
 use std::time::Duration;
 
 use agent_bridge::{spawn_agent, AgentBridge};
-use qq_channel::QQChannel;
+use channel::ChannelHandle;
 use anyhow::Context;
+use robit_qq::QqPlatformAdapter;
+use robit_wechat::WechatPlatformAdapter;
 use zimu_market::client::{HttpMarketClient, DEFAULT_BASE_URL, DEFAULT_TIMEOUT};
 use zimu_market::MarketApi as _; // base_url() 是 trait 方法
 use zimu_server::holdings_api::SharedStore;
@@ -92,6 +96,12 @@ struct AppState {
     shutdown_rx: watch::Receiver<bool>,
     /// QQ 通道在线位（T5）：通道未启用/未连上时为 false，health 如实透出
     qq_online: Arc<AtomicBool>,
+    /// 微信通道在线位（ADR-0017）：同 qq_online 口径
+    wechat_online: Arc<AtomicBool>,
+    /// 启用开关快照（启动时 [zimu.channels]，ADR-0017 D6）：界面只读展示
+    /// 「未启用」与「离线」的区分依据（拍板⑤⑥——开关本体只在配置文件）
+    qq_enabled: bool,
+    wechat_enabled: bool,
     // 持仓存储（P4-T1）与行情路由（P4-T4）不从这里走：api_router 用独立状态 merge 进来
 }
 
@@ -104,6 +114,9 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         static_ready: state.static_dir.join("index.html").exists(),
         agent_online: state.agent.is_some(),
         qq_online: state.qq_online.load(Ordering::SeqCst),
+        wechat_online: state.wechat_online.load(Ordering::SeqCst),
+        qq_enabled: state.qq_enabled,
+        wechat_enabled: state.wechat_enabled,
         market_url: state.market_url.clone(),
     })
 }
@@ -211,89 +224,9 @@ fn agent_offline() -> Response {
         .into_response()
 }
 
-// ============================================================================
-// 通道推送出站（T6/ADR-0011）——文案组装、多目标循环、逐目标留痕都在宿主
-// ============================================================================
-
-/// QQ 消息长度上限（PlatformCaps::qq().max_message_length = 2000，robit-chatbot
-/// adapter.rs:97）；出站前清洗 + 截断都要贴这个数。
-const QQ_MAX_LEN: usize = 2000;
-
-/// 一条系统消息 → 全部已绑定 QQ 会话，逐目标 push_log 留痕。
-/// 送达失败如实记（调度器已按日去重，同一预警今日不重推——失败的可补救面
-/// 就是留痕本身，与「受理 ≠ 完成」同纪律）。返回是否送达至少一目标。
-async fn push_to_bound(
-    store: &SharedStore,
-    active: &qq_channel::ActiveAdapter,
-    kind: &'static str,
-    text: &str,
-    subject: &str,
-) -> bool {
-    let targets = match zimu_agent::lock(store).channel_bindings(Some("qq")) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::warn!("绑定会话读取失败（放弃推送）：{e:#}");
-            return false;
-        }
-    };
-    if targets.is_empty() {
-        let _ = zimu_agent::lock(store).insert_push_log(
-            &zimu_server::chat_record::ts_now(),
-            "qq",
-            kind,
-            false,
-            &format!("{subject}｜无已绑定会话（跳过推送）"),
-        );
-        return false;
-    }
-    // QQ 的 Markdown 面只有 code_blocks：过 robit-chatbot 现成清洗器降级为可读纯文本
-    let cleaned = robit_chatbot::markdown::prepare_markdown_for_platform(
-        text,
-        &robit_chatbot::MarkdownFeatures::qq(),
-    );
-    let clipped = clip_by_lines(&cleaned, QQ_MAX_LEN);
-    let mut any = false;
-    for t in targets {
-        let (ok, note): (bool, String) = match active.send(&t.chat_id, &clipped).await {
-            None => (false, "通道未在线（发送放弃）".into()),
-            Some(Ok(_)) => (true, "已送达".into()),
-            Some(Err(e)) => (false, format!("发送失败：{e}")),
-        };
-        any |= ok;
-        if let Err(e) = zimu_agent::lock(store).insert_push_log(
-            &zimu_server::chat_record::ts_now(),
-            "qq",
-            kind,
-            ok,
-            &format!("{subject} → {}：{note}", t.chat_id),
-        ) {
-            tracing::warn!("推送留痕失败：{e:#}");
-        }
-    }
-    any
-}
-
-/// 按行截到 cap 字符内（不切半行；超限省略标记）——保证多行摘要不被拦腰截断
-fn clip_by_lines(s: &str, cap: usize) -> String {
-    let mut out = String::new();
-    for line in s.lines() {
-        let candidate = if out.is_empty() {
-            line.to_string()
-        } else {
-            format!("{out}\n{line}")
-        };
-        if candidate.chars().count() > cap {
-            if out.is_empty() {
-                // 单行超限：按字符硬截（至少给出开头）
-                return s.chars().take(cap.saturating_sub(4)).collect::<String>() + "…截";
-            }
-            out.push_str("\n…（已截断）");
-            return out;
-        }
-        out = candidate;
-    }
-    out
-}
+// 通道推送出站（T6/ADR-0011 → ADR-0017 D5）已收口进 lib `channel_push`：
+// caps 参数化的 push_to_bound / 文案组装（alert_message/summary_message）/
+// 按行截断 / 复合 pusher（combine_*）——零硬编码通道词汇，QQ/微信共用。
 
 // ============================================================================
 // 启动装配
@@ -320,13 +253,13 @@ fn resolve_static_dir() -> PathBuf {
 }
 
 /// Ctrl+C 优雅关闭序列：先中止调度器（停止盘中轮询/盘后链的后台写入），
-/// 再停 QQ 通道（notify → 等 supervisor 退出 + WAL flush，T5），
+/// 再逐通道停 supervisor（notify → 等退出 + WAL flush，T5；ADR-0017 多通道化），
 /// 最后翻 watch 断开全部 SSE 长连接，让 axum 等在途请求完成后退出。
 /// 注意：信号已被 tokio 接管，连按第二次 Ctrl+C 不会强杀进程——等排空即可；
 /// 真卡死就用系统手段（任务管理器 / `taskkill`）。
 async fn shutdown_signal(
     scheduler: Option<JoinHandle<()>>,
-    qq: Option<QQChannel>,
+    channels: Vec<ChannelHandle>,
     sse: watch::Sender<bool>,
 ) {
     if let Err(e) = tokio::signal::ctrl_c().await {
@@ -335,13 +268,13 @@ async fn shutdown_signal(
         tracing::error!("Ctrl+C 信号监听失败：{e}——优雅关闭不可用，需系统手段停止进程");
         std::future::pending::<()>().await;
     }
-    tracing::info!("收到 Ctrl+C：停止调度器与 QQ 通道、断开 SSE 长连接、等待在途请求完成…");
+    tracing::info!("收到 Ctrl+C：停止调度器与 IM 通道、断开 SSE 长连接、等待在途请求完成…");
     if let Some(h) = scheduler {
         h.abort();
     }
-    if let Some(q) = qq {
-        q.request_stop();
-        q.join(Duration::from_secs(3)).await;
+    for ch in channels {
+        ch.request_stop();
+        ch.join(Duration::from_secs(3)).await;
     }
     // 无接收者（从未有 SSE 客户端连过）时 send 返回 Err，属正常情况
     let _ = sse.send(true);
@@ -439,16 +372,13 @@ async fn main() -> anyhow::Result<()> {
     // 重连由 QqPlatformAdapter 自带 supervisor 负责（robit-qq platform.rs:164），
     // 本通道 supervisor 只兜残余退出路径（见 qq_channel.rs 模块头）。
     let flags = zimu_server::config_flags::load_flags(&working_dir);
-    if flags.wechat {
-        tracing::warn!("微信通道开关已开但本轮无实现（等 robit 平台模块到货）：忽略，不建通道");
-    }
     let qq_online = Arc::new(AtomicBool::new(false));
     // 在线连接槽（T6 推送侧）：QQ 未启用/未连上时 send 恒 None，推送如实失败留痕
     let qq_active = qq_channel::ActiveAdapter::default();
     let qq_channel = match (flags.qq, agent.clone()) {
         (true, Some(bridge)) => {
             tracing::info!("QQ 通道已启用（[zimu.channels].qq=true）：supervisor 启动");
-            Some(QQChannel::spawn(
+            Some(qq_channel::spawn(
                 bridge,
                 store.clone(),
                 working_dir.clone(),
@@ -465,6 +395,57 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+
+    // 微信通道（P6-T2/ADR-0017）：QQ 同款双闸门——开关 true 且 Web Agent 在位。
+    // iLink Bot 出站长轮询（无需公网回调）；登录 = 部署侧 CLI 扫码（停服约定，
+    // D3）；token 失效终态由 wechat_channel supervisor 探测恢复（D4）。
+    let wechat_online = Arc::new(AtomicBool::new(false));
+    let wechat_active = wechat_channel::ActiveAdapter::default();
+    let wechat_channel = match (flags.wechat, agent.clone()) {
+        (true, Some(bridge)) => {
+            tracing::info!("微信通道已启用（[zimu.channels].wechat=true）：supervisor 启动（iLink Bot，ADR-0017）");
+            Some(wechat_channel::spawn(
+                bridge,
+                store.clone(),
+                working_dir.clone(),
+                wechat_online.clone(),
+                wechat_active.clone(),
+            ))
+        }
+        (true, None) => {
+            tracing::warn!("微信通道已启用但 Web Agent 不可用（缺 robit 配置或启动失败）：通道跳过");
+            None
+        }
+        (false, _) => {
+            tracing::info!("微信通道未启用（[zimu.channels].wechat 缺省停用，ADR-0011 拍板⑥）");
+            None
+        }
+    };
+
+    // 推送通道组合（ADR-0017 D5）：按实际 spawn 的通道收集 caps 参数化闭包，
+    // 复合 pusher 顺序 OR——调度器 trait 不动，文案组装在 combine 闭包内恰一次。
+    let mut push_channels: Vec<zimu_server::channel_push::ChannelPush> = Vec::new();
+    if qq_channel.is_some() {
+        push_channels.push(zimu_server::channel_push::make_channel_push::<QqPlatformAdapter>(
+            store.clone(),
+            qq_active.clone(),
+        ));
+    }
+    if wechat_channel.is_some() {
+        push_channels.push(zimu_server::channel_push::make_channel_push::<WechatPlatformAdapter>(
+            store.clone(),
+            wechat_active.clone(),
+        ));
+    }
+
+    // 优雅关闭句柄收集（QQ 先微信后，与启动序一致）
+    let mut channel_handles: Vec<ChannelHandle> = Vec::new();
+    if let Some(q) = qq_channel {
+        channel_handles.push(q);
+    }
+    if let Some(w) = wechat_channel {
+        channel_handles.push(w);
+    }
 
     // 调度与预警引擎（P4-T7，03 §12）：交易日盘中分钟级轮询（行情刷新 → 预警
     // 判定 → alerts 落库）+ 15:05 盘后链（equity_snapshots 快照 + /复盘 注入
@@ -486,59 +467,17 @@ async fn main() -> anyhow::Result<()> {
                     Box::pin(async move { bridge.submit_user_text(text).await.is_ok() })
                 }) as ReviewTrigger
             });
-            // 通道推送回调（T6/ADR-0011）：QQ 启用时接线，未启用 = None（与 review
-            // 同构降级）。送达 = 对全部已绑定会话逐条发 + 逐目标 push_log 留痕。
-            let (push_alert, push_summary) = if qq_channel.is_some() {
-                let store = store.clone();
-                let active = qq_active.clone();
-                let alert: zimu_agent::scheduler::AlertPusher = {
-                    let store = store.clone();
-                    let active = active.clone();
-                    Arc::new(move |a: zimu_agent::scheduler::NewAlertInfo| {
-                        let store = store.clone();
-                        let active = active.clone();
-                        Box::pin(async move {
-                            let msg = format!("子木预警 · {} {}", a.name, a.text);
-                            let subject = format!("预警 {} {}", a.code, a.alert_type);
-                            push_to_bound(&store, &active, "alert_push", &msg, &subject).await
-                        })
-                            as std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
-                    })
-                };
-                let summary: zimu_agent::scheduler::SummaryPusher =
-                    Arc::new(move |snap: zimu_store::EquitySnapshotRow| {
-                    let store = store.clone();
-                    let active = active.clone();
-                    Box::pin(async move {
-                        // 数字 = equity_snapshots 落库原值（03 §12 不现编）；
-                        // 复盘正文留在 Web 会话，这里只推数字摘要
-                        let msg = format!(
-                            "子木盘后摘要 {}\n总资产 {:.2}\n当日盈亏 {:+.2}（{:+.2}%）\n累计盈亏 {:+.2}（{:+.2}%）\n现金 {:.2} · 仓位 {:.1}% · 集中度 {:.2}",
-                            snap.date,
-                            snap.total_assets,
-                            snap.day_pnl,
-                            snap.day_pnl_pct,
-                            snap.total_pnl,
-                            snap.total_pnl_pct,
-                            snap.cash,
-                            snap.exposure,
-                            snap.hhi,
-                        );
-                        let subject = format!("盘后摘要 {}", snap.date);
-                        push_to_bound(
-                            &store,
-                            &active,
-                            "post_market_review_push",
-                            &msg,
-                            &subject,
-                        )
-                        .await
-                    })
-                        as std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
-                });
-                (Some(alert), Some(summary))
-            } else {
+            // 通道推送回调（T6/ADR-0011 → ADR-0017 D5）：按实际 spawn 的通道接线
+            // （push_channels 在装配处收集），未启用任何通道 = None（与 review
+            // 同构降级）。送达 = 逐通道对全部已绑定会话逐条发 + 逐目标 push_log
+            // 留痕；文案在 combine 闭包内组装恰一次（数字 = 落库原值不现编）。
+            let (push_alert, push_summary) = if push_channels.is_empty() {
                 (None, None)
+            } else {
+                (
+                    Some(zimu_server::channel_push::combine_alert_pushers(push_channels.clone())),
+                    Some(zimu_server::channel_push::combine_summary_pushers(push_channels)),
+                )
             };
             let core = zimu_agent::scheduler::SchedulerCore::new(
                 // 独立 AgentDeps（自己的 CalendarCache）：调度与工具面/HTTP 侧解耦，
@@ -605,6 +544,9 @@ async fn main() -> anyhow::Result<()> {
             market_url,
             shutdown_rx: sse_shutdown_rx,
             qq_online,
+            wechat_online,
+            qq_enabled: flags.qq,
+            wechat_enabled: flags.wechat,
         })
         // Web 上传（ADR-0015）：POST /api/chat multipart，自带 UploadState（与 AppState 解耦）
         .merge(zimu_server::chat_upload::router(upload_state))
@@ -629,7 +571,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(scheduler_handle, qq_channel, sse_shutdown_tx))
+        .with_graceful_shutdown(shutdown_signal(scheduler_handle, channel_handles, sse_shutdown_tx))
         .await
         .context("服务异常退出")?;
 
@@ -656,6 +598,9 @@ mod tests {
             static_ready: true,
             agent_online: false,
             qq_online: false,
+            wechat_online: false,
+            qq_enabled: false,
+            wechat_enabled: false,
             market_url: "http://127.0.0.1:8300".into(),
         };
         let value = serde_json::to_value(&sample).expect("Health 可序列化");

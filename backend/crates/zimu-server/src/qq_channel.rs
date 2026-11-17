@@ -19,99 +19,44 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use robit_chatbot::{ChatbotManager, PlatformAdapter};
+use robit_chatbot::ChatbotManager;
 use robit_qq::{QqConfig, QqPlatformAdapter};
 use tokio::sync::Notify;
-use tokio::task::JoinHandle;
 
 use crate::agent_bridge::AgentBridge;
+use crate::channel::ChannelHandle;
 // bin 模块引 lib 目标：走 zimu_server:: 路径（crate:: 是 bin 自己，见 agent_bridge 同款）
 use zimu_server::channel_adapter::BoundOnly;
 use zimu_server::holdings_api::SharedStore;
 
-/// 在线连接槽（T6 推送侧的"只推在线的"）：run_once 连上后写入 adapter，
-/// 退出/失败清空。宿主 sink 经它出站——未连接时 `send` 返回 None（如实失败，
-/// 不装送达）。锁内只 clone 出句柄，await 在锁外。
-#[derive(Clone, Default)]
-pub struct ActiveAdapter(Arc<std::sync::Mutex<Option<Arc<QqPlatformAdapter>>>>);
+/// 在线连接槽（T6 推送侧的"只推在线的"）：泛型槽收口在 lib `channel_push`
+/// （ADR-0017 D5 caps 参数化），QQ 是具体别名——main.rs 调用面不变。
+pub type ActiveAdapter = zimu_server::channel_push::ActiveAdapter<QqPlatformAdapter>;
 
-impl ActiveAdapter {
-    /// 出站一条文本：None = 通道当前不在线；Some(Err) = 平台发送失败。
-    pub async fn send(
-        &self,
-        chat_id: &str,
-        text: &str,
-    ) -> Option<robit_agent::error::Result<robit_chatbot::SendResult>> {
-        let adapter = self.0.lock().ok()?.clone()?;
-        Some(adapter.send_message(chat_id, text).await)
-    }
-
-    fn set(&self, adapter: Arc<QqPlatformAdapter>) {
-        if let Ok(mut slot) = self.0.lock() {
-            *slot = Some(adapter);
-        }
-    }
-
-    fn clear(&self) {
-        if let Ok(mut slot) = self.0.lock() {
-            *slot = None;
-        }
-    }
-}
-
-/// 通道句柄：health 的 `qq_online` 由 main 自持同一个 `Arc<AtomicBool>` 读；
-/// 优雅关闭调 `request_stop()` 后 `join()`。
-pub struct QQChannel {
-    stop: Arc<AtomicBool>,
-    shutdown: Arc<Notify>,
-    handle: JoinHandle<()>,
-}
-
-impl QQChannel {
-    /// 前提（main.rs 已判）：`[zimu.channels].qq = true` 且 Web 通道在线（共享三件套）。
-    /// working_dir 与 Web 同源（backend/）——人格 agent.md 与 memory.md 按 working_dir
-    /// 搜索，同源是 T8 的结构前提（ADR-0011）；`ZIMU_QQ_WORKDIR` 留作将来第二
-    /// Manager 防共库的覆盖开关，本轮不设。
-    pub fn spawn(
-        bridge: Arc<AgentBridge>,
-        store: SharedStore,
-        working_dir: PathBuf,
-        online: Arc<AtomicBool>,
-        active: ActiveAdapter,
-    ) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let shutdown = Arc::new(Notify::new());
-        let handle = tokio::spawn(run_supervisor(
-            bridge,
-            store,
-            working_dir,
-            online.clone(),
-            stop.clone(),
-            shutdown.clone(),
-            active,
-        ));
-        Self { stop, shutdown, handle }
-    }
-
-    /// 停：置位 + 唤醒 manager.run 的 select（robit-chatbot manager.rs:224-227 契约）。
-    pub fn request_stop(&self) {
-        self.stop.store(true, Ordering::SeqCst);
-        self.shutdown.notify_waiters();
-    }
-
-    /// 等通道任务退出 + 200ms flush（SQLite WAL 落盘——robit-qq main.rs:113 同款收尾）。
-    pub async fn join(self, wait: Duration) {
-        let stop = self.stop.clone();
-        let shutdown = self.shutdown.clone();
-        let _ = tokio::time::timeout(wait, async {
-            // 兜底再喊一次（幂等）：调用方 request_stop 与这里之间可能有竞态
-            stop.store(true, Ordering::SeqCst);
-            shutdown.notify_waiters();
-            let _ = self.handle.await;
-        })
-        .await;
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
+/// 前提（main.rs 已判）：`[zimu.channels].qq = true` 且 Web 通道在线（共享三件套）。
+/// working_dir 与 Web 同源（backend/）——人格 agent.md 与 memory.md 按 working_dir
+/// 搜索，同源是 T8 的结构前提（ADR-0011）；微信第二 Manager 同 working_dir 共库
+/// （ADR-0017 D2：(source, namespace) 隔离已收口，不拆目录——旧 ZIMU_QQ_WORKDIR
+/// 覆盖开关设想作废）。
+pub fn spawn(
+    bridge: Arc<AgentBridge>,
+    store: SharedStore,
+    working_dir: PathBuf,
+    online: Arc<AtomicBool>,
+    active: ActiveAdapter,
+) -> ChannelHandle {
+    let stop = Arc::new(AtomicBool::new(false));
+    let shutdown = Arc::new(Notify::new());
+    let handle = tokio::spawn(run_supervisor(
+        bridge,
+        store,
+        working_dir,
+        online.clone(),
+        stop.clone(),
+        shutdown.clone(),
+        active,
+    ));
+    ChannelHandle::new(stop, shutdown, handle)
 }
 
 async fn run_supervisor(

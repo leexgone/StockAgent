@@ -103,9 +103,16 @@ pub struct Health {
     pub static_ready: bool,
     /// Agent 是否在线（false = 缺 robit 配置或启动失败，/api/chat* 降级 503）
     pub agent_online: bool,
-    /// QQ 通道在线状态（T5）：false = 未启用（[zimu.channels].qq 缺省停用）/
-    /// 未连上/已退出——health 如实透出，不装在线
+    /// QQ 通道在线状态（T5）：false = 未启用/未连上/已退出——health 如实透出，
+    /// 不装在线（「未启用」与「离线」的区分看 qq_enabled）
     pub qq_online: bool,
+    /// 微信通道在线状态（ADR-0017，iLink Bot）：口径同 qq_online
+    pub wechat_online: bool,
+    /// QQ 通道启用开关快照（启动时 [zimu.channels].qq，ADR-0017 D6）：
+    /// 开关本体只在服务器配置文件（拍板⑤⑥），界面只读展示
+    pub qq_enabled: bool,
+    /// 微信通道启用开关快照（启动时 [zimu.channels].wechat）：口径同 qq_enabled
+    pub wechat_enabled: bool,
     /// 行情 sidecar 基地址（是否在线由 /api/market/status 探测，health 不打网络）
     pub market_url: String,
 }

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel";
 import { clockView, marketClock } from "../lib/clock";
 import { fixed, money } from "../lib/format";
+import { channelLabel, pushKindLabel } from "../lib/pushKind";
 import { useAlerts } from "../store/alerts";
 import { useChatHistory } from "../store/chatHistory";
 import { hydrateEntries } from "../lib/chatHydrate";
@@ -18,7 +19,7 @@ import { useUi } from "../store/ui";
  * 演示问答库（固定三层脚本 + 假 cites）更强：依据来源就是 Agent 实调的行情/持仓
  * 工具（tool_call/tool_result 如实展示），不伪造引用。
  * 右栏两卡：context（助理现在能看到什么，读 portfolio/alerts/clock 原值）、
- * sessions（最近会话 = push_log 定时任务留痕 + 微信渠道待 C4 接入）。原 limit 卡
+ * sessions（最近会话 = push_log 全通道留痕，ADR-0017）。原 limit 卡
  * 「它不会做的事」已移除（2026-11-03 拍板）——边界承诺由页头描述与免责脚注兜底
  * （docs/02 chat 展示口径）。建议问题 chips / ?q= 深链只预填输入不自动发送（真实
  * LLM，交用户确认）；例外 = `?q=…&send=1`（analysis 空态「去问答触发 /建议」
@@ -28,12 +29,6 @@ import { useUi } from "../store/ui";
  * 不清本地）；localStorage 降级为服务端不可达时的只读展示缓存（上限 30 条，
  * docs/02 chat 口径）。
  */
-
-/* push_log.kind → 会话文案（与 index 时间线同映射，03 §12 封闭词汇） */
-const KIND_LABEL: Record<string, string> = {
-  post_market_review: "盘后复盘",
-  alert_push: "预警推送",
-};
 
 /* 建议问题（通用真实问法；点击预填输入框，不自动发送） */
 const SUGGESTIONS = [
@@ -148,7 +143,7 @@ export default function ChatView({ now }: { now: Date }) {
           <button className="btn" id="clear-btn" onClick={() => void handleClear()}>
             清空会话
           </button>
-          <button className="btn" id="push-last" onClick={() => toast("微信推送随渠道接入（C4 拍板后）——当前仅本机会话")}>
+          <button className="btn" id="push-last" onClick={() => toast("即时推送端点另案——预警与盘后摘要已自动推送绑定的微信/QQ 会话")}>
             把最后一条推送到微信
           </button>
         </div>
@@ -194,7 +189,7 @@ export default function ChatView({ now }: { now: Date }) {
             <div className="card-head">
               <div>
                 <div className="card-title">最近会话</div>
-                <div className="card-sub">定时任务留痕 · 微信渠道待接入</div>
+                <div className="card-sub">定时任务与通道推送留痕 · 全通道</div>
               </div>
             </div>
             <div className="list" id="recent">
@@ -202,7 +197,7 @@ export default function ChatView({ now }: { now: Date }) {
                 pushRows.slice(0, 6).map((r, i) => (
                   <div className="list-item" data-od-id={`recent-item-${i}`} key={r.id}>
                     <span className="li-main">
-                      <span className="li-title">{r.channel === "agent" ? "定时任务" : r.channel} · {KIND_LABEL[r.kind] ?? r.kind}</span>
+                      <span className="li-title">{channelLabel(r.channel)} · {pushKindLabel(r.kind)}</span>
                       <span className="li-desc">{r.ok ? "已受理" : `受理失败：${r.detail}`}</span>
                     </span>
                     <span className="li-right">
@@ -213,7 +208,7 @@ export default function ChatView({ now }: { now: Date }) {
                 ))
               ) : (
                 <div className="empty" style={{ padding: "22px 14px" }}>
-                  还没有历史会话 · 盘后复盘（15:05）与微信消息完成后会归档在这里（微信随 C4 拍板接入）
+                  还没有历史会话 · 盘后复盘（15:05）与通道推送留痕会归档在这里
                 </div>
               )}
             </div>

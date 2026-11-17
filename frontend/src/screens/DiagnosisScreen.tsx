@@ -284,7 +284,7 @@ export default function DiagnosisScreen() {
             onClick={() =>
               toast(
                 perfWin
-                  ? `诊断摘要：${win} 日超额 ${pct(perfWin.cum - perfWin.bench_cum)}、回撤 ${fixed(perfWin.mdd, 1)}%。报告生成与微信推送随渠道接入（C4 拍板后）。`
+                  ? `诊断摘要：${win} 日超额 ${pct(perfWin.cum - perfWin.bench_cum)}、回撤 ${fixed(perfWin.mdd, 1)}%。诊断报告推送另案；预警与盘后摘要已推送绑定的微信/QQ 会话。`
                   : "暂无净值样本可诊断 · 录入第一笔后报告才有内容",
               )
             }

@@ -38,13 +38,14 @@ cd ..\frontend; npm run dev            # 前端 :5173，/api 已反代到 :8080
 浏览器访问 `http://127.0.0.1:5173`（开发）或 `http://127.0.0.1:8080`（生产形态）。
 workspace 里有多个 bin，`cargo run` 必须带 `-p` 指明。
 
-停止服务：控制台按 **Ctrl+C** 即优雅关闭——先中止预警调度器，再断开全部 SSE
-长连接，等在途请求完成后退出（数据库连接与 Agent 会话随进程释放）。
+停止服务：控制台按 **Ctrl+C** 即优雅关闭——先中止预警调度器，再逐通道停 IM
+supervisor（QQ/微信，notify + 等退出 + WAL flush），最后断开全部 SSE 长连接，
+等在途请求完成后退出（数据库连接与 Agent 会话随进程释放）。
 
 ## 会话端点（P2-T3 SSE 桥）
 
 Agent 随服务启动装配（装配线在 `zimu_agent::assembly::AgentCore`——Web 桥、
-QQ 通道与 zimu-agent-cli 共享同一 `LlmClient`/`ToolRegistry`/`SkillRegistry`
+QQ/微信通道与 zimu-agent-cli 共享同一 `LlmClient`/`ToolRegistry`/`SkillRegistry`
 三 Arc，ADR-0011/T1；`CliFrontend` 换成 robit-web 的 `WebFrontend`：`WebEvent`
 broadcast 扇出 + 单槽位确认，P2-T5 起由 robit 提供）。宿主侧只剩 axum 接线
 （SSE 编码、`connected` 首帧——P4-T6 起含 `skills` 键、POST → `WebBridge` 路由，
@@ -64,11 +65,43 @@ read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent medi
 （R12 诉求上游公开）；axum 因此启用 `multipart` feature。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.2.1 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.3.0 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
 宿主循环只兜残余退出。health 透出 `qq_online`。
+
+微信 IM 通道（P6-T2，ADR-0017 / C4 关闭）：`[zimu.channels].wechat = true` 时挂
+`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.3.0 库面消费）——
+微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
+长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
+`(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
+入站过同一绑定白名单（装饰器零改动换词汇），出站推送共用 **caps 参数化链**
+（`channel_push.rs`：通道词汇 = `T::platform_name()`、清洗/截断 = `T::capabilities()`，
+QQ 数值行为逐位不变；复合 pusher 逐通道顺序 OR，`SchedulerCore` 签名不动）。
+health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快照，
+界面只读区分「未启用」与「离线」，拍板⑤⑥）。
+
+**登录 = 部署侧 CLI 扫码（停服约定，硬需求）**：
+
+```powershell
+# 先停 zimu-server——WechatState::save 非原子整文件覆盖且运行中无互斥，
+# 健康期并发登录写入的新 token 会被 adapter 旧内存快照覆盖（ADR-0017 D3 / R13④）
+cargo install robit-wechat --version 0.3.0   # 或 robit 仓 cargo run -p robit-wechat -- login
+robit-wechat -w e:\Github\StockAgent\backend login   # 终端二维码 + 配对码，一次性换长期 token
+# 产物 backend/.robit/wechat-state.json（含 bot_token 凭据，已被 **/.robit/* gitignore
+# 覆盖，**勿加豁免**）；再翻 config.toml [zimu.channels] wechat = true → 起服
+```
+
+**token 失效（errcode -14）是终态**：无自动重登录。supervisor 停止快速重建
+（同 token 重建无意义），error 日志给重扫指引，转 **60s 低频只读探测**
+（重解析 `WechatConfig::from_config` 比对 bot_token）——变化即自动重建
+（重扫后 ≤60s 零接触恢复；失效态 adapter 静默无 state 写，**不停服重扫安全**）。
+局限如实记：同值重登录 / config override 未更新不可检测。凭据闸门：
+`[channels.wechat_bot].bot_token` override 含 `${` 残留 → 拒绝并退避（state
+文件来的扫码 token 不会含占位符）。robit 缺口批见 `docs/07` R13（入站媒体绕过
+`max_media_bytes` 守卫 / silk 语音不可消费 / Image MIME 恒 jpeg / state 非原子），
+子木零绕过（白名单限缩风险面 + 停服约定承接）。
 
 | 端点 | 说明 |
 |---|---|
@@ -286,7 +319,7 @@ draft 2020-12）三连：
    会直接红）；
 2. seeded 测试服务（FakeApi 注入，`tests/common/` 共享装置）全端点**实时
    响应**过其声明的响应 schema，含 422/404/400/503 错误契约；
-3. **`fixtures/api/` 35 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
+3. **`fixtures/api/` 36 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
 
 health/chat 实现在 bin（依赖 robit 装配），契约在 `openapi.rs` 以 doc-stub
 声明、类型定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化键集 == schema
@@ -318,8 +351,8 @@ SQLite 单文件（C9 已决：rusqlite bundled，备份 = 拷文件；`.db` 在
 note）；纯增表，v2 老库自动前进、旧数据无损（`watchlist_migrates_v1_db_to_v2` 覆盖）；八表齐备。
 
 迁移机制：`PRAGMA user_version` 逐版前进，每版一个事务；已发布版本的 SQL 永不修改，
-新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.41，随
-robit 0.1.28 从 0.40 升）——`libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
+新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.42，随
+robit 0.2.0 从 0.41 升）——`libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
 
 ```powershell
 cargo test -p zimu-store   # 28 项：录入事务/校验拒绝/回滚/重启不丢数据/行情回写（P4-T4）/建议留档（P4-T6）/
@@ -340,7 +373,15 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.2.1`（0.2.1 = M1 收尾，同日发版：附件
+robit 全家消费 crates.io 正式版 `0.3.0`（0.3.0 = 微信 iLink Bot 渠道接入，
+2026-11-17 发版，ADR-0017 / C4 关闭：新 crate `robit-wechat`（微信官方 iLink
+AI Bot，协议 SDK weixin-agent 0.3）+ `PlatformCaps::wechat()` /
+`MarkdownFeatures::wechat()` + manager 附件契约（local_path 已设跳过通用下载）。
+全 additive：trait/签名不变、robit-web 零 diff（wire 不变）、存储 v7 零迁移、
+robit-agent/qq/web 源码零改动纯版本跟随、rusqlite 0.42 无连带——QQ 消费代码
+零适配。子木消费面：`wechat_channel.rs` 双 manager 接线 + `channel_push.rs`
+caps 参数化推送；缺口批 R13 登记移交，零绕过）。
+上一版 0.2.1（M1 收尾，2026-11-14 同日发版：附件
 标注行携带本地保存路径——`describe_with_local` 相对 working_dir 显示，
 非图数据文件对模型从「能发现、够不着」变为路径可见；内容读取仍需宿主
 注册收读工具，子木另案。纯 additive 无签名变化，子木纯升版）。
@@ -431,11 +472,18 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.2.1 正式版，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.3.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
                             ├─ agent_bridge.rs   Agent 装配（工具面/Skill 来自 zimu-agent；WebBridge 接线）
+                            ├─ channel.rs        ChannelHandle（QQ/微信 supervisor 共享句柄：request_stop + join WAL flush，ADR-0017）
+                            ├─ qq_channel.rs     QQ 通道 supervisor（T5：退避重建 + 占位符凭据闸门；ActiveAdapter 泛型槽别名）
+                            ├─ wechat_channel.rs 微信通道 supervisor（ADR-0017：iLink Bot + token 失效终态 60s 探测恢复 + 凭据闸门）
+                            ├─ channel_push.rs   caps 参数化推送链（lib：ActiveAdapter<T> + push_to_bound<T> + 文案组装 + 复合 pusher，ADR-0017 D5）
+                            ├─ channel_adapter.rs BoundOnly 入站白名单装饰器（lib，通道无关；fail-closed）
+                            ├─ channel_bindings.rs /api/channel_bindings GET/POST/DELETE（lib，绑定关系界面管理拍板⑤）
+                            ├─ testutil.rs       lib 单测共享装置（MockPlatform 宏 + 临时 store，#[cfg(test)]）
                             ├─ holdings_api.rs   /api/holdings* 录入流程（P4-T1）+ 直接维护 PUT/DELETE + /api/holding_edits 留痕读取（ADR-0009）；错误→状态码映射，utoipa::path 契约标注
                             ├─ market_api.rs     /api/market/*（P4-T4：status/quote/kline/cb_list/calendar；refresh 处理器 P4-T6 起薄壳调 zimu-agent::service）
                             ├─ alerts_api.rs     /api/alerts* /api/equity_snapshots /api/push_logs（P4-T7 + P5-T2：调度引擎落库内容的读取与归档，不生成不改写）
