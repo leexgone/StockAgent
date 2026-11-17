@@ -175,8 +175,15 @@ jobs:
           print(f"smoke OK: version={h['version']} static_ready={h['static_ready']}")
           EOF
           curl -fsS http://127.0.0.1:8080/ | grep -qi '<!doctype html'
-      - name: sidecar healthz（容器网络内）
-        run: docker compose exec -T datafetch python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8300/healthz', timeout=3); print('healthz OK')"
+      - name: sidecar healthz（容器网络内，轮询——Python 重导入启动慢于 server）
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose exec -T datafetch python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8300/healthz', timeout=3)" 2>/dev/null; then
+              echo "healthz OK"; exit 0
+            fi
+            sleep 2
+          done
+          echo "sidecar healthz 60s 超时"; docker compose logs datafetch; exit 1
       - name: 失败日志
         if: failure()
         run: docker compose logs
