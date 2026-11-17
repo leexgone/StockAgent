@@ -19,6 +19,8 @@ frontend/          React + TS + Vite 前端：index 工作台 + dashboard 总览
                    src/api/schema.d.ts 为 OpenAPI 契约生成的 TS 类型面（P4-T5，`npm run gen:api` 再生成，不手改）；
                    P5-T1 工程约定落地（ADR-0008）：react-router 路由表 src/routes.ts + openapi-fetch 客户端 src/api/client.ts + zustand 状态基线
 datafetch/         Python 行情 sidecar（uv + FastAPI + akshare/baostock）：P4-T3 正式化——`zimu_datafetch/` 包（/quote /kline /cb_list /calendar /sector_map，兜底链+熔断+限频+缓存+错误契约；/sector_map 行业映射 P7-T6/ADR-0016），spike 探测脚本保留为复现入口
+deploy/            发布基建（ADR-0018）：docker/{server.Dockerfile,datafetch.Dockerfile,entrypoint.sh} + config.example.toml（容器播种净化模板）；仓库根 compose.yaml / .env.example / .dockerignore
+.github/workflows/ CI 门禁 ci.yml（前端漂移守卫 + 后端全 workspace + datafetch 双架构）与 tag 驱动 release.yml（版本守卫 → 双架构矩阵 → manifest 合并 → 容器冒烟 → GitHub Release；GHCR GITHUB_TOKEN 零额外 secrets）
 design/            界面原型（P5-T3 已冻结 2026-10-30）：7 个 html + assets/{ui.css, data.js, charts.js}——设计参照与像素/交互验收基准，生产实现在 frontend/，原型只保留不新增功能
 fixtures/golden/   黄金测试向量（P3）：数字口径的权威样例集，Rust 领域库与 TS 共享层跑同一份；schema 见 03 附录
 fixtures/api/      API 响应样例（P4-T5）：每端点一份提交样例，契约测试对其过 OpenAPI schema 校验；前端可直接当 mock
@@ -67,6 +69,10 @@ docs/decisions/    ADR 决策记录
 **中文文案**
 - 界面文案与文档用简体中文，技术标识符保持英文；数字用 `font-variant-numeric: tabular-nums`，价格/代码走 `--font-mono`。
 - 金额、百分比的格式化统一走 `ZM.money / fmt / pct / wan`，不要手搓 `toFixed` 拼百分号。
+
+## 发布形态（ADR-0018，2026-11-17）
+
+Docker 双镜像 + compose 一键起：`ghcr.io/leexgone/zimu`（server + 前端产物 + robit-wechat 登录 CLI + 智能体 Python 数据环境）+ `ghcr.io/leexgone/zimu-datafetch`（无状态 sidecar，仅容器网络）；仓库根 `compose.yaml`，数据落命名卷 `zimu-data`（/data = WORKDIR：zimu.db/.robit/media/images 全套）。容器几何：烘焙资产在 /app（static/skills/defaults），env 钉死 `ZIMU_STATIC_DIR=/app/static`、`ZIMU_SKILLS_DIR=/app/skills`、`ZIMU_ADDR=0.0.0.0:8080`（ZIMU_DB_PATH 不设，缺省落卷）；entrypoint 幂等播种人格/config（永不覆盖已有）+ `exec "$@"`（compose run 登录不被吞）；`STOPSIGNAL SIGINT` 对上 tokio ctrl_c 优雅关闭（backend 零改动）。**凭据单通道**：只走 compose 根 .env（env_file），卷内勿放 .robit/.env（robit set_var 无条件覆盖容器 env）。发布 = tag 驱动（push v* → 版本守卫 → CI 门禁 → amd64/arm64 原生 runner 矩阵 → GHCR manifest 合并 → 容器冒烟 → GitHub Release）；三处版本字段（Cargo workspace/package.json/pyproject）发布前手工同步，bump 连带 openapi.json 再生成 + gen:api。智能体运行时依赖三层：烘焙 pandas/openpyxl/xlrd/charset-normalizer（/opt/agent-env）+ 卷上 venv 自助扩展（/data/.venv-agent，持久）+ 派生镜像 apt。微信登录 = `compose stop zimu` → `compose run --rm -it --no-deps zimu robit-wechat login` → start（停服约定照旧 ADR-0017）。完整指南 `docs/08-release.md`。
 
 ## 验证方式
 
