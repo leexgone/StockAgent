@@ -47,6 +47,34 @@ jobs:
         # --no-fail-fast：首个 Linux 跑曾 fail-fast 挡住后续集成测试，一次看全平台兼容面
         run: cargo test --workspace --no-fail-fast
 
+  image-build:
+    # Dockerfile 门禁（2026-11-17 增）：镜像编译此前只在 release 才验证——
+    # chef 依赖层/缓存挂载改动在 PR/main 即构建 + 起服 + health 断言。
+    # runner 的 crates.io 网络正常（本机容器出境慢，本地全量构建不具验证可行性）。
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/server.Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: zimu:ci
+          cache-from: type=gha,scope=image-ci
+          cache-to: type=gha,mode=max,scope=image-ci
+      - name: 容器冒烟（entrypoint 播种 + health 断言）
+        run: |
+          docker run -d --name zimu-ci -p 8080:8080 zimu:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/api/health > /tmp/h.json 2>/dev/null; then break; fi
+            sleep 2
+          done
+          cat /tmp/h.json
+          python3 -c "import json; h=json.load(open('/tmp/h.json')); assert h['ok'] and h['static_ready'], h"
+          docker rm -f zimu-ci
+
   datafetch:
     strategy:
       fail-fast: false

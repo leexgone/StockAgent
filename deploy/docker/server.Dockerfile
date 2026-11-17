@@ -19,7 +19,8 @@ RUN npm run build
 FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --locked
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo install cargo-chef --locked
 # 登录 CLI 随镜像（D7）：不依赖 workspace 源码，置于源码 COPY 之前——层近乎
 # 永久缓存（crate 自带 Cargo.lock，--locked 可复现）；独立 target 目录。
 ENV CARGO_TARGET_DIR=/src/cli-target
