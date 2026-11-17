@@ -36,6 +36,11 @@ COPY backend/crates/zimu-agent-cli/Cargo.toml crates/zimu-agent-cli/Cargo.toml
 COPY backend/crates/zimu-domain/Cargo.toml crates/zimu-domain/Cargo.toml
 COPY backend/crates/zimu-store/Cargo.toml crates/zimu-store/Cargo.toml
 COPY backend/crates/zimu-market/Cargo.toml crates/zimu-market/Cargo.toml
+# chef prepare 需可解析的 manifest：cargo 要求目标存在——六成员置 dummy src
+# （cook 用 recipe 自建 dummy 工程，真实源码随后 COPY 覆盖；CI image-build 门禁实证）
+RUN for c in zimu-server zimu-agent zimu-agent-cli zimu-domain zimu-store zimu-market; do \
+      mkdir -p crates/$c/src && echo "" > crates/$c/src/lib.rs; \
+    done
 RUN cargo chef prepare --recipe-path recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo chef cook --release --recipe-path recipe.json
