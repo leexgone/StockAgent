@@ -242,12 +242,18 @@ impl IntoResponse for UploadError {
 // 落盘卫生规则（复刻 robit-agent media.rs 私有 fn，R12 诉求上游公开）
 // ============================================================================
 
-/// 文件名消毒（复刻 robit-agent media.rs:125-146）：
+/// 文件名消毒（复刻 robit-agent media.rs:125-146，一处有意硬化）：
 /// 只取 `file_name()` 分量（剥目录与 `..`）→ 滤控制字符及残留 `/ \ :` →
 /// trim 空白与首尾点 → 空结果 UUID v4 → 无扩展名按 content_type 补。
+/// **跨平台硬化（2026-11-17，首次 Linux CI 暴露）**：取分量前先把反斜杠归一为
+/// 正斜杠——`Path::file_name()` 平台相关（Linux 不认 `\` 分隔符，Windows 客户端
+/// 上传的 `a/b\c:d.txt` 在 Linux 会残留 `b` 成分），归一后同一上传跨平台落盘同名，
+/// Windows 风格穿越在 Linux 服务端也被完整剥除（纵深防御）。上游 robit 原版无此
+/// 归一（IM 附件走 robit 自己的消毒）——有意分歧已记 docs/07 R12③ 移交。
 fn sanitize_filename(filename: Option<&str>, content_type: Option<&str>) -> String {
-    let component = filename
-        .and_then(|name| Path::new(name).file_name())
+    let normalized = filename.map(|n| n.replace('\\', "/")).unwrap_or_default();
+    let component = Path::new(&normalized)
+        .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut cleaned: String = component

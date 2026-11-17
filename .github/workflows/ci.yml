@@ -44,7 +44,8 @@ jobs:
         with:
           workspaces: backend
       - name: 全 workspace 测试（含契约三连 + persona 守护 + 黄金向量）
-        run: cargo test --workspace
+        # --no-fail-fast：首个 Linux 跑曾 fail-fast 挡住后续集成测试，一次看全平台兼容面
+        run: cargo test --workspace --no-fail-fast
 
   datafetch:
     strategy:
