@@ -604,7 +604,7 @@ export default function DashboardScreen({ now }: { now: Date }) {
           </div>
         )}
         <div className="card-foot" style={{ justifyContent: "space-between" }}>
-          <span className="hint" style={{ margin: 0 }}>预警触发即推送绑定会话；推送订阅（时段/静音）另案落地，见「微信助理接入」。</span>
+          <span className="hint" style={{ margin: 0 }}>预警触发即推送绑定会话；推送订阅（时段/静音）另案落地，见「助理接入」。</span>
           <Link className="btn btn-sm" to="/wechat">通道接入</Link>
         </div>
       </section>

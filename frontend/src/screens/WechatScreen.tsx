@@ -9,7 +9,7 @@ import { usePushLog } from "../store/push_log";
 import { useUi } from "../store/ui";
 
 /**
- * 微信助理接入（wechat 屏，P5-T2 收尾 / ADR-0017，C4 关闭）—— 对照基准
+ * 助理接入（wechat 屏，P5-T2 收尾 / ADR-0017，C4 关闭）—— 对照基准
  * design/wechat.html（冻结原型，服务号语义作废，生产形态见 docs/02 wechat 段）。
  *
  * 六卡生产形态：
@@ -161,7 +161,7 @@ export default function WechatScreen() {
     <main className="page" data-od-id="wechat-page">
       <div className="page-head">
         <div>
-          <div className="eyebrow">微信助理接入</div>
+          <div className="eyebrow">助理接入</div>
           <h1 className="page-title">让预警和摘要送到手机上</h1>
           <p className="page-desc">
             微信（iLink Bot）与 QQ 双通道共享同一个助理：私聊问答、预警与盘后数字摘要推送。

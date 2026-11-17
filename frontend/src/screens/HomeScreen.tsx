@@ -103,6 +103,9 @@ export default function HomeScreen({ now }: HomeScreenProps) {
       : null;
   const covered = coveredCount(adviceRows);
 
+  /* IM 通道在线数（health 快照；绑定即推，接入页管理白名单——ADR-0017） */
+  const chanOnline = health ? (health.qq_online ? 1 : 0) + (health.wechat_online ? 1 : 0) : null;
+
   /* 六张界面入口卡（stat 全部现算自真实数据；模板与原型 SCREENS 逐一对应） */
   const screens: { path: string; Icon: () => React.JSX.Element; name: string; desc: string; stat: string }[] = [
     {
@@ -131,9 +134,9 @@ export default function HomeScreen({ now }: HomeScreenProps) {
       stat: mdd !== null && agg ? `HHI ${agg.hhi.toFixed(3)} · 回撤 ${fixed(mdd, 1)}%` : "待净值积累 · 每交易日 15:05 快照",
     },
     {
-      path: "/wechat", Icon: IconWechat, name: "微信助理接入",
-      desc: "绑定微信后，盘中预警、收盘复盘与建议确认都送到手机上。",
-      stat: "渠道待接入 · C4 待拍板",
+      path: "/wechat", Icon: IconWechat, name: "助理接入",
+      desc: "绑定微信 / QQ 会话后，盘中预警与盘后数字摘要都送到手机上。",
+      stat: chanOnline === null ? "连接中…" : chanOnline > 0 ? `${chanOnline} 个 IM 通道在线 · 绑定即推` : "IM 通道未在线 · 见接入页",
     },
   ];
 
