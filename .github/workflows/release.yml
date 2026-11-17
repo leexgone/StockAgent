@@ -1,0 +1,211 @@
+# 发布流水线（ADR-0018 D2/D3/D4）：push v* tag → 版本守卫 → CI 门禁 →
+# 2 镜像 × 2 架构原生 runner 矩阵（push-by-digest）→ manifest 合并（vX.Y.Z + latest）
+# → 容器冒烟 → GitHub Release。GHCR 用内置 GITHUB_TOKEN，零额外 secrets。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version-guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag 与三处版本字段一致性（发布前手工同步，ADR-0018 D4）
+        run: |
+          python3 - <<'EOF'
+          import json, os, sys, tomllib
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          versions = {
+              "backend/Cargo.toml": tomllib.load(open("backend/Cargo.toml", "rb"))["workspace"]["package"]["version"],
+              "frontend/package.json": json.load(open("frontend/package.json"))["version"],
+              "datafetch/pyproject.toml": tomllib.load(open("datafetch/pyproject.toml", "rb"))["project"]["version"],
+          }
+          bad = {k: v for k, v in versions.items() if v != tag}
+          if bad:
+              print(f"::error::版本不一致：tag v{tag} vs {bad}——发布前手工同步三处字段（docs/08 §8）")
+              sys.exit(1)
+          print(f"version guard OK: v{tag} == 三处字段")
+          EOF
+
+  tests:
+    needs: version-guard
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [version-guard, tests]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - key: server
+            name: zimu
+            dockerfile: deploy/docker/server.Dockerfile
+          - key: sidecar
+            name: zimu-datafetch
+            dockerfile: deploy/docker/datafetch.Dockerfile
+        arch:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            suffix: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            suffix: arm64
+    runs-on: ${{ matrix.arch.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: cmake 兜底（server 的 aws-lc-sys；sidecar 腿无害秒过）
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image.name }}
+            org.opencontainers.image.description=子木 · 个人股票助理（StockAgent）
+            org.opencontainers.image.licenses=Apache-2.0
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.arch.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # provenance:false——缺省 attestation 生成 unknown/unknown 附加 manifest
+          # 干扰 imagetools 合并（ADR-0018 D3 取舍）
+          provenance: false
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image.key }}-${{ matrix.arch.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.key }}-${{ matrix.arch.suffix }}
+      - name: 导出 digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.key }}-${{ matrix.arch.suffix }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests/server
+          pattern: digests-server-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests/sidecar
+          pattern: digests-sidecar-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 合并双架构 manifest（vX.Y.Z + latest）
+        run: |
+          owner="${{ github.repository_owner }}"
+          ver="${GITHUB_REF_NAME}"
+          for pair in "zimu:server" "zimu-datafetch:sidecar"; do
+            img="${pair%%:*}"; dir="${pair##*:}"
+            refs=$(printf "ghcr.io/$owner/$img@sha256:%s " $(ls "/tmp/digests/$dir"))
+            docker buildx imagetools create \
+              -t "ghcr.io/$owner/$img:$ver" \
+              -t "ghcr.io/$owner/$img:latest" \
+              $refs
+            docker buildx imagetools inspect "ghcr.io/$owner/$img:$ver"
+          done
+
+  smoke:
+    needs: manifest
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4 # compose.yaml / .env.example
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 拉发布镜像 compose 起服 + health 断言
+        run: |
+          owner="${{ github.repository_owner }}"
+          ver="${GITHUB_REF_NAME}"
+          sed -i "s|ghcr.io/leexgone/zimu:latest|ghcr.io/$owner/zimu:$ver|; s|ghcr.io/leexgone/zimu-datafetch:latest|ghcr.io/$owner/zimu-datafetch:$ver|" compose.yaml
+          cp .env.example .env
+          echo "ZIMU_SCHEDULER_DISABLE=1" >> .env # 冒烟不跑调度（设任意值即停用）
+          docker compose up -d --no-build
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/api/health > /tmp/health.json 2>/dev/null; then break; fi
+            sleep 2
+          done
+          cat /tmp/health.json
+          python3 - <<'EOF'
+          import json, os
+          h = json.load(open("/tmp/health.json"))
+          ver = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          assert h["ok"] is True, "health.ok != true"
+          assert h["version"] == ver, f"version {h['version']} != tag {ver}"
+          assert h["static_ready"] is True, "static_ready != true（前端产物未烘焙好）"
+          print(f"smoke OK: version={h['version']} static_ready={h['static_ready']}")
+          EOF
+          curl -fsS http://127.0.0.1:8080/ | grep -qi '<!doctype html'
+      - name: sidecar healthz（容器网络内）
+        run: docker compose exec -T datafetch python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8300/healthz', timeout=3); print('healthz OK')"
+      - name: 失败日志
+        if: failure()
+        run: docker compose logs
+      - name: 清场
+        if: always()
+        run: docker compose down -v
+
+  release:
+    needs: [manifest, smoke]
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Docker 安装（ADR-0018）
+
+            ```bash
+            curl -LO https://raw.githubusercontent.com/${{ github.repository }}/main/compose.yaml
+            curl -L -o .env.example https://raw.githubusercontent.com/${{ github.repository }}/main/.env.example
+            cp .env.example .env   # 填入模型/QQ 凭据（空 key 也能起，Agent 离线但服务不瘫）
+            docker compose pull && docker compose up -d
+            # → http://127.0.0.1:8080
+            ```
+
+            - 镜像：`ghcr.io/${{ github.repository_owner }}/zimu` + `zimu-datafetch`（linux/amd64 + linux/arm64）
+            - 微信登录（停服约定）：`docker compose stop zimu` → `docker compose run --rm -it --no-deps zimu robit-wechat login` → `docker compose start zimu`
+            - 完整指南：[docs/08-release.md](https://github.com/${{ github.repository }}/blob/main/docs/08-release.md)
+            - ⚠️ 首发布一次性：GHCR 两个 package 默认 private，需在 GitHub → Packages → Package settings 手动设 Public（docs/08 §8）

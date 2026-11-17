@@ -1,0 +1,67 @@
+# CI 门禁（ADR-0018 D4）：PR / push main 跑测试，不出镜像。
+# 三门禁对齐 CLAUDE.md「验证方式」：全离线（联网冒烟 live_smoke 不进 CI）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call: # release.yml 复用
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: 契约类型漂移守卫（gen:api 后 schema.d.ts 必须零 diff）
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/schema.d.ts
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: cmake 兜底（aws-lc-sys 构建依赖；runner 已装则秒过）
+        run: sudo apt-get update && sudo apt-get install -y cmake
+        working-directory: .
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - name: 全 workspace 测试（含契约三连 + persona 守护 + 黄金向量）
+        run: cargo test --workspace
+
+  datafetch:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: datafetch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: datafetch/uv.lock
+      - name: lock 可安装性（arm64 腿 = mini-racer 换名验证门，ADR-0018 D10）
+        run: uv sync --frozen
+      - run: uv run pytest
