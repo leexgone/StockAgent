@@ -1,0 +1,45 @@
+# 构建上下文纪律（ADR-0018）：真实账本 / 运行态 / 凭据永不进镜像。
+# docker 不读 .gitignore——本文件独立维护；人格豁免用内容级写法（目录级排除会挡死豁免）。
+
+.git
+.github
+.claude
+.vscode
+.file-versions
+.od
+.robit
+design
+docs
+fixtures
+screenshots
+shots
+*.log
+
+# 构建产物与依赖（镜像内重建，防陈旧产物混入）
+**/target
+**/node_modules
+frontend/dist
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+
+# 开发机运行态与凭据（backend/ 是裸机 working_dir）
+backend/zimu.db*
+backend/media
+backend/images
+backend/.robit/*
+!backend/.robit/prompts
+!backend/.robit/prompts/agent.md
+.env
+.env.*
+**/.env
+**/secrets.*
+*.csv
+
+# sidecar 镜像只 COPY pyproject/uv.lock/zimu_datafetch——其余不进上下文
+datafetch/tests
+datafetch/spike_probe*.py
+datafetch/live_smoke.py
+datafetch/start_sidecar.ps1

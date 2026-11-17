@@ -8,6 +8,7 @@
 *.json text eol=lf
 *.yml  text eol=lf
 *.py   text eol=lf
+*.sh   text eol=lf # 容器 entrypoint 等 shell 脚本：CRLF 会炸 /bin/sh（ADR-0018）
 
 # 二进制，不做文本处理
 *.png binary

@@ -1,0 +1,41 @@
+# 子木一键部署（ADR-0018）：cp .env.example .env 填凭据 → docker compose up -d
+# → http://127.0.0.1:8080。完整指南 docs/08-release.md。
+# 凭据单通道纪律（D8）：只放本目录 .env（env_file 注入容器 env）；
+# 勿在卷内 /data/.robit/ 放 .env——robit 的 .env 加载会无条件覆盖容器 env。
+services:
+  zimu:
+    image: ghcr.io/leexgone/zimu:latest
+    build:
+      context: .
+      dockerfile: deploy/docker/server.Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080" # 内网监听面（ADR-0005）；局域网/反代改 "8080:8080" 并自加鉴权
+    volumes:
+      - zimu-data:/data
+      # bind 挂载备选（两坑见 docs/08 §1）：
+      # - ./data:/data # Linux 先 mkdir data && sudo chown 1000:1000 data；Windows Docker Desktop 不建议（SQLite WAL 锁语义）
+    env_file: .env
+    environment:
+      TZ: Asia/Shanghai
+      ZIMU_MARKET_URL: http://datafetch:8300
+      # ZIMU_SCHEDULER_DISABLE: "1" # 可选：停用调度器（设任意值即停用）
+    restart: unless-stopped
+    stop_signal: SIGINT # 对上 tokio ctrl_c 优雅关闭（D6：调度器→通道→SSE→排空）
+    stop_grace_period: 30s
+    depends_on:
+      - datafetch # 普通依赖即可：server 缺 sidecar 降级 503 不瘫（设计行为）
+
+  datafetch:
+    image: ghcr.io/leexgone/zimu-datafetch:latest
+    build:
+      context: .
+      dockerfile: deploy/docker/datafetch.Dockerfile
+    expose:
+      - "8300" # 仅容器网络，不映射宿主（ADR-0005 内网面）
+    environment:
+      TZ: Asia/Shanghai
+    restart: unless-stopped
+    # 无卷：纯内存缓存零落盘，重启清零是设计语义
+
+volumes:
+  zimu-data:

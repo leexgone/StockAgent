@@ -1,0 +1,77 @@
+# ── 子木容器配置模板（ADR-0018 D8）─────────────────────────────────
+# entrypoint 首跑播种到 /data/.robit/config.toml（永不覆盖已有文件）。
+# 凭据纪律：只允许整串 ${VAR} 占位、永不写密钥字面量；真实值经 compose 根 .env
+# （env_file）注入容器 env 展开消费。勿在卷内 .robit/ 放 .env（robit 加载会
+# 无条件覆盖容器 env，docs/08 §2）。
+# 通道开关缺省停用 fail-closed（ADR-0011 拍板⑥）：填好凭据后翻 true 并重启。
+default_model = "qwen/qwen3.7-plus"
+default_image_model = "wanxiang/wan2.7-image-pro"
+
+[providers.qwen]
+name = "通义千问"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key = "${DASHSCOPE_API_KEY}"
+
+[[providers.qwen.models]]
+id = "qwen3.7-plus"
+thinking = "on" # 思考过程输出（R7）；不需要可改 "auto"
+name = "Qwen 3.7 Plus"
+context_window = 1000000
+max_output_tokens = 8192
+supports_images = true
+supports_tools = true
+
+[[providers.qwen.models]]
+id = "qwen-max"
+name = "Qwen Max"
+context_window = 32768
+max_output_tokens = 8192
+supports_images = true
+supports_tools = true
+
+[[providers.qwen.models]]
+id = "qwen-plus"
+name = "Qwen Plus"
+context_window = 131072
+max_output_tokens = 8192
+supports_images = true
+supports_tools = true
+
+[image_providers.wanxiang] # 万相（DashScope 协议）；base_url 可换自有网关/套餐端点
+name = "通义万相"
+base_url = "https://dashscope.aliyuncs.com/api/v1"
+api_key = "${BAILIAN_API_KEY}"
+protocol = "dashscope" # dashscope | openai
+mode = "async" # sync | async（仅 dashscope 有效）
+poll_interval_secs = 3
+poll_timeout_secs = 300
+
+[[image_providers.wanxiang.models]]
+id = "wan2.7-image-pro"
+name = "万相2.7 Pro"
+
+[[image_providers.wanxiang.models]]
+id = "wan2.7-image"
+name = "万相2.7"
+
+[channels.qq_bot]
+app_id = "${ZIMU_QQ_APP_ID}"
+app_secret = "${ZIMU_QQ_APP_SECRET}"
+
+# 微信无配置节：bot_token 由扫码登录落 .robit/wechat-state.json
+# （docker compose run --rm -it --no-deps zimu robit-wechat login，docs/08 §3）。
+
+# ── 子木自有节：通道启用开关（robit 类型化解析忽略本节，两边读同一文件互不冲突）──
+[zimu.channels]
+qq = false
+wechat = false
+
+[app]
+# ADR-0014 拍板：确认关闭、自动执行（工具无沙箱，人格纪律 + 绑定白名单 + 域校验
+# 是防线）。重开确认 = 翻 false + 先补 docs/07 C13 两洞。
+auto_approve = true
+# 通道库隔离前提（ADR-0011）：true 会把 robit 会话库指到 ~/.robit/memory/ 撞库——保持 false。
+global_storage = false
+max_steps = 20
+log_level = "info"
+log_file = true
