@@ -30,6 +30,7 @@ pub mod config_flags;
 pub mod holdings_api;
 pub mod market_api;
 pub mod openapi;
+pub mod pending_bindings;
 pub mod watchlist_api;
 
 #[cfg(test)]
@@ -94,6 +95,7 @@ pub fn api_router(
     store: holdings_api::SharedStore,
     market: market_api::SharedMarket,
     chat_reset: chat_api::ResetHook,
+    pending: pending_bindings::PendingBindings,
 ) -> Router {
     Router::new()
         .route("/api/openapi.json", get(openapi::openapi_doc))
@@ -102,6 +104,6 @@ pub fn api_router(
         .merge(advice_router(store.clone()))
         .merge(watchlist_router(store.clone()))
         .merge(chat_api::router(store.clone(), chat_reset))
-        .merge(channel_bindings::router(store.clone()))
+        .merge(channel_bindings::router(store.clone(), pending))
         .merge(market_api::router(store, market))
 }

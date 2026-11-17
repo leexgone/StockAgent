@@ -76,7 +76,9 @@ robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定�
 微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
 长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
 `(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
-入站过同一绑定白名单（装饰器零改动换词汇），出站推送共用 **caps 参数化链**
+入站过同一绑定白名单（装饰器零改动换词汇；**待绑定观察队列** D3 补记：未绑定
+来消息丢弃时自动入列，`GET /api/channel_bindings/pending` 透出、绑定卡一键绑定，
+绑定成功即移除——观察自动化、授权仍人工，内存态重启清零），出站推送共用 **caps 参数化链**
 （`channel_push.rs`：通道词汇 = `T::platform_name()`、清洗/截断 = `T::capabilities()`，
 QQ 数值行为逐位不变；复合 pusher 逐通道顺序 OR，`SchedulerCore` 签名不动）。
 health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快照，
@@ -319,7 +321,7 @@ draft 2020-12）三连：
    会直接红）；
 2. seeded 测试服务（FakeApi 注入，`tests/common/` 共享装置）全端点**实时
    响应**过其声明的响应 schema，含 422/404/400/503 错误契约；
-3. **`fixtures/api/` 36 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
+3. **`fixtures/api/` 37 份提交样例**过同一校验（样例永不腐烂，前端可当 mock）。
 
 health/chat 实现在 bin（依赖 robit 装配），契约在 `openapi.rs` 以 doc-stub
 声明、类型定义在 lib 供 bin 消费；bin 单测断言 `Health` 序列化键集 == schema

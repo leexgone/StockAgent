@@ -28,6 +28,7 @@ async fn serve(store: Store, reset: ResetHook) -> (String, SharedStore) {
         shared.clone(),
         market_api::new_market(Arc::new(FakeApi::new())),
         reset,
+        Default::default(), // 待绑定队列（本测试不消费）
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

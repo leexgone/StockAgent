@@ -12,12 +12,12 @@
     "date": "2026-11-17",
     "dot": "live",
     "live": true,
-    "next_at": "2026-11-17T11:30:00+08:00",
-    "next_event": "lunch",
+    "next_at": "2026-11-17T15:00:00+08:00",
+    "next_event": "close",
     "next_trade_day": "2026-11-18",
-    "state": "am",
-    "state_text": "交易中 · 早盘",
-    "time": "11:27:30"
+    "state": "pm",
+    "state_text": "交易中 · 午盘",
+    "time": "14:01:10"
   },
   "sidecar": {
     "error": null,

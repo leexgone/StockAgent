@@ -372,6 +372,9 @@ async fn main() -> anyhow::Result<()> {
     // 重连由 QqPlatformAdapter 自带 supervisor 负责（robit-qq platform.rs:164），
     // 本通道 supervisor 只兜残余退出路径（见 qq_channel.rs 模块头）。
     let flags = zimu_server::config_flags::load_flags(&working_dir);
+    // 待绑定观察队列（ADR-0017 D3 补记）：双通道 BoundOnly 共享写入，
+    // 绑定端点读取/移除——观察自动化、授权仍人工（入列 ≠ 放行）
+    let pending = zimu_server::pending_bindings::PendingBindings::default();
     let qq_online = Arc::new(AtomicBool::new(false));
     // 在线连接槽（T6 推送侧）：QQ 未启用/未连上时 send 恒 None，推送如实失败留痕
     let qq_active = qq_channel::ActiveAdapter::default();
@@ -384,6 +387,7 @@ async fn main() -> anyhow::Result<()> {
                 working_dir.clone(),
                 qq_online.clone(),
                 qq_active.clone(),
+                pending.clone(),
             ))
         }
         (true, None) => {
@@ -410,6 +414,7 @@ async fn main() -> anyhow::Result<()> {
                 working_dir.clone(),
                 wechat_online.clone(),
                 wechat_active.clone(),
+                pending.clone(),
             ))
         }
         (true, None) => {
@@ -551,7 +556,7 @@ async fn main() -> anyhow::Result<()> {
         // Web 上传（ADR-0015）：POST /api/chat multipart，自带 UploadState（与 AppState 解耦）
         .merge(zimu_server::chat_upload::router(upload_state))
         // 业务路由（持仓 P4-T1 + 行情 P4-T4 + 会话档案 T3）在库目标装配，各自带独立状态
-        .merge(api_router(store, market, chat_reset))
+        .merge(api_router(store, market, chat_reset, pending))
         // SPA 回落：dist 里不存在的路径返回 index.html。
         // 注意必须用 .fallback() 而不是 .not_found_service()：后者会把状态码强制成 404
         //（tower-http 0.6 的设计，body 照常返回），客户端路由刷新就会拿到 404。

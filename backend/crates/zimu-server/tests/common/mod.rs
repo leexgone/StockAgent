@@ -130,8 +130,17 @@ pub fn no_reset_hook() -> zimu_server::chat_api::ResetHook {
 }
 
 pub async fn spawn_api(fake: FakeApi, store: Store) -> String {
+    spawn_api_with_pending(fake, store, Default::default()).await
+}
+
+/// 待绑定队列注入变体（契约测试种子 pending 记录用；ADR-0017 D3 补记）
+pub async fn spawn_api_with_pending(
+    fake: FakeApi,
+    store: Store,
+    pending: zimu_server::pending_bindings::PendingBindings,
+) -> String {
     let shared: SharedStore = Arc::new(Mutex::new(store));
-    let router = api_router(shared, market_api::new_market(Arc::new(fake)), no_reset_hook());
+    let router = api_router(shared, market_api::new_market(Arc::new(fake)), no_reset_hook(), pending);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });

@@ -329,7 +329,10 @@ async fn live_responses_and_samples_pass_schema() {
             "预警 600519 stop_loss → private:WXSEED：已送达（契约样例种子）",
         )
         .unwrap();
-    let base = spawn_api(fake.clone(), store).await;
+    // 待绑定观察种子（ADR-0017 D3 补记）：一条 wechat 未绑定来消息尝试
+    let pending = zimu_server::pending_bindings::PendingBindings::default();
+    pending.record("wechat", "private:WXPENDING", "你好（待绑定样例）");
+    let base = spawn_api_with_pending(fake.clone(), store, pending).await;
     let http = reqwest::Client::new();
 
     // ---- holdings 面（P4-T1）----
@@ -668,6 +671,28 @@ async fn live_responses_and_samples_pass_schema() {
     let (s, b) = delete(&http, &base, "/api/channel_bindings/wechat/private:WXNEW").await;
     assert_eq!(s, 404);
     assert_eq!(b["error"], json!("no_binding"));
+
+    // ---- 待绑定队列（ADR-0017 D3 补记）：观察自动列出 → 一键绑定即移除 ----
+    let (s, b) = get(&http, &base, "/api/channel_bindings/pending").await;
+    assert_eq!(s, 200);
+    assert_eq!(b.as_array().unwrap().len(), 1, "种子观察记录可见");
+    assert_eq!(b[0]["channel"], json!("wechat"));
+    assert_eq!(b[0]["chat_id"], json!("private:WXPENDING"));
+    assert_eq!(b[0]["hits"], json!(1));
+    check(&doc, "pending_bindings", "get", "/api/channel_bindings/pending", 200, &b);
+
+    // 一键绑定（前端待绑定卡同款动作）→ 队列移除（授权完成）
+    let (s, _b) = post(
+        &http,
+        &base,
+        "/api/channel_bindings",
+        json!({"channel": "wechat", "chat_id": "private:WXPENDING", "kind": "private", "label": "一键绑定"}),
+    )
+    .await;
+    assert_eq!(s, 200);
+    let (s, b) = get(&http, &base, "/api/channel_bindings/pending").await;
+    assert_eq!(s, 200);
+    assert_eq!(b, json!([]), "绑定成功后观察记录移除");
 
     // 契约文档自身也可在线取（与仓库文件同内容）
     let (s, b) = get(&http, &base, "/api/openapi.json").await;

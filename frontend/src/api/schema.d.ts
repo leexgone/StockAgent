@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/channel_bindings/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_pending_bindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/channel_bindings/{channel}/{chat_id}": {
         parameters: {
             query?: never;
@@ -636,9 +652,12 @@ export interface components {
         };
         /** @description `POST /api/channel_bindings` 请求体。 */
         BindingRequest: {
-            /** @description 通道词汇表：'qq'（'wechat' 随模块到货启用）；非空即可入库（向前兼容） */
+            /** @description 通道词汇表：'qq' / 'wechat'（ADR-0017）；非空即可入库（向前兼容） */
             channel: string;
-            /** @description 平台会话 id（QQ 形如 private:{openid} / group:{openid}） */
+            /**
+             * @description 平台会话 id（QQ 形如 private:{openid} / group:{openid}；
+             *     微信恒 private:{ilink_user_id}，仅 1:1）
+             */
             chat_id: string;
             /** @description 'private' | 'group' */
             kind: string;
@@ -1058,6 +1077,24 @@ export interface components {
             name: string;
             note?: string;
             sector?: string;
+        };
+        /** @description 一条待绑定观察记录（未绑定会话的来消息尝试，去重累计）。 */
+        PendingAttempt: {
+            /** @description 通道词汇（qq / wechat） */
+            channel: string;
+            /** @description 平台会话 id（绑定表单直接取用） */
+            chat_id: string;
+            /** @description 首次观察到（上海 YYYY-MM-DD HH:MM） */
+            first_seen: string;
+            /**
+             * Format: int32
+             * @description 未绑定被丢弃的来消息次数（去重累计）
+             */
+            hits: number;
+            /** @description 最近观察到 */
+            last_seen: string;
+            /** @description 最近一条消息摘录（≤40 字符）——帮主人辨认哪条是自己发的 */
+            last_text: string;
         };
         PerHolding: {
             code: string;
@@ -1544,6 +1581,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_pending_bindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 待绑定观察队列（最近活跃在前，上限 20 条）：未绑定会话来消息被 BoundOnly 丢弃时自动入列（去重累计 hits）——绑定卡一键绑定的数据源。内存态不落库：重启清零，绑定成功即移除。入列 ≠ 放行，授权仍是 POST 绑定（ADR-0017 D3 补记） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingAttempt"][];
                 };
             };
         };

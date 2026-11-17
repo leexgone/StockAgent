@@ -3,13 +3,15 @@
 //!
 //! 端点：
 //! - `GET    /api/channel_bindings?channel=`       活跃绑定列表（bound_at 升序）
-//! - `POST   /api/channel_bindings`                绑定/重绑（幂等 upsert）
+//! - `GET    /api/channel_bindings/pending`        待绑定观察队列（ADR-0017 D3 补记：
+//!   未绑定来消息自动入列，绑定卡一键绑定——观察自动化、授权仍人工）
+//! - `POST   /api/channel_bindings`                绑定/重绑（幂等 upsert；成功即
+//!   从待绑定队列移除）
 //! - `DELETE /api/channel_bindings/{channel}/{chat_id}`  解绑（置 active=0 留痕）
 //!
 //! 边界（拍板⑤）：本模块只管**绑定关系**（谁能对子木说话）——连接参数（凭据）
-//! 在服务器配置文件编辑，这里不出现、不读写；QQ 的真机绑定流程 =
-//! 未绑定来消息的日志里抄 chat_id → POST 绑定（wechat 屏的二维码流程随 C4/
-//! 微信模块到货再挂，接口词汇 channel 已含 wechat 扩展位）。
+//! 在服务器配置文件编辑，这里不出现、不读写。真机绑定流程（QQ/微信同款）：
+//! 未绑定来消息 → 待绑定队列自动列出（日志仍留案底兜底）→ 界面一键绑定。
 //! kind 校验在前（400），存储 CHECK 兜底；解绑未命中 → 404（幂等语义同预警归档）。
 
 use axum::extract::{Path, Query, State};
@@ -24,13 +26,18 @@ use zimu_store::ChannelBindingRow;
 use crate::chat_record::ts_now;
 use crate::holdings_api::{lock, store_error, SharedStore};
 use crate::openapi::ApiError;
+use crate::pending_bindings::{PendingAttempt, PendingBindings};
+
+/// 绑定路由共享状态：store（真值）+ 待绑定观察队列（内存态）。
+type BindingsState = (SharedStore, PendingBindings);
 
 /// `POST /api/channel_bindings` 请求体。
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BindingRequest {
-    /// 通道词汇表：'qq'（'wechat' 随模块到货启用）；非空即可入库（向前兼容）
+    /// 通道词汇表：'qq' / 'wechat'（ADR-0017）；非空即可入库（向前兼容）
     pub channel: String,
-    /// 平台会话 id（QQ 形如 private:{openid} / group:{openid}）
+    /// 平台会话 id（QQ 形如 private:{openid} / group:{openid}；
+    /// 微信恒 private:{ilink_user_id}，仅 1:1）
     pub chat_id: String,
     /// 'private' | 'group'
     pub kind: String,
@@ -63,7 +70,7 @@ pub struct BindingsQuery {
     )
 )]
 async fn list_bindings(
-    State(store): State<SharedStore>,
+    State((store, _pending)): State<BindingsState>,
     Query(q): Query<BindingsQuery>,
 ) -> Response {
     match lock(&store).channel_bindings(q.channel.as_deref()) {
@@ -73,6 +80,19 @@ async fn list_bindings(
             store_error()
         }
     }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/channel_bindings/pending",
+    operation_id = "list_pending_bindings",
+    tag = "system",
+    responses(
+        (status = 200, description = "待绑定观察队列（最近活跃在前，上限 20 条）：未绑定会话来消息被 BoundOnly 丢弃时自动入列（去重累计 hits）——绑定卡一键绑定的数据源。内存态不落库：重启清零，绑定成功即移除。入列 ≠ 放行，授权仍是 POST 绑定（ADR-0017 D3 补记）", body = Vec<PendingAttempt>),
+    )
+)]
+async fn list_pending(State((_store, pending)): State<BindingsState>) -> Response {
+    Json(pending.list()).into_response()
 }
 
 #[utoipa::path(
@@ -88,7 +108,7 @@ async fn list_bindings(
     )
 )]
 async fn bind(
-    State(store): State<SharedStore>,
+    State((store, pending)): State<BindingsState>,
     Json(req): Json<BindingRequest>,
 ) -> Response {
     let channel = req.channel.trim();
@@ -109,6 +129,8 @@ async fn bind(
     if result.is_err() {
         return result.unwrap_err();
     }
+    // 授权完成：待绑定观察记录使命结束（ADR-0017 D3 补记）
+    pending.remove(channel, chat_id);
     Json(ChannelBindingRow {
         channel: channel.to_string(),
         chat_id: chat_id.to_string(),
@@ -135,7 +157,7 @@ async fn bind(
     )
 )]
 async fn unbind(
-    State(store): State<SharedStore>,
+    State((store, _pending)): State<BindingsState>,
     Path((channel, chat_id)): Path<(String, String)>,
 ) -> Response {
     match lock(&store).unbind_channel(&channel, &chat_id) {
@@ -163,10 +185,12 @@ fn bad_input(msg: &str) -> Response {
         .into_response()
 }
 
-/// 绑定管理路由（进 `api_router`；纯 store 状态，agent 在线与否都可用）。
-pub fn router(store: SharedStore) -> Router {
+/// 绑定管理路由（进 `api_router`；store + 待绑定队列，agent 在线与否都可用）。
+pub fn router(store: SharedStore, pending: PendingBindings) -> Router {
     Router::new()
         .route("/api/channel_bindings", get(list_bindings).post(bind))
+        // 静态段 pending 先于 {channel} 注册（matchit 静态优先，GET 无冲突）
+        .route("/api/channel_bindings/pending", get(list_pending))
         .route("/api/channel_bindings/{channel}/{chat_id}", axum::routing::delete(unbind))
-        .with_state(store)
+        .with_state((store, pending))
 }

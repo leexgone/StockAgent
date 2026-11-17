@@ -44,6 +44,7 @@ pub fn spawn(
     working_dir: PathBuf,
     online: Arc<AtomicBool>,
     active: ActiveAdapter,
+    pending: zimu_server::pending_bindings::PendingBindings,
 ) -> ChannelHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let shutdown = Arc::new(Notify::new());
@@ -55,6 +56,7 @@ pub fn spawn(
         stop.clone(),
         shutdown.clone(),
         active,
+        pending,
     ));
     ChannelHandle::new(stop, shutdown, handle)
 }
@@ -67,13 +69,14 @@ async fn run_supervisor(
     stop: Arc<AtomicBool>,
     shutdown: Arc<Notify>,
     active: ActiveAdapter,
+    pending: zimu_server::pending_bindings::PendingBindings,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        match run_once(&bridge, &store, &working_dir, &shutdown, &stop, &online, &active).await {
+        match run_once(&bridge, &store, &working_dir, &shutdown, &stop, &online, &active, &pending).await {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break; // 关停路径的"正常退出"，不重连
@@ -109,6 +112,7 @@ async fn run_once(
     stop: &Arc<AtomicBool>,
     online: &Arc<AtomicBool>,
     active: &ActiveAdapter,
+    pending: &zimu_server::pending_bindings::PendingBindings,
 ) -> Result<()> {
     // 第二份 RobitConfig：不可 Clone 且 ChatbotManager::new 按值吃（manager.rs:117）；
     // load_config 重复调用安全（纯文件读，robit-ai config.rs:388）
@@ -128,7 +132,7 @@ async fn run_once(
         .context("连接 QQ 网关失败")?;
     // 推送侧句柄（T6）：出站走原始 adapter（不过白名单——入站闸门与主动出站不同层）
     active.set(adapter.clone());
-    let bounded = Arc::new(BoundOnly::new(adapter, store.clone(), "qq"));
+    let bounded = Arc::new(BoundOnly::new(adapter, store.clone(), "qq", pending.clone()));
 
     let manager = ChatbotManager::new(
         bounded,

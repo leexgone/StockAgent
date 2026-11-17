@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { IconChat, IconGrid, IconWechat } from "../components/Icons";
 import { fixed } from "../lib/format";
 import { channelLabel, pushKindLabel } from "../lib/pushKind";
-import { useBindings, type ChannelBindingRow } from "../store/bindings";
+import { kindForChatId, useBindings, type ChannelBindingRow, type PendingAttempt } from "../store/bindings";
 import { useEquity } from "../store/equity";
 import { useHealth } from "../store/health";
 import { usePushLog } from "../store/push_log";
@@ -18,8 +18,9 @@ import { useUi } from "../store/ui";
  * - push：**待启动态**——「当前生效（绑定即推）」如实列两条真实推送；订阅管理
  *   （6 类/时段/静音）另案 C15，禁用占位、不枚举六类标签（词汇冲突未决）。
  * - config：iLink Bot 脱敏只读（凭据只在服务器 state 文件，界面不显示任何 token）。
- * - bind：**通道无关白名单管理（QQ 同样受益）**——绑定/解绑（两步确认弹窗）/
- *   chat_id 获取引导；扫码不上 Web（登录 = 部署侧 CLI，停服约定见 backend/README）。
+ * - bind：**通道无关白名单管理（QQ 同样受益）**——待绑定会话自动列出（D3 补记：
+ *   未绑定来消息入观察队列，一键绑定，不用抄日志）+ 绑定/解绑（两步确认弹窗）/
+ *   手工表单兜底；扫码不上 Web（登录 = 部署侧 CLI，停服约定见 backend/README）。
  * - preview：纯文本消息样例（无按钮——服务号模板消息语义生产不存在）；摘要 =
  *   最近 equity_snapshots 真实行按后端 summary_message 同款行格式（改后端须同步这里）。
  * - log：最近 6 条全通道 push_log（detail 原样，ok=1 只表示已受理，03 §12）。
@@ -34,6 +35,7 @@ const signed = (v: number, d: number): string => (v >= 0 ? "+" : "") + fixed(v, 
 export default function WechatScreen() {
   const health = useHealth((s) => s.health);
   const rows = useBindings((s) => s.rows);
+  const pending = useBindings((s) => s.pending);
   const bindingsLoaded = useBindings((s) => s.loaded);
   const bindingsError = useBindings((s) => s.error);
   const pushRows = usePushLog((s) => s.rows);
@@ -53,6 +55,7 @@ export default function WechatScreen() {
   useEffect(() => {
     const loadAll = () => {
       void useBindings.getState().load();
+      void useBindings.getState().loadPending();
       void useHealth.getState().load();
       void usePushLog.getState().load();
       void useEquity.getState().load();
@@ -92,6 +95,17 @@ export default function WechatScreen() {
       setChatId("");
       setLabel("");
     }
+  };
+
+  // 待绑定一键绑定（D3 补记：观察自动化、授权仍人工——点击是主人的明示动作；
+  // kind 由 chat_id 前缀推断，微信恒 private）
+  const bindPending = async (p: PendingAttempt) => {
+    const ok = await useBindings.getState().bind({
+      channel: p.channel,
+      chat_id: p.chat_id,
+      kind: kindForChatId(p.chat_id),
+    });
+    if (ok) toast(`已绑定 ${channelLabel(p.channel)} 会话 ${p.chat_id}，现在发消息即可应答`);
   };
 
   const doUnbind = async () => {
@@ -319,6 +333,42 @@ export default function WechatScreen() {
                 </div>
               )}
             </div>
+            {/* 待绑定会话（D3 补记：未绑定来消息自动入列，一键绑定——不用抄日志） */}
+            <div className="card-body" style={{ borderTop: "1px solid var(--border)", paddingBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 550 }}>待绑定会话</span>
+                {pending.length > 0 && <span className="pill warn">{pending.length}</span>}
+                <button
+                  className="btn btn-sm"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => void useBindings.getState().loadPending()}
+                >
+                  刷新
+                </button>
+              </div>
+              {pending.length ? (
+                pending.map((p, i) => (
+                  <div className="list-item" data-od-id={`pending-${i}`} key={`${p.channel}:${p.chat_id}`} style={{ padding: "8px 0" }}>
+                    <span className="li-main">
+                      <span className="li-title">
+                        <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(p.channel)}</span>
+                        <span className="code num" style={{ fontSize: 12 }}>{p.chat_id}</span>
+                      </span>
+                      <span className="li-desc">
+                        {`来消息 ${p.hits} 次 · 最近 ${p.last_seen}${p.last_text ? ` · 「${p.last_text}」` : ""}`}
+                      </span>
+                    </span>
+                    <span className="li-right">
+                      <button className="btn btn-sm" onClick={() => void bindPending(p)}>绑定</button>
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="hint" style={{ margin: 0 }}>
+                  暂无待绑定会话 · 未绑定会话发来消息会自动出现在这里（点「刷新」或等 60s 轮询）
+                </div>
+              )}
+            </div>
             <div className="card-body" style={{ borderTop: "1px solid var(--border)" }}>
               <div className="field" style={{ margin: "0 0 10px" }}>
                 <label htmlFor="bind-channel">通道</label>
@@ -370,8 +420,8 @@ export default function WechatScreen() {
                 {busy ? "绑定中…" : "绑定"}
               </button>
               <div className="hint" style={{ marginTop: 10 }}>
-                chat_id 怎么拿：先给 bot 发一条消息 → 服务端日志「未绑定会话来消息…chat_id=private:…」→ 抄录到这里绑定。
-                微信登录（扫码）在部署侧 CLI 完成，见「接入配置」卡。
+                常规路径：给 bot 发一条消息 → 上方「待绑定会话」自动列出 → 点「绑定」。
+                此处手工表单为兜底（服务端日志仍留 chat_id 案底）。微信登录（扫码）在部署侧 CLI 完成，见「接入配置」卡。
               </div>
             </div>
           </section>

@@ -54,6 +54,7 @@ pub fn spawn(
     working_dir: PathBuf,
     online: Arc<AtomicBool>,
     active: ActiveAdapter,
+    pending: zimu_server::pending_bindings::PendingBindings,
 ) -> ChannelHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let shutdown = Arc::new(Notify::new());
@@ -65,6 +66,7 @@ pub fn spawn(
         stop.clone(),
         shutdown.clone(),
         active,
+        pending,
     ));
     ChannelHandle::new(stop, shutdown, handle)
 }
@@ -84,13 +86,14 @@ async fn run_supervisor(
     stop: Arc<AtomicBool>,
     shutdown: Arc<Notify>,
     active: ActiveAdapter,
+    pending: zimu_server::pending_bindings::PendingBindings,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        match run_once(&bridge, &store, &working_dir, &shutdown, &stop, &online, &active).await {
+        match run_once(&bridge, &store, &working_dir, &shutdown, &stop, &online, &active, &pending).await {
             Ok(RunOutcome::Stopped) => break,
             Ok(RunOutcome::TokenStale(stale_token)) => {
                 online.store(false, Ordering::SeqCst);
@@ -175,6 +178,7 @@ async fn run_once(
     stop: &Arc<AtomicBool>,
     online: &Arc<AtomicBool>,
     active: &ActiveAdapter,
+    pending: &zimu_server::pending_bindings::PendingBindings,
 ) -> Result<RunOutcome> {
     // 第二份 RobitConfig：不可 Clone 且 ChatbotManager::new 按值吃（QQ 同款）
     let config = robit_ai::load_config(None).context("微信通道重读 config.toml 失败")?;
@@ -193,7 +197,7 @@ async fn run_once(
         .context("连接微信 iLink Bot 失败")?;
     // 推送侧句柄：出站走原始 adapter（不过白名单——入站闸门与主动出站不同层，QQ 同款）
     active.set(adapter.clone());
-    let bounded = Arc::new(BoundOnly::new(adapter, store.clone(), "wechat"));
+    let bounded = Arc::new(BoundOnly::new(adapter, store.clone(), "wechat", pending.clone()));
 
     let manager = ChatbotManager::new(
         bounded,

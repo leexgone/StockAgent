@@ -27,6 +27,7 @@ use utoipa::{OpenApi, ToSchema};
 // schemas() 宏只接受裸标识符/完整路径，不认 `{…}` 分组——统一 import 后引用。
 // （这些 import 全部被 ApiDoc derive 的展开消费，不是死代码。）
 use crate::channel_bindings::{BindingRequest, UnbindResult};
+use crate::pending_bindings::PendingAttempt;
 use crate::chat_api::{ChatHistory, ChatResetResult};
 use crate::holdings_api::{AccountPatch, HoldingEditRequest};
 use crate::market_api::{
@@ -238,6 +239,7 @@ fn chat_cancel_doc() {}
         crate::chat_api::get_history,
         crate::chat_api::reset_session,
         crate::channel_bindings::list_bindings,
+        crate::channel_bindings::list_pending,
         crate::channel_bindings::bind,
         crate::channel_bindings::unbind,
         openapi_doc,
@@ -266,7 +268,7 @@ fn chat_cancel_doc() {}
     components(schemas(
         ApiError, Health, ChatUploadForm, ConfirmRequest,
         ChatHistory, ChatResetResult, ChatMessageRow,
-        BindingRequest, ChannelBindingRow, UnbindResult,
+        BindingRequest, ChannelBindingRow, UnbindResult, PendingAttempt,
         AccountPatch,
         CalendarStatus, KlineResponse, MarketStatusResponse, RefreshResponse,
         SidecarStatus, SkippedRow,

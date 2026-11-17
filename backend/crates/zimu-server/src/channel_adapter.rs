@@ -2,9 +2,10 @@
 //! 不绕 trait、不改 robit，绑定判定表在 `zimu.db channel_bindings`。
 //!
 //! 语义（拍板：绑定关系界面管理、连接参数配置文件）：
-//! - **入站闸门**：`recv_event` 里未绑定 chat 的消息**静默丢弃 + 日志留 chat_id**
-//!   （不回「未绑定」提示——避免任何 QQ 用户发一条就收到回复的骚扰面；日志里的
-//!   chat_id 足够人工完成绑定：`POST /api/channel_bindings`）；
+//! - **入站闸门**：`recv_event` 里未绑定 chat 的消息**静默丢弃 + 日志留 chat_id
+//!   + 记入待绑定队列**（不回「未绑定」提示——避免任何 QQ 用户发一条就收到回复
+//!   的骚扰面；待绑定队列经 `GET /api/channel_bindings/pending` 在绑定卡自动
+//!   列出，主人一键绑定——观察自动化、授权仍人工，ADR-0017 D3 补记）；
 //! - **出站不拦**：`send_message` 等透传 inner——主动推送（T6）走宿主自持的 inner
 //!   Arc 或这里的透传均可，白名单是「谁能对子木说话」，不是「子木能答谁」的
 //!   第二道闸（绑定即授权，解绑后回复自然停：入站没了，出站由推送侧另行判定）；
@@ -19,17 +20,20 @@ use robit_agent::error::Result;
 use robit_chatbot::{PlatformAdapter, PlatformCaps, PlatformEvent, SendResult, UploadResult};
 
 use crate::holdings_api::SharedStore;
+use crate::pending_bindings::PendingBindings;
 
 pub struct BoundOnly<T: PlatformAdapter> {
     inner: Arc<T>,
     store: SharedStore,
     /// 通道词汇表（'qq'/'wechat'）；与 channel_bindings.channel 列同源
     channel: &'static str,
+    /// 待绑定观察队列（丢弃路径顺手记录；入列 ≠ 放行）
+    pending: PendingBindings,
 }
 
 impl<T: PlatformAdapter> BoundOnly<T> {
-    pub fn new(inner: Arc<T>, store: SharedStore, channel: &'static str) -> Self {
-        Self { inner, store, channel }
+    pub fn new(inner: Arc<T>, store: SharedStore, channel: &'static str, pending: PendingBindings) -> Self {
+        Self { inner, store, channel, pending }
     }
 
     /// inner 句柄（T6 推送侧要自持原始 adapter 出站；decorator 也转发出站，
@@ -71,13 +75,14 @@ impl<T: PlatformAdapter + 'static> PlatformAdapter for BoundOnly<T> {
                     if self.is_bound(&msg.sender.chat_id) {
                         return Ok(ev);
                     }
-                    // 静默丢弃 + 留案底：chat_id 进日志供人工绑定
+                    // 静默丢弃 + 留案底：chat_id 进日志 + 待绑定队列（绑定卡自动列出）
                     tracing::info!(
                         "未绑定会话来消息，丢弃：channel={} chat_id={} text={:.40}",
                         self.channel,
                         msg.sender.chat_id,
                         msg.text,
                     );
+                    self.pending.record(self.channel, &msg.sender.chat_id, &msg.text);
                 }
                 // Disconnected / Other 原样透传（宿主 supervisor 负责处理）
                 _ => return Ok(ev),
@@ -129,17 +134,22 @@ mod tests {
     #[tokio::test]
     async fn unbound_chat_silently_dropped_until_bound() {
         let store = tmp_store("unbound");
+        let pending = crate::pending_bindings::PendingBindings::default();
         let mock = MockPlatform::with(vec![msg("private:EVE", "骚扰"), msg("private:ME", "正主")]);
-        let adapter = BoundOnly::new(mock.clone(), store.clone(), "qq");
+        let adapter = BoundOnly::new(mock.clone(), store.clone(), "qq", pending.clone());
 
         // 未绑定：EVE 被吞，循环取到下一条 ME——同样未绑定 → 队列耗尽 Err
         let ev = adapter.recv_event().await;
         assert!(ev.is_err(), "全部未绑定 → 透传 inner 耗尽错误，不造幽灵消息");
+        // 丢弃路径记入待绑定队列（观察自动化、授权仍人工）
+        let rows = pending.list();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|r| r.chat_id == "private:EVE" && r.last_text == "骚扰"));
 
         // 绑定 ME 后：EVE 照旧吞、ME 放行
         zimu_agent::lock(&store).bind_channel("qq", "private:ME", "private", "本人", "2026-11-07 09:00").unwrap();
         let mock = MockPlatform::with(vec![msg("private:EVE", "骚扰"), msg("private:ME", "正主")]);
-        let adapter = BoundOnly::new(mock, store.clone(), "qq");
+        let adapter = BoundOnly::new(mock, store.clone(), "qq", pending.clone());
         let got = adapter.recv_event().await.expect("绑定会话应放行");
         match got {
             PlatformEvent::Message(m) => assert_eq!(m.sender.chat_id, "private:ME"),
@@ -152,7 +162,7 @@ mod tests {
         let store = tmp_store("outbound");
         // Other/Disconnected 不经白名单
         let mock = MockPlatform::with(vec![PlatformEvent::Other(serde_json::json!({"raw": 1}))]);
-        let adapter = BoundOnly::new(mock.clone(), store.clone(), "qq");
+        let adapter = BoundOnly::new(mock.clone(), store.clone(), "qq", Default::default());
         assert!(matches!(adapter.recv_event().await.unwrap(), PlatformEvent::Other(_)));
 
         // 出站透传（推送侧语义在 T6：出站不受入站闸门约束）
@@ -170,13 +180,15 @@ mod tests {
         let store = tmp_store("wechat-gate");
         // QQ 绑定不放行微信会话（通道词汇隔离）
         zimu_agent::lock(&store).bind_channel("qq", "private:WXME", "private", "跨通道同名", "2026-11-17 09:00").unwrap();
+        let pending = crate::pending_bindings::PendingBindings::default();
         let mock = MockPlatform::with(vec![msg("private:WXME", "微信来消息")]);
-        let adapter = BoundOnly::new(mock, store.clone(), "wechat");
+        let adapter = BoundOnly::new(mock, store.clone(), "wechat", pending.clone());
         assert!(adapter.recv_event().await.is_err(), "qq 绑定不算 wechat 绑定 → 丢弃至耗尽");
+        assert_eq!(pending.list()[0].channel, "wechat", "待绑定记录带本通道词汇");
 
         zimu_agent::lock(&store).bind_channel("wechat", "private:WXME", "private", "本人微信", "2026-11-17 09:01").unwrap();
         let mock = MockPlatform::with(vec![msg("private:EVE", "骚扰"), msg("private:WXME", "正主")]);
-        let adapter = BoundOnly::new(mock, store.clone(), "wechat");
+        let adapter = BoundOnly::new(mock, store.clone(), "wechat", pending);
         match adapter.recv_event().await.expect("绑定会话应放行") {
             PlatformEvent::Message(m) => assert_eq!(m.sender.chat_id, "private:WXME"),
             other => panic!("期望 Message，得到 {other:?}"),
