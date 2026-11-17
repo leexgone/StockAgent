@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { IconChat, IconGrid, IconWechat } from "../components/Icons";
 import { fixed } from "../lib/format";
+import { maskChatId } from "../lib/mask";
 import { channelLabel, pushKindLabel } from "../lib/pushKind";
 import { kindForChatId, useBindings, type ChannelBindingRow, type PendingAttempt } from "../store/bindings";
 import { useEquity } from "../store/equity";
@@ -20,7 +21,8 @@ import { useUi } from "../store/ui";
  * - config：iLink Bot 脱敏只读（凭据只在服务器 state 文件，界面不显示任何 token）。
  * - bind：**通道无关白名单管理（QQ 同样受益）**——待绑定会话自动列出（D3 补记：
  *   未绑定来消息入观察队列，一键绑定，不用抄日志）+ 绑定/解绑（两步确认弹窗）/
- *   手工表单兜底；扫码不上 Web（登录 = 部署侧 CLI，停服约定见 backend/README）。
+ *   手工表单兜底；chat_id 默认掩码脱敏、逐行「查看/收起」切换（lib/mask，
+ *   展示层投影不动 API 真值）；扫码不上 Web（登录 = 部署侧 CLI，停服约定见 backend/README）。
  * - preview：纯文本消息样例（无按钮——服务号模板消息语义生产不存在）；摘要 =
  *   最近 equity_snapshots 真实行按后端 summary_message 同款行格式（改后端须同步这里）。
  * - log：最近 6 条全通道 push_log（detail 原样，ok=1 只表示已受理，03 §12）。
@@ -51,6 +53,10 @@ export default function WechatScreen() {
   const [busy, setBusy] = useState(false);
   // 解绑两步确认弹窗（镜像原型 unbind-modal，Esc/scrim 可关）
   const [unbindTarget, setUnbindTarget] = useState<ChannelBindingRow | null>(null);
+  // chat_id 展示脱敏：默认掩码，逐行「查看/收起」；组件态离屏即复位回掩码
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const idKey = (ch: string, id: string) => `${ch}:${id}`;
+  const toggleReveal = (key: string) => setRevealed((s) => ({ ...s, [key]: !s[key] }));
 
   useEffect(() => {
     const loadAll = () => {
@@ -91,7 +97,7 @@ export default function WechatScreen() {
     });
     setBusy(false);
     if (ok) {
-      toast(`已绑定 ${channelLabel(channel)} 会话 ${id}`);
+      toast(`已绑定 ${channelLabel(channel)} 会话 ${maskChatId(id)}`);
       setChatId("");
       setLabel("");
     }
@@ -105,7 +111,7 @@ export default function WechatScreen() {
       chat_id: p.chat_id,
       kind: kindForChatId(p.chat_id),
     });
-    if (ok) toast(`已绑定 ${channelLabel(p.channel)} 会话 ${p.chat_id}，现在发消息即可应答`);
+    if (ok) toast(`已绑定 ${channelLabel(p.channel)} 会话 ${maskChatId(p.chat_id)}，现在发消息即可应答`);
   };
 
   const doUnbind = async () => {
@@ -113,7 +119,7 @@ export default function WechatScreen() {
     const t = unbindTarget;
     setUnbindTarget(null);
     const ok = await useBindings.getState().unbind(t.channel, t.chat_id);
-    if (ok) toast(`已解绑 ${channelLabel(t.channel)} 会话 ${t.chat_id}（留痕 active=0，可随时重新绑定）`);
+    if (ok) toast(`已解绑 ${channelLabel(t.channel)} 会话 ${maskChatId(t.chat_id)}（留痕 active=0，可随时重新绑定）`);
   };
 
   /* ---------- 通道状态（只读） ---------- */
@@ -307,24 +313,31 @@ export default function WechatScreen() {
             </div>
             <div className="list">
               {rows.length ? (
-                rows.map((r, i) => (
-                  <div className="list-item" data-od-id={`binding-${i}`} key={`${r.channel}:${r.chat_id}`}>
-                    <span className="li-main">
-                      <span className="li-title">
-                        <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(r.channel)}</span>
-                        <span className="code num" style={{ fontSize: 12 }}>{r.chat_id}</span>
+                rows.map((r, i) => {
+                  const key = idKey(r.channel, r.chat_id);
+                  const shown = revealed[key] ?? false;
+                  return (
+                    <div className="list-item" data-od-id={`binding-${i}`} key={key}>
+                      <span className="li-main">
+                        <span className="li-title">
+                          <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(r.channel)}</span>
+                          <span className="code num" style={{ fontSize: 12 }}>{shown ? r.chat_id : maskChatId(r.chat_id)}</span>
+                        </span>
+                        <span className="li-desc">
+                          {[r.kind === "private" ? "私聊" : "群聊", r.label, `绑定于 ${r.bound_at}`].filter(Boolean).join(" · ")}
+                        </span>
                       </span>
-                      <span className="li-desc">
-                        {[r.kind === "private" ? "私聊" : "群聊", r.label, `绑定于 ${r.bound_at}`].filter(Boolean).join(" · ")}
+                      <span className="li-right">
+                        <button className="btn btn-sm" aria-pressed={shown} title={shown ? "重新掩码" : "查看完整 chat_id"} onClick={() => toggleReveal(key)}>
+                          {shown ? "收起" : "查看"}
+                        </button>
+                        <button className="btn btn-sm" style={{ color: "var(--danger)", borderColor: "var(--danger)" }} onClick={() => setUnbindTarget(r)}>
+                          解绑
+                        </button>
                       </span>
-                    </span>
-                    <span className="li-right">
-                      <button className="btn btn-sm" style={{ color: "var(--danger)", borderColor: "var(--danger)" }} onClick={() => setUnbindTarget(r)}>
-                        解绑
-                      </button>
-                    </span>
-                  </div>
-                ))
+                    </div>
+                  );
+                })
               ) : (
                 <div className="empty" style={{ padding: "18px 14px" }}>
                   {bindingsLoaded
@@ -347,22 +360,29 @@ export default function WechatScreen() {
                 </button>
               </div>
               {pending.length ? (
-                pending.map((p, i) => (
-                  <div className="list-item" data-od-id={`pending-${i}`} key={`${p.channel}:${p.chat_id}`} style={{ padding: "8px 0" }}>
-                    <span className="li-main">
-                      <span className="li-title">
-                        <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(p.channel)}</span>
-                        <span className="code num" style={{ fontSize: 12 }}>{p.chat_id}</span>
+                pending.map((p, i) => {
+                  const key = idKey(p.channel, p.chat_id);
+                  const shown = revealed[key] ?? false;
+                  return (
+                    <div className="list-item" data-od-id={`pending-${i}`} key={key} style={{ padding: "8px 0" }}>
+                      <span className="li-main">
+                        <span className="li-title">
+                          <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(p.channel)}</span>
+                          <span className="code num" style={{ fontSize: 12 }}>{shown ? p.chat_id : maskChatId(p.chat_id)}</span>
+                        </span>
+                        <span className="li-desc">
+                          {`来消息 ${p.hits} 次 · 最近 ${p.last_seen}${p.last_text ? ` · 「${p.last_text}」` : ""}`}
+                        </span>
                       </span>
-                      <span className="li-desc">
-                        {`来消息 ${p.hits} 次 · 最近 ${p.last_seen}${p.last_text ? ` · 「${p.last_text}」` : ""}`}
+                      <span className="li-right">
+                        <button className="btn btn-sm" aria-pressed={shown} title={shown ? "重新掩码" : "查看完整 chat_id"} onClick={() => toggleReveal(key)}>
+                          {shown ? "收起" : "查看"}
+                        </button>
+                        <button className="btn btn-sm" onClick={() => void bindPending(p)}>绑定</button>
                       </span>
-                    </span>
-                    <span className="li-right">
-                      <button className="btn btn-sm" onClick={() => void bindPending(p)}>绑定</button>
-                    </span>
-                  </div>
-                ))
+                    </div>
+                  );
+                })
               ) : (
                 <div className="hint" style={{ margin: 0 }}>
                   暂无待绑定会话 · 未绑定会话发来消息会自动出现在这里（点「刷新」或等 60s 轮询）
