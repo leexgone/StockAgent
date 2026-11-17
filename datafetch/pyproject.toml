@@ -12,7 +12,16 @@ dependencies = [
     # spike 里 requests 靠 akshare 传递依赖碰巧可用；正式化后显式声明（直连通道的核心依赖）
     "requests",
     "pandas",
+    # ADR-0018 D10：akshare 传递依赖 py-mini-racer 0.6.0 只有 x86_64 wheel（arm64 硬阻塞），
+    # 换名续作 mini-racer（aarch64 manylinux wheel 齐备，import 命名空间仍 py_mini_racer）；
+    # 下方 [tool.uv] override 以永假 marker 全平台剔除旧包。
+    "mini-racer>=0.12.4",
 ]
+
+[tool.uv]
+# requires-python >= 3.13 使 python_version < '3' 永假 → py-mini-racer 被全平台剔除，
+# akshare 的 py_mini_racer 导入由上方 mini-racer 续作接管（同命名空间）。
+override-dependencies = ["py-mini-racer; python_version < '3'"]
 
 [dependency-groups]
 dev = [
