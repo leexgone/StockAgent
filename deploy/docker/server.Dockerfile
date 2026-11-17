@@ -12,16 +12,36 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── 阶段 2：Rust 构建（aws-lc-sys 需 cmake；rusqlite bundled 需 cc，镜像自带）──
+# 编译缓存策略（2026-11-17 优化）：cargo-chef 依赖层分离——先 cook 全部依赖成
+# 独立层（仅 Cargo.toml/lock 变才 invalidate），再 COPY 源码只重编 workspace
+# crate；registry 缓存挂载跨构建持久（索引不重拉，根治本地重建卡索引）。
+# target 留层内（不用 mount）——CI gha 层缓存可导出，COPY --from 不受影响。
 FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake \
     && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
+# 登录 CLI 随镜像（D7）：不依赖 workspace 源码，置于源码 COPY 之前——层近乎
+# 永久缓存（crate 自带 Cargo.lock，--locked 可复现）；独立 target 目录。
+ENV CARGO_TARGET_DIR=/src/cli-target
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo install --locked --root /opt/cli --version 0.3.0 robit-wechat
+# 依赖层：workspace + 六成员 manifest（新增成员须补 COPY 行）→ chef 预编依赖
+ENV CARGO_TARGET_DIR=/src/backend/target
 WORKDIR /src/backend
+COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/crates/zimu-server/Cargo.toml crates/zimu-server/Cargo.toml
+COPY backend/crates/zimu-agent/Cargo.toml crates/zimu-agent/Cargo.toml
+COPY backend/crates/zimu-agent-cli/Cargo.toml crates/zimu-agent-cli/Cargo.toml
+COPY backend/crates/zimu-domain/Cargo.toml crates/zimu-domain/Cargo.toml
+COPY backend/crates/zimu-store/Cargo.toml crates/zimu-store/Cargo.toml
+COPY backend/crates/zimu-market/Cargo.toml crates/zimu-market/Cargo.toml
+RUN cargo chef prepare --recipe-path recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo chef cook --release --recipe-path recipe.json
+# 源码层：真实代码覆盖 chef _dummy，依赖命中 cook 层，只重编 workspace crate
 COPY backend/ ./
-RUN cargo build --release -p zimu-server --bin zimu-server
-# 登录 CLI 随镜像（D7）：crate 自带 Cargo.lock，--locked 可复现；
-# target 指到 workspace 下共享 registry 缓存面（每架构 +3~6min，tag 低频可接受）
-ENV CARGO_TARGET_DIR=/src/backend/target/cli-install
-RUN cargo install --locked --root /opt/cli --version 0.3.0 robit-wechat
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release -p zimu-server --bin zimu-server
 
 # ── 阶段 3：运行时 ──
 FROM debian:bookworm-slim AS runtime
