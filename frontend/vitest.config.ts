@@ -7,5 +7,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // vmThreads（2026-11-17）：vitest 5.1.0 缺省 forks/threads 池在本机 Windows
+    // 项目路径下模块加载异常（worker 状态在而 suite collector undefined，
+    // describe 抛 reading 'config'）；vmThreads 合成模块链接绕过，156 例全绿。
+    // 上游 tarball 当日有重发布噪声（5.0.5 构建漂移），5.1.0 + vmThreads 为实证稳定组合。
+    pool: "vmThreads",
   },
 });
