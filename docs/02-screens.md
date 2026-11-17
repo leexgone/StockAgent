@@ -29,7 +29,7 @@
 - **analysis**：持仓范围为空时隐藏结果、显示引导卡；可切「自选」看观察类结论形态。
 - **chat**：空态专属欢迎消息与「第一笔怎么录入 / 今天该做什么」问答；会话历史按模式分键。
 - **diagnosis**：指标不以 0 冒充「安全」，KPI/曲线/清单/分区间表全部为说明态。
-- **wechat**：卡片模板保留结构、文案占位、按钮禁用；推送日志为空态。
+- **wechat**：六卡不报错——通道状态如实显示未启用/离线、绑定卡空态引导、push 卡待启动态（订阅体系 C15 另案）、预览占位文案、推送日志空态（原型语义：卡片模板保留结构、文案占位、按钮禁用）。
 
 ## index.html — 工作台
 
@@ -174,13 +174,17 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 
 ## wechat.html — 微信助理接入
 
-| 模块 | 内容 | 数据依赖 |
-|---|---|---|
-| `wx-channel-card` | 接入通道开关，主通道失败自动改用备用通道重试一次 | 本地状态（生产侧：启用开关在服务器配置文件 `[zimu.channels]`，界面只读展示——ADR-0011 拍板⑤⑥） |
-| `wx-push-card` | 6 类推送订阅 + 推送时段 + 静音标的 | 本地状态（生产侧界面管理、落 zimu.db——P7-T2 后具备接线条件） |
-| `wx-config-card` | 服务号 / 推送参数（AppID、Token、Webhook），**仅存本机浏览器**（原型语义） | `localStorage`。**生产侧改口径（ADR-0011 拍板⑤）**：连接参数在服务器配置文件编辑（`backend/.robit/config.toml` + `.env` 占位，凭据永不入库），卡片仅做**脱敏只读状态展示**；产品定位 = 个人微信助理（OpenClaw 形态），非服务号——本卡文案随 C4 落地重写 |
-| `wx-bind-card` | 绑定二维码、绑定状态、解绑二次确认弹窗 | `sessions`（生产侧契约已就位：`/api/channel_bindings` GET/POST/DELETE，`channel_bindings` 表；QQ 本轮以端点操作绑定，二维码流程随微信模块到货） |
-| `wx-preview-card` | 推送卡片模板预览（可点按钮） | `ZM` 样本 |
-| `wx-log-card` | 最近 6 条推送日志 | 本地状态 |
+生产侧落地（2026-11-17，ADR-0017 / C4 关闭）：渠道 = **微信官方 iLink AI Bot**（robit-wechat 0.3.0，1:1 私聊、出站长轮询无需公网回调，非服务号）。六卡生产形态（`WechatScreen`，`data-od-id` 沿用原型名）：
 
-状态存 `localStorage['zimu:wechat:v2']`。参数输入要做校验，密钥类字段永远不进仓库（`.gitignore` 已覆盖 `.env`/`secrets.*`）。
+| 模块 | 生产形态 | 数据依赖 |
+|---|---|---|
+| `wx-channel-card` | QQ / 微信 / Web 三行状态**只读**（在线=ok 绿 / 离线=warn / 未启用=plain，头徽章 N/3 在线）；无 switch、无逐通道「测一下」。启用开关在服务器配置文件 `[zimu.channels]`，界面只读展示（ADR-0011 拍板⑤⑥） | `health.qq_online/wechat_online/agent_online` + `qq_enabled/wechat_enabled`（启动时开关快照，区分「未启用」与「离线」） |
+| `wx-push-card` | **待启动态**：上段「当前生效（绑定即推）」如实列两条真实推送（预警推送 / 15:05 盘后数字摘要，无开关）；下段订阅管理禁用占位 + 另案 banner。6 类订阅 + 时段 + 静音落库 = **C15 另案**（先对齐 vision/原型词汇，再 schema v5 + 03 口径）；**不枚举六类标签**（词汇冲突未决，渲染任一即提前站队） | 静态 + push kind 词汇 |
+| `wx-config-card` | **iLink Bot 脱敏只读**（服务号 AppID/Token/Webhook 文案全废，ADR-0011 拍板⑤兑现）：渠道形态 / 凭据位置（bot_token 存服务器 `backend/.robit/wechat-state.json`，CLI 扫码换取，**界面不显示任何 token 值**）/ 登录命令 + 停服约定 / 出站长轮询无需公网回调 / 在线状态行。**零输入框、零 localStorage** | health + 静态文案 |
+| `wx-bind-card` | **通道无关白名单管理（QQ 同样受益）**：活跃绑定列表（channel 徽章 + chat_id mono + kind + label + bound_at）+ 行内解绑**两步确认弹窗**（Esc/scrim 可关，danger）；新增表单（channel 选 qq/wechat、**选 wechat 时 kind 锁死 private**——微信仅 1:1、label 可选）；chat_id 获取引导 =「先给 bot 发一条消息 → 服务端日志『未绑定会话来消息…chat_id=private:…』→ 抄录绑定」。**扫码不上 Web**（robit 无非交互式登录 API；登录 = 部署侧 `robit-wechat login`，停服约定见 backend/README） | bindings store（`/api/channel_bindings` GET/POST/DELETE，`channel_bindings` 表） |
+| `wx-preview-card` | **纯文本消息样例预览（无按钮**——服务号模板消息语义生产不存在）：摘要 = 最近 `equity_snapshots` 真实行按后端 `summary_message` 同款行格式渲染（数字真值不伪造，无快照→占位文案）；预警 = 静态示例明确标「样例」；sub 注「纯文本 · 2000 字上限超长截断」 | useEquity + 静态 |
+| `wx-log-card` | 最近 6 条**全通道** push_log（channel 徽章 + ok/warn 圆点 + kind 标签 + **detail 原样**不另造文案 + ts）；空态生产文案 | usePushLog（只读 store 复用） |
+
+页头「发送测试推送」**禁用 + hint**（测试推送端点另案——新增 = 新契约面 + 无鉴权服务上的真实发送滥用面，超出本轮范围）。屏挂载即 load bindings/health/pushLog + 屏内 60s 轮询（卸载清理）。状态色 B5：已绑定/在线一律绿 `--ok`、离线/未绑定 warn，绝不用红；`--accent` ≤2（仅绑定提交 btn-primary）；空账户六卡不报错。
+
+**原型语义作废清单**（`design/wechat.html` 冻结参照，生产不实现）：主通道失败自动改备用重试一次（生产推送失败不自动重试，ADR-0011）、服务号参数输入与校验、演示二维码 + TTL 换码（登录 = 部署侧 CLI 扫码）、浏览器桌面通知备用通道、推送卡片按钮（微信纯文本）、「推送内容包含具体价格」开关与 6 类订阅开关（C15 另案）。原型 `localStorage['zimu:wechat:v2']` 状态键不入生产（绑定落 zimu.db、订阅待 C15、屏无本地状态）。密钥类字段永远不进仓库（`.gitignore` 已覆盖 `.env`/`secrets.*`；`wechat-state.json` 含凭据已被 `**/.robit/*` 覆盖，不加豁免）。

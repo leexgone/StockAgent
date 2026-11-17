@@ -56,3 +56,4 @@ B …
 | [0014](./0014-agent-standard-tools.md) | 智能体启用 robit 标准工具面：全套消费、确认关闭自动执行（推翻 R2） | 接受 |
 | [0015](./0015-web-attachment-upload.md) | Web 对话框文件上传识别：multipart 随消息发送，robit 零改动 | 接受 |
 | [0016](./0016-holdings-sector-sina-source.md) | 持仓行业数据源：新浪行业板，挂刷新链顺带补 sector | 接受 |
+| [0017](./0017-wechat-channel-ilink-bot.md) | 微信通道接入：iLink Bot 双 manager + CLI 扫码绑定（C4 关闭） | 接受 |
