@@ -137,6 +137,7 @@ CI 门禁（ci.yml，PR/main）：frontend（npm ci → gen:api 漂移守卫 →
 ```bash
 mkdir -p /volume1/docker/zimu && cd /volume1/docker/zimu   # 路径按实际共享文件夹调整
 # 放入 compose.yaml（= deploy/compose.nas.yaml 内容）与 .env（= .env.example 填凭据 + ZIMU_VERSION）
+# 首跑可先 touch .env（空文件合法；env_file 缺文件直接报错，勿注释该行绕过——日后凭据不注入）
 mkdir -p data && sudo chown -R 1000:1000 data              # 容器 uid 1000，bind 目录属主必须先改
 docker compose pull && docker compose up -d
 # → http://<NAS局域网IP>:8018
