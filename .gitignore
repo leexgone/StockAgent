@@ -56,6 +56,8 @@ cache/
 !**/.robit/prompts/agent.md
 # QQ 通道入站附件随 ChatbotManager working_dir 落盘（backend/media/），不入库
 media/
+# 生图工具产物（generate_image 落 backend/images/，运行期生成资产非源码），不入库
+backend/images/
 screenshots/
 shots/
 *.log

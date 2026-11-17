@@ -984,6 +984,9 @@ fn standard_surface_plus_domain_composition_per_adr_0014() {
     }
 
     register_domain_tools(&mut registry, AgentDeps::new(seeded_store(), FakeApi::arc()));
+    // send_file（ADR-0017 D9）：assemble 在领域件后注册，IM 发文件/图片；
+    // 平台扩展自守卫（Web/CLI 调用如实报错），共享注册不按通道重建
+    registry.register(robit_chatbot::tool::SendFileTool);
     let names = registry.tool_names();
     for t in [
         "read", "write", "edit", "ls", "find", "grep", "bash", "load_skill", "search_history",
@@ -994,5 +997,6 @@ fn standard_surface_plus_domain_composition_per_adr_0014() {
     for t in zimu_agent::tools::DOMAIN_TOOL_NAMES {
         assert!(names.contains(&t), "领域面缺 {t}，实有 {names:?}");
     }
-    assert_eq!(names.len(), 24, "空配置下应恰 10 标准 + 14 领域，实有 {names:?}");
+    assert!(names.contains(&"send_file"), "IM 发文件工具缺位，实有 {names:?}");
+    assert_eq!(names.len(), 25, "空配置下应恰 10 标准 + 14 领域 + send_file，实有 {names:?}");
 }

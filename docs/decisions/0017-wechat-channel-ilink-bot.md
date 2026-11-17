@@ -24,6 +24,7 @@ wechat 屏是 P5-T2 唯一余屏（gate C4）。其「推送订阅」卡背后�
 6. **D6 · Health 契约面**：加 `wechat_online`（照 `qq_online` 口径）；**同批加 `qq_enabled`/`wechat_enabled`**（additive，启动时 `[zimu.channels]` 快照）——`02` 通道卡「启用开关界面只读展示」规格要求区分「未启用」与「离线」，只有 online 位会把未启用误标异常。此为唯一超出 `wechat_online` 的契约增项。
 7. **D7 · 订阅体系另案（C15）**：wechat 屏推送订阅卡显示**待启动态**；「当前生效」段如实列两条真实推送（`alert_push` 预警 / `post_market_review_push` 15:05 盘后数字摘要，绑定即推、无订阅过滤）。**不枚举六类订阅标签**——vision 与原型词汇冲突未决，渲染任一即提前站队。`docs/03` 本轮零改动（微信推送复用现有口径；kind 词汇全量对齐归 C15）。
 8. **D8 · robit 缺口批记 R13，子木零绕过**：① 微信入站媒体由 adapter 自下载（AES-CDN 解密落盘、`local_path` 预填），manager 见 local_path 跳过通用下载分支 → **绕过 `max_media_bytes` 守卫**；② 语音 silk 无转写，对模型不可消费；③ Image MIME 恒 `image/jpeg`（png 也标 jpeg）；④ `WechatState::save` 非原子 + 登录与运行无互斥（D3）。框架级缺口先改 robit（ADR-0005 协作纪律），不写宿主绕过补丁；绑定白名单限缩风险面（只有主人绑定的会话能发附件），接受。
+9. **D9 · send_file 全通道共享注册（2026-11-17 增补）**：QQ/微信智能体支持发本地文件/图片给用户——消费 robit-chatbot 现成 `SendFileTool`（robit 官方 QQ/微信 bin 同款注册），在 `AgentCore::assemble` 领域件后注册。工具经 `ToolContext.extensions` 的 `chatbot.platform_ext` 取平台句柄（ChatbotManager 每会话自动注入）：QQ 走真实 CDN 上传、微信走 SDK `send_media`（`upload_file` 占位返回本地路径，链路闭合）。**共享注册而非按通道重建**：`ToolRegistry = HashMap<String, Box<dyn Tool>>` 不可 Clone，按通道复制需重跑整条装配；工具自带平台扩展守卫——Web/CLI 无扩展时调用如实报错「only available on chat platforms」，无副作用。子木注册面 25→26 件起（随配置 26–28）。
 
 ## 选项与取舍
 
@@ -34,6 +35,7 @@ wechat 屏是 P5-T2 唯一余屏（gate C4）。其「推送订阅」卡背后�
 - **推送形态**：caps 参数化裸推（**选**——QQ 同构、嘴不同手相同拍板⑦、数字摘要不经模型转写）；`inject_message` 走模型组织语言（本轮否——ADR-0011「IM 注入触发回合本轮不做」边界不变；有档案但引入模型延迟与数字转写面，另案拍板）。
 - **Health 面**：online + enabled 三键（**选**——规格要求只读展示启用开关，additive 成本低）；仅 wechat_online（否——通道卡无法区分未启用与离线）。
 - **本轮范围**：通道接线 + 屏移植、订阅卡待启用（**选**——主人拍板；C4 与 P5-T2 一并收口）；全量含订阅体系（否——词汇冲突未决、schema v5 + 03 口径定稿周期长，登记 C15）。
+- **send_file 注册面（D9）**：共享装配注册（**选**——robit 官方 bin 同款、工具扩展自守卫、零装配重复）；按通道重建 registry（否——ToolRegistry 不可 Clone，需重跑内核 + 领域 + read_image 整条装配，复杂度不值当）；等 robit 提供 registry 克隆/manager 级 extra_tools（R 系列候选，本轮不阻塞）。
 
 ## 后果
 

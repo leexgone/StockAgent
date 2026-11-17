@@ -4015,6 +4015,7 @@ dependencies = [
  "chrono",
  "robit-agent",
  "robit-ai",
+ "robit-chatbot",
  "rusqlite",
  "serde",
  "serde_json",

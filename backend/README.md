@@ -152,6 +152,7 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice::score_advice`（03 §10 生产口径）出数 → 数字列直接留档（B9：`generated_at` + `data_version=adv-v1\|k=…\|q=…`）→ 返回 advice_id 与全部数字；日线拿不到**拒绝出建议** |
 | `finalize_advice` | 写 advice_history 文案列 | 模型文案只回填 reason/risks（risks 至少一条，03 §10）——**数字不经模型转写**（ADR-0007 结构性保证） |
 | `echo` | 只读 | P2-T2 链路验证保留（网关排查不依赖数据） |
+| `send_file` | IM 出站 | 发本地文件/图片给用户（ADR-0017 D9，robit-chatbot SendFileTool）：平台扩展自守卫——QQ 真实 CDN 上传、微信 SDK send_media；Web/CLI 无平台扩展调用如实报错，无副作用 |
 
 Skill 模板在**仓库根 `skills/`**（robit SKILL.md 约定：YAML frontmatter +
 Markdown 正文；`/触发词` 命中时正文以临时 system message 注入本轮）。不放

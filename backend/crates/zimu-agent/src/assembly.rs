@@ -30,6 +30,7 @@ use robit_agent::{
     create_tools_from_config_with, resolve_memory_settings, MemorySettings, SkillRegistry,
     ToolRegistry,
 };
+use robit_chatbot::tool::SendFileTool;
 use robit_ai::{resolve_vision_model, ContextConfig, LlmClient, RobitConfig};
 use zimu_market::MarketApi;
 
@@ -97,9 +98,10 @@ impl AgentCore {
         }
         let skill_names: Vec<String> =
             loaded.iter().map(|s| s.frontmatter.name.clone()).collect();
-        // tools_required 校验名单 = 领域 14 + 标准面可能名（warn-only，容条件注册缺席）
+        // tools_required 校验名单 = 领域 14 + 标准面可能名 + send_file（warn-only，容条件注册缺席）
         let mut available: Vec<&str> = DOMAIN_TOOL_NAMES.to_vec();
         available.extend(STANDARD_TOOL_NAMES);
+        available.push("send_file");
         let skills = Arc::new(SkillRegistry::new(loaded, &available));
 
         // robit 标准工具面（ADR-0014）：与 bootstrap 同内核，skill 主权留子木。
@@ -153,6 +155,15 @@ impl AgentCore {
         // 领域 14 件叠加（写账本五件自动落账纪律见 tools/mod.rs 头与 ADR-0012/0013）
         let deps = AgentDeps::new(store, market);
         register_domain_tools(&mut registry, deps);
+
+        // send_file（ADR-0017 D9）：IM 通道发本地文件/图片给用户——robit 官方
+        // QQ/微信 bin 同款注册。工具经 ToolContext.extensions 的 chatbot.platform_ext
+        // 取平台句柄（ChatbotManager 每会话自动注入，manager.rs:799-808）：
+        // QQ 走真实 CDN 上传、微信走 SDK send_media（upload_file 占位返回本地路径）。
+        // **共享注册而非按通道重建**：ToolRegistry = HashMap<String, Box<dyn Tool>>
+        // 不可 Clone，按通道复制需重跑整条装配——不值当；工具自带平台扩展守卫，
+        // Web/CLI 无扩展时调用如实报错「only available on chat platforms」，无副作用。
+        registry.register(SendFileTool);
         let mut tool_names: Vec<String> =
             registry.tool_names().iter().map(|s| s.to_string()).collect();
         tool_names.sort();
