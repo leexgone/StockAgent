@@ -1,0 +1,64 @@
+# 子木 · 绿联 NAS 正式部署 compose（ADR-0018；通用缺省见仓库根 compose.yaml）
+#
+# 用法（SSH 推荐——UGOS 控制面板先启用 SSH）：
+#   1. 建项目目录：mkdir -p /volume1/docker/zimu && cd /volume1/docker/zimu
+#      （/volume1/docker 按 NAS 实际共享文件夹调整，ls /volume1 查看）
+#   2. 本文件存为 compose.yaml；仓库 .env.example 存为 .env，填凭据 + ZIMU_VERSION
+#   3. 数据目录属主（容器内 uid 1000）：mkdir -p data && sudo chown -R 1000:1000 data
+#   4. docker compose pull && docker compose up -d
+#   5. 浏览器 http://<NAS局域网IP>:8018
+#
+# 镜像双架构（linux/amd64 + arm64）——Intel DXP 与 Realtek ARM 机型自动拉对。
+# 前提：GHCR 两 package 已设公开（docs/08 §8 首发布步骤）；仍私有则先 docker login ghcr.io。
+# UGOS Docker 界面「项目/Compose」粘贴本文件亦可，但 .env 须位于项目目录（env_file 相对路径）。
+#
+# 与本地测试 compose 的差异：bind 挂载（NAS 文件管理器可见/可备份，Linux 本地盘
+# WAL 安全）、restart unless-stopped（NAS 重启自动拉起）、版本经 .env 钉死、日志轮转。
+services:
+  zimu:
+    image: ghcr.io/leexgone/zimu:${ZIMU_VERSION:-latest}
+    ports:
+      - "8018:8080" # 宿主 8018 → 容器 8080；局域网访问，服务无鉴权勿裸曝公网（反代+鉴权自理，ADR-0005）
+    volumes:
+      - ./data:/data # 账本/人格/记忆/微信state/上传全在此目录——NAS 备份工具直接覆盖
+    env_file: .env
+    environment:
+      TZ: Asia/Shanghai
+      ZIMU_MARKET_URL: http://datafetch:8300
+    restart: unless-stopped
+    stop_signal: SIGINT # 对上 tokio ctrl_c 优雅关闭（调度器→通道→SSE→排空）
+    stop_grace_period: 30s
+    depends_on:
+      - datafetch # 普通依赖：sidecar 缺席 server 降级 503 不瘫
+    networks:
+      - zimu-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  datafetch:
+    # 仅挂 zimu-net：sidecar 只对 server 可达，不映射宿主（内网面纪律）
+    image: ghcr.io/leexgone/zimu-datafetch:${ZIMU_VERSION:-latest}
+    expose:
+      - "8300" # 仅容器网络，不映射宿主（内网面纪律）
+    environment:
+      TZ: Asia/Shanghai
+    restart: unless-stopped
+    networks:
+      - zimu-net
+    # 无卷：纯内存缓存零落盘，重启清零是设计语义
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# 专用桥接网络：固定名便于 UGOS 网络管理识别；子网 Docker 自动分配（避免与局域网段
+# 冲突，需固定再加 ipam.config）。用户定义 bridge 自带容器名 DNS——
+# ZIMU_MARKET_URL=http://datafetch:8300 直接解析；sidecar 仅本网内可达。
+networks:
+  zimu-net:
+    name: zimu-net
+    driver: bridge

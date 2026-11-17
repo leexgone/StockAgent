@@ -126,4 +126,27 @@ docker compose pull && docker compose up -d
 5. **首发布一次性**：GHCR 两个 package（zimu / zimu-datafetch）默认 private——GitHub → Packages → 各 package → Package settings → Change visibility → Public，并关联仓库。
 6. 干净机器验证：`docker compose pull && up -d` → health/七屏/行情；arm64 设备（或 Docker Desktop Rosetta）拉 arm64 manifest + datafetch `live_smoke.py` 新浪通道。
 
-CI 门禁（ci.yml，PR/main）：frontend（npm ci → gen:api 漂移守卫 → vitest → build）、backend（cargo test --workspace，含契约三连与 persona 守护）、datafetch（**双架构** uv sync --frozen → pytest；arm64 腿专证 lock 可安装）。全离线，联网冒烟不进 CI。
+CI 门禁（ci.yml，PR/main）：frontend（npm ci → gen:api 漂移守卫 → vitest → build）、backend（cargo test --workspace --no-fail-fast，含契约三连与 persona 守护）、datafetch（**双架构** uv sync --frozen → pytest；arm64 腿专证 lock 可安装）。全离线，联网冒烟不进 CI。
+
+## 9. 绿联 NAS 正式部署（`deploy/compose.nas.yaml`）
+
+本地 Docker Desktop 适合测试（命名卷 + 手工启动覆盖层）；**正式服务推荐 NAS 常驻**，用专用模板 `deploy/compose.nas.yaml`——与通用 compose 的差异：bind 挂载到 NAS 可见目录（文件管理器可查、NAS 备份工具直接覆盖；Linux 本地盘 SQLite WAL 安全，无 Desktop gRPC-FUSE 坑）、`restart: unless-stopped`（NAS 重启自动拉起）、镜像版本经 `.env` 的 `ZIMU_VERSION` 钉死、json-file 日志轮转（10m×3）。
+
+**步骤（SSH 推荐，UGOS 控制面板先启用 SSH）**：
+
+```bash
+mkdir -p /volume1/docker/zimu && cd /volume1/docker/zimu   # 路径按实际共享文件夹调整
+# 放入 compose.yaml（= deploy/compose.nas.yaml 内容）与 .env（= .env.example 填凭据 + ZIMU_VERSION）
+mkdir -p data && sudo chown -R 1000:1000 data              # 容器 uid 1000，bind 目录属主必须先改
+docker compose pull && docker compose up -d
+# → http://<NAS局域网IP>:8018
+```
+
+- **架构自适应**：镜像双架构 manifest，Intel DXP（amd64）与 Realtek ARM 机型（arm64）自动拉对。
+- **网络**：专用桥接 `zimu-net`（固定名，UGOS 网络管理可见；子网 Docker 自动分配避免与局域网段冲突）——用户定义 bridge 自带容器名 DNS（`ZIMU_MARKET_URL=http://datafetch:8300`），sidecar 仅本网内可达、不映射宿主。
+- **端口面**：`8018:8080`（宿主 8018 → 容器 8080，容器内端口与 healthcheck 不动）局域网访问；服务无鉴权，**勿直接暴露公网**——公网需求自加反代 + 鉴权（ADR-0005 监听面纪律）。
+- **微信登录（NAS SSH 终端扫码，停服约定照旧）**：`docker compose stop zimu` → `docker compose run --rm -it --no-deps zimu robit-wechat login` → `docker compose start zimu`；token 失效态不停服重扫安全（60s 探测恢复）。
+- **通道启用**：改 `data/.robit/config.toml` 的 `[zimu.channels]` qq/wechat=true + `.env` 凭据 → `docker compose up -d`（env_file 变更需重建容器，restart 不重读）。
+- **升级**：`.env` 改 `ZIMU_VERSION=vX.Y.Z` → `docker compose pull && docker compose up -d`；回滚改回旧 tag 同命令。数据卷原样，人格不自动覆盖（§6）。
+- **备份**：NAS 快照/备份工具直接覆盖 `data/` 目录即可（含账本/人格/记忆/微信 state）；一致性要求高时先 `docker compose stop zimu` 再备（§5 同理）。微信 state 含凭据，备份按密钥纪律保管。
+- UGOS Docker 界面「项目/Compose」粘贴模板亦可，但 `.env` 须位于项目目录（env_file 相对路径）；SSH 方式目录自主、更直观。
