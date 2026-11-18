@@ -28,7 +28,7 @@ docker compose up -d
 - 健康：`curl http://127.0.0.1:8080/api/health`——恒 200 只做存活探针；`agent_online`/`static_ready`/`qq_online`/`wechat_online` 读响应体判断降级面。
 
 **Docker Desktop（Windows/macOS）**：命名卷缺省即可，勿改 bind 挂载（gRPC-FUSE/9p 上 SQLite WAL 锁语义有风险）。
-**Linux 服务器/NAS**：命名卷缺省即可；若偏好 bind 挂载 `./data:/data`（compose 内有注释备选），先 `mkdir data && sudo chown 1000:1000 data`（容器 uid 1000），并知悉 WAL 锁风险。
+**Linux 服务器/NAS**：命名卷缺省即可；若偏好 bind 挂载 `./data:/data`（compose 内有注释备选），`mkdir data` 即可——v0.1.1 起 entrypoint 自动修属主到 uid 1000（v0.1.0 需手工 `sudo chown -R 1000:1000 data`），并知悉 WAL 锁风险。
 
 ## 2. 配置：.env 与 config.toml
 
@@ -114,7 +114,7 @@ docker compose pull && docker compose up -d
 | 行情 503 | datafetch 容器状态 / `docker compose logs datafetch`；server 缺 sidecar 降级不瘫是设计行为 |
 | 微信不应答 | 绑定白名单（助理接入屏待绑定列表）；token 失效看日志探测态（§3） |
 | QQ 不应答 | .env 凭据 + `[zimu.channels] qq=true` + 绑定；凭据闸门拒连看日志 |
-| 容器反复重启 | `docker compose logs`；卷权限（bind 挂载须 chown 1000） |
+| 容器反复重启 | `docker compose logs`；卷权限（v0.1.0 bind 挂载须手工 chown 1000；v0.1.1+ entrypoint 自动处理） |
 | 优雅关闭验证 | `docker compose stop zimu` 日志应见调度器/通道/SSE 关闭序列（STOPSIGNAL SIGINT，30s 宽限） |
 
 ## 8. 维护者发布流程
@@ -138,8 +138,8 @@ CI 门禁（ci.yml，PR/main）：frontend（npm ci → gen:api 漂移守卫 →
 mkdir -p /volume1/docker/zimu && cd /volume1/docker/zimu   # 路径按实际共享文件夹调整
 # 放入 compose.yaml（= deploy/compose.nas.yaml 内容）与 .env（= .env.example 填凭据 + ZIMU_VERSION）
 # 首跑可先 touch .env（空文件合法；env_file 缺文件直接报错，勿注释该行绕过——日后凭据不注入）
-mkdir -p data && sudo chown -R 1000:1000 data              # 容器 uid 1000，bind 目录属主必须先改
-docker compose pull && docker compose up -d
+mkdir -p data                                                # v0.1.1 起 entrypoint 自动 chown 到 uid 1000
+docker compose pull && docker compose up -d                  # v0.1.0 旧版需先 sudo chown -R 1000:1000 data
 # → http://<NAS局域网IP>:8018
 ```
 

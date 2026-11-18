@@ -7,7 +7,8 @@
 #      （首跑可先 touch .env 空文件——env_file 缺文件会直接报错；空文件合法，
 #       Agent 离线但服务照常，凭据后补 up -d 生效。勿注释 env_file 行绕过：
 #       注释后日后填的凭据不会被注入）
-#   3. 数据目录属主（容器内 uid 1000）：mkdir -p data && sudo chown -R 1000:1000 data
+#   3. mkdir -p data 即可——entrypoint 以 root 启动自动 chown 到 uid 1000 再降权
+#      （postgres 模式，v0.1.1 起；v0.1.0 仍需手工 sudo chown -R 1000:1000 data）
 #   4. docker compose pull && docker compose up -d
 #   5. 浏览器 http://<NAS局域网IP>:8018
 #

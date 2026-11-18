@@ -54,7 +54,7 @@ FROM debian:bookworm-slim AS runtime
 # D12 烘焙层：智能体 bash 的 python3 直接命中 /opt/agent-env（PATH 前置），
 # pandas/openpyxl/xlrd/charset-normalizer = Excel(.xlsx/.xls)/CSV(含 GBK 探测) 开箱即用
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata curl python3 python3-venv \
+      ca-certificates tzdata curl python3 python3-venv gosu \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/agent-env \
     && /opt/agent-env/bin/pip install --no-cache-dir pandas openpyxl xlrd charset-normalizer \
@@ -75,7 +75,8 @@ ENV ZIMU_STATIC_DIR=/app/static \
     ZIMU_SKILLS_DIR=/app/skills \
     ZIMU_ADDR=0.0.0.0:8080 \
     PATH=/opt/agent-env/bin:$PATH
-USER zimu
+# 不设 USER：entrypoint 以 root 启动修 bind 目录属主后 gosu 降权到 zimu（1000），
+# 主进程仍非 root（postgres 模式；docker inspect 可见 entrypoint 瞬间 root）
 WORKDIR /data
 EXPOSE 8080
 # 优雅关闭（D6）：tokio ctrl_c 在 Linux 只收 SIGINT——docker stop 缺省 SIGTERM
