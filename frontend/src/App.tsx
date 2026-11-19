@@ -24,7 +24,7 @@ import { useUi } from "./store/ui";
  * 子木 SPA 根组件：外壳 Chrome + react-router 路由表（P5-T1，ADR-0008）。
  * 七屏全移植（P5-T2 收尾 2026-11-17，ADR-0017 / C4 关闭）：/ 工作台、
  * /dashboard 总览仪表盘、/holdings 持仓管理（含加减仓抽屉接 API）、/analysis
- * AI 分析建议、/diagnosis 组合诊断、/chat Agent SSE 会话、/wechat 助理接入
+ * 分析建议、/diagnosis 组合诊断、/chat Agent SSE 会话、/wechat 助理接入
  * （通道状态/绑定管理/推送日志真实数据，订阅卡待启动态 C15 另案）。
  * 占位屏机制保留（routes.ts ported=false 的屏自动渲染占位，当前集合为空）。
  *

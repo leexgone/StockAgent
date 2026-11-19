@@ -119,7 +119,7 @@ export default function HomeScreen({ now }: HomeScreenProps) {
       stat: !view ? "—" : isEmpty ? `现金 ${money(agg?.cash ?? 0)} · 待录入第一笔` : `${holdings.length} 只标的 · ${money(agg?.cash ?? 0)} 现金`,
     },
     {
-      path: "/analysis", Icon: IconSpark, name: "AI 分析建议",
+      path: "/analysis", Icon: IconSpark, name: "分析建议",
       desc: "买入 / 持有 / 卖出结论，拆到技术、基本面、资金、消息四个维度并给出目标与止损。",
       stat: covered > 0 ? `已覆盖 ${covered} 只标的` : "暂无留档 · 盘后复盘自动生成",
     },

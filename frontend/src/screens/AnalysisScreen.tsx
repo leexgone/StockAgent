@@ -14,7 +14,7 @@ import { useUi } from "../store/ui";
 import { useWatchlist } from "../store/watchlist";
 
 /**
- * AI 分析建议（analysis 屏，P5-T2 真实数据移植）—— 对照基准 design/analysis.html。
+ * 分析建议（analysis 屏，P5-T2 真实数据移植）—— 对照基准 design/analysis.html。
  * 铁律：绝不伪造建议（原型的 adviceFor 观察态兜底、RNG 蜡烛、样本历史全部删除）。
  * 结论/四维/得分/目标止损/风险 = `GET /api/advice?code=` 的 AdviceRow 留档原值
  * （ADR-0007：数字归规则、文字归模型；reason 空串如实标注「文案未回填」）；
@@ -279,7 +279,7 @@ export default function AnalysisScreen() {
     <main className="page" data-od-id="analysis-page">
       <div className="page-head">
         <div>
-          <div className="eyebrow">AI 分析建议</div>
+          <div className="eyebrow">分析建议</div>
           <h1 className="page-title">结论、依据、以及怎么执行</h1>
           <p className="page-desc">
             每只标的给出一个动作（买入 / 加仓 / 持有 / 减仓 / 卖出 / 定投），并把结论拆成四个维度：你能看到它是根据什么得出的，也能看到它可能错在哪。数字归规则、文字归模型（ADR-0007）。

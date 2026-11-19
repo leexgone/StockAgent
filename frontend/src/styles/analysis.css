@@ -1,4 +1,4 @@
-/* AI 分析建议页专属样式（迁移自 design/analysis.html <style>，P5-T2）。
+/* 分析建议页专属样式（迁移自 design/analysis.html <style>，P5-T2）。
    通用类（card/tbl/seg/pill/progress…）走 ui.css；本文件只留本页小件：
    双栏布局 a-layout、标的选择 pick、结论标签 verdict-tag、四维 dim、执行计划 plan-step。 */
 
