@@ -54,13 +54,11 @@ FROM debian:bookworm-slim AS runtime
 # D12 烘焙层：智能体 bash 的 python3 直接命中 /opt/agent-env（PATH 前置），
 # pandas/openpyxl/xlrd/charset-normalizer = Excel(.xlsx/.xls)/CSV(含 GBK 探测) 开箱即用
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata curl python3 python3-venv gosu \
+      ca-certificates tzdata curl python3 python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/agent-env \
     && /opt/agent-env/bin/pip install --no-cache-dir pandas openpyxl xlrd charset-normalizer \
-    && useradd -u 1000 -m zimu \
-    && mkdir -p /data /app/defaults \
-    && chown 1000:1000 /data
+    && mkdir -p /data /app/defaults
 COPY --from=web /web/dist /app/static
 COPY skills/ /app/skills
 COPY backend/.robit/prompts/agent.md /app/defaults/agent.md
@@ -75,8 +73,10 @@ ENV ZIMU_STATIC_DIR=/app/static \
     ZIMU_SKILLS_DIR=/app/skills \
     ZIMU_ADDR=0.0.0.0:8080 \
     PATH=/opt/agent-env/bin:$PATH
-# 不设 USER：entrypoint 以 root 启动修 bind 目录属主后 gosu 降权到 zimu（1000），
-# 主进程仍非 root（postgres 模式；docker inspect 可见 entrypoint 瞬间 root）
+# v0.1.2 起 root 运行（D5 修订）：UGOS NAS virtiofs/9p bind 翻译层使 chown
+# 静默无效（v0.1.1 非 root/gosu 在标准 Linux CI 通过、NAS 仍 Permission denied）；
+# 个人 NAS 部署 root 惯例。缓解：仅内网端口、无 privileged/无 docker.sock、
+# 应用层绑定白名单不变。sidecar 无卷仍保留非 root。
 WORKDIR /data
 EXPOSE 8080
 # 优雅关闭（D6）：tokio ctrl_c 在 Linux 只收 SIGINT——docker stop 缺省 SIGTERM
