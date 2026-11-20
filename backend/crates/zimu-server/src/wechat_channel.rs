@@ -3,19 +3,23 @@
 //! 同 working_dir 共 robit.db（会话按 `(chat_id, source="wechat", namespace)` 隔离，
 //! D2：R8④ 收口，不拆目录）、入站过绑定白名单（拍板⑤，装饰器零改动换词汇）。
 //!
-//! 渠道 = 微信官方 iLink AI Bot（robit-wechat 0.3.0）：出站长轮询无需公网回调，
+//! 渠道 = 微信官方 iLink AI Bot（robit-wechat 0.4.0）：出站长轮询无需公网回调，
 //! 1:1 私聊（chat_id 恒 `private:{ilink_user_id}`）。登录 = 部署侧 CLI
 //! `robit-wechat -w <backend> login`（**停服约定**，D3：state save 非原子 +
 //! 运行中无互斥，健康期并发登录会覆盖新 token；失效态 adapter 静默，不停服安全）。
+//! 出站反刷（R14/robit 0.4.0）：adapter 内置账号级发送节流（throttle 模块，
+//! 微信缺省启用：最小间隔 2s、窗口 10 条/180s、-2 冷却 120s，快照随
+//! wechat-state.json 持久化跨重启）——宿主 `push_to_bound` 直调 adapter 自动受护，
+//! 子木零适配；-2 瞬态限流码经 `AgentError::RateLimited` 类型化上报。
 //!
 //! 生命周期两层 + 一个终态分支，**职责不同不要混**：
-//! - `WechatPlatformAdapter` **自带 poll supervisor**（robit-wechat platform.rs:199，
+//! - `WechatPlatformAdapter` **自带 poll supervisor**（robit-wechat platform.rs:378，
 //!   传输错误指数退避 1s→30s）：连接层自愈归它；
 //! - 本文件循环兜**残余退出路径**（构造失败 / recv Err）：退避重建整个 manager
 //!   （1s→30s 封顶，QQ 同款）；
 //! - **token 失效（errcode -14）是终态**，重建无意义（state 不变）——推断链：
-//!   adapter 只在 `on_token_stale` 发 `Disconnected`（platform.rs:331-341），
-//!   manager 对 `Disconnected` 返回 `Ok(())`（robit-chatbot manager.rs:243-246），
+//!   adapter 只在 `on_token_stale` 发 `Disconnected`（platform.rs:510-514），
+//!   manager 对 `Disconnected` 返回 `Ok(())`（robit-chatbot manager.rs:262），
 //!   shutdown 也返回 Ok 但 stop 已置位 ⇒ **run 返回 Ok 且 stop 未置位 = token 失效**。
 //!   策略（D4）：停止快速重建 → error 日志给重扫指引 → 60s 低频**只读**探测
 //!   （重解析 from_config 比对 bot_token）→ 变化即重置退避自动重建（重扫后
@@ -33,7 +37,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use robit_chatbot::ChatbotManager;
 use robit_wechat::{WechatConfig, WechatPlatformAdapter};
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_bridge::AgentBridge;
 use crate::channel::ChannelHandle;
@@ -57,7 +61,7 @@ pub fn spawn(
     pending: zimu_server::pending_bindings::PendingBindings,
 ) -> ChannelHandle {
     let stop = Arc::new(AtomicBool::new(false));
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
     let handle = tokio::spawn(run_supervisor(
         bridge,
         store,
@@ -84,7 +88,7 @@ async fn run_supervisor(
     working_dir: PathBuf,
     online: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
-    shutdown: Arc<Notify>,
+    shutdown: CancellationToken,
     active: ActiveAdapter,
     pending: zimu_server::pending_bindings::PendingBindings,
 ) {
@@ -107,7 +111,7 @@ async fn run_supervisor(
                 let mut recovered = false;
                 while !stop.load(Ordering::SeqCst) {
                     tokio::select! {
-                        _ = shutdown.notified() => stop.store(true, Ordering::SeqCst),
+                        _ = shutdown.cancelled() => stop.store(true, Ordering::SeqCst),
                         _ = tokio::time::sleep(PROBE_INTERVAL) => {}
                     }
                     if stop.load(Ordering::SeqCst) {
@@ -133,7 +137,7 @@ async fn run_supervisor(
                     break;
                 }
                 tokio::select! {
-                    _ = shutdown.notified() => break,
+                    _ = shutdown.cancelled() => break,
                     _ = tokio::time::sleep(backoff) => {}
                 }
                 backoff = (backoff * 2).min(Duration::from_secs(30));
@@ -174,7 +178,7 @@ async fn run_once(
     bridge: &Arc<AgentBridge>,
     store: &SharedStore,
     working_dir: &PathBuf,
-    shutdown: &Arc<Notify>,
+    shutdown: &CancellationToken,
     stop: &Arc<AtomicBool>,
     online: &Arc<AtomicBool>,
     active: &ActiveAdapter,
@@ -215,11 +219,11 @@ async fn run_once(
          与 QQ 共 robit.db 按 source 隔离（ADR-0017 D2）"
     );
 
-    // 与关停通知赛跑：manager.run 自身 select shutdown（返回 Ok），这里再兜一层。
+    // 与关停令牌赛跑：manager.run 自身收 CancellationToken（返回 Ok），这里再兜一层。
     // Ok + stop 未置位 ⇒ Disconnected ⇒ token 失效终态（推断链见模块头）。
     tokio::select! {
         biased;
-        _ = shutdown.notified() => {
+        _ = shutdown.cancelled() => {
             stop.store(true, Ordering::SeqCst);
             Ok(RunOutcome::Stopped)
         }
@@ -246,6 +250,9 @@ mod tests {
             base_url: None,
             cdn_base_url: None,
             working_dir: PathBuf::from("."),
+            // robit 0.4.0 新字段：保守缺省（节流启用）——闸门测试只看 bot_token
+            rate_limit: robit_chatbot::throttle::ThrottleConfig::default(),
+            progress_hint: None,
         }
     }
 

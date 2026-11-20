@@ -120,6 +120,8 @@ mod tests {
     use robit_chatbot::{MarkdownFeatures, PlatformCaps};
 
     // 事件队列 + 出站记录（共享装置 testutil，ADR-0017 B3；caps 保持原 100 上限）
+    // progress_hints（robit 0.4.0 新字段）：mock 平台缺省 always——提示策略不在
+    // 白名单测试面，任何值不影响断言
     mock_platform!(MockPlatform, "mock", PlatformCaps {
         supports_edit: false,
         returns_msg_id: true,
@@ -129,6 +131,7 @@ mod tests {
         supports_images: false,
         supports_files: false,
         max_upload_size: 0,
+        progress_hints: robit_chatbot::HintPolicy::Always,
     });
 
     #[tokio::test]

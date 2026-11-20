@@ -21,6 +21,8 @@ robit-wechat.workspace = true
 # T5 通道开关：raw 解析 [zimu.channels]（robit 类型化面看不见自有节）
 toml.workspace = true
 tokio.workspace = true
+# robit 0.4.0 关停信号：CancellationToken（通道管线 + manager.run/adapter.connect）
+tokio-util.workspace = true
 tokio-stream.workspace = true
 async-trait.workspace = true
 axum.workspace = true

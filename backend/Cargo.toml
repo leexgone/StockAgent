@@ -7,6 +7,17 @@ version = "0.1.2"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.4.0（2026-11-20）= 子木第五轮移交 R14 落地（微信出站反刷限流，交接件
+# robit/docs/robit-rfc-wechat-outbound-ratelimit.md，W1–W4 全收）：
+# robit-chatbot 通用 throttle 模块（账号级预算：最小间隔+滑动窗口+冷却+快照
+# 持久化，微信缺省启用）+ AgentError::RateLimited（-2 瞬态码类型化，
+# #[non_exhaustive]）+ HintPolicy 进度提示策略（微信缺省 off）+
+# send_message_best_effort + 无编辑平台长回复分段（不再静默截断）。
+# v0.3.1 同批：Ctrl+C 优雅退出重做——ChatbotManager::run 与双 adapter connect
+# 的 shutdown 参数 Arc<Notify> → CancellationToken（电平触发不丢信号）、退出前
+# 等流式回复收尾最多 15s、robit-wechat login 可 Ctrl+C 取消。
+# 子木适配面：channel.rs/qq_channel.rs/wechat_channel.rs 关停管线换
+# CancellationToken；WechatConfig 字面构造补 rate_limit/progress_hint（测试）。
 # 0.3.0（2026-11-17）= 微信 iLink Bot 渠道接入（ADR-0017，C4 关闭）：新 crate
 # robit-wechat（微信官方 iLink AI Bot，协议 SDK weixin-agent 0.3；出站长轮询无需
 # 公网回调，1:1 私聊，CLI 扫码换长期 bot_token）+ PlatformCaps::wechat() /
@@ -39,17 +50,17 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.3.0"
-robit-agent = "0.3.0"
-robit-web = "0.3.0"
+robit-ai = "0.4.0"
+robit-agent = "0.4.0"
+robit-web = "0.4.0"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。
 # rusqlite 0.42 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.3.0"
-robit-qq = "0.3.0"
+robit-chatbot = "0.4.0"
+robit-qq = "0.4.0"
 # P6-T2 微信通道（ADR-0017）：robit-wechat iLink Bot adapter（lib 面消费，
 # 登录走部署侧 CLI `robit-wechat login`，bin 不复用）。
-robit-wechat = "0.3.0"
+robit-wechat = "0.4.0"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "1.2"
@@ -68,6 +79,9 @@ async-trait = "0.1"
 # multipart：Web 对话框文件上传（ADR-0015，POST /api/chat 改 multipart/form-data）
 axum = { version = "0.8", features = ["multipart"] }
 tokio-stream = { version = "0.1", features = ["sync"] } # BroadcastStream（SSE 事件扇出）
+# robit 0.4.0 起关停信号统一 CancellationToken（zimu-server 通道管线；版本与
+# robit-agent 传递依赖对齐，zimu-agent 测试同款）
+tokio-util = "0.7"
 tower-http = { version = "0.7", features = ["fs", "trace"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

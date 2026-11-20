@@ -65,14 +65,14 @@ read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent medi
 （R12 诉求上游公开）；axum 因此启用 `multipart` feature。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.3.0 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.4.0 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
 宿主循环只兜残余退出。health 透出 `qq_online`。
 
 微信 IM 通道（P6-T2，ADR-0017 / C4 关闭）：`[zimu.channels].wechat = true` 时挂
-`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.3.0 库面消费）——
+`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.4.0 库面消费）——
 微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
 长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
 `(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
@@ -89,8 +89,9 @@ health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快�
 ```powershell
 # 先停 zimu-server——WechatState::save 非原子整文件覆盖且运行中无互斥，
 # 健康期并发登录写入的新 token 会被 adapter 旧内存快照覆盖（ADR-0017 D3 / R13④）
-cargo install robit-wechat --version 0.3.0   # 或 robit 仓 cargo run -p robit-wechat -- login
+cargo install robit-wechat --version 0.4.0   # 或 robit 仓 cargo run -p robit-wechat -- login
 robit-wechat -w e:\Github\StockAgent\backend login   # 终端二维码 + 配对码，一次性换长期 token
+# 0.3.1 起 login 支持 Ctrl+C 取消（不写半成品 state 文件）
 # 产物 backend/.robit/wechat-state.json（含 bot_token 凭据，已被 **/.robit/* gitignore
 # 覆盖，**勿加豁免**）；再翻 config.toml [zimu.channels] wechat = true → 起服
 ```
@@ -376,14 +377,26 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.3.0`（0.3.0 = 微信 iLink Bot 渠道接入，
-2026-11-17 发版，ADR-0017 / C4 关闭：新 crate `robit-wechat`（微信官方 iLink
-AI Bot，协议 SDK weixin-agent 0.3）+ `PlatformCaps::wechat()` /
-`MarkdownFeatures::wechat()` + manager 附件契约（local_path 已设跳过通用下载）。
-全 additive：trait/签名不变、robit-web 零 diff（wire 不变）、存储 v7 零迁移、
-robit-agent/qq/web 源码零改动纯版本跟随、rusqlite 0.42 无连带——QQ 消费代码
-零适配。子木消费面：`wechat_channel.rs` 双 manager 接线 + `channel_push.rs`
-caps 参数化推送；缺口批 R13 登记移交，零绕过）。
+robit 全家消费 crates.io 正式版 `0.4.0`（0.4.0 = 子木第五轮移交 R14 落地，
+2026-11-20 发版，交接件 `robit/docs/robit-rfc-wechat-outbound-ratelimit.md`
+W1–W4 全收：robit-chatbot 通用 `throttle` 模块（账号级发送预算 = 最小间隔 +
+滑动窗口 + 冷却 + 快照持久化，微信缺省启用：2s 间隔 / 10 条·180s 窗口 /
+-2 冷却 120s，快照随 wechat-state.json 跨重启）+ `AgentError::RateLimited`
+（-2 瞬态码类型化，`#[non_exhaustive]`）+ `HintPolicy` 进度提示策略（微信缺省
+off）+ `send_message_best_effort` + 无编辑平台长回复分段不再静默截断。
+v0.3.1 同批：Ctrl+C 优雅退出重做——`ChatbotManager::run` 与双 adapter `connect`
+的 shutdown 参数 `Arc<Notify>` → `CancellationToken`（电平触发不丢信号）、退出前
+等流式回复收尾最多 15s、`robit-wechat login` 可 Ctrl+C 取消。子木适配面：
+`channel.rs`/`qq_channel.rs`/`wechat_channel.rs` 关停管线换 `CancellationToken`
++ `WechatConfig`/`PlatformCaps` 字面构造补新字段（测试）；微信出站节流/-2 语义/
+冷却持久化对宿主直调 adapter 自动生效，子木零绕过）。
+上一版 0.3.0（微信 iLink Bot 渠道接入，2026-11-17 发版，ADR-0017 / C4 关闭：
+新 crate `robit-wechat`（微信官方 iLink AI Bot，协议 SDK weixin-agent 0.3）+
+`PlatformCaps::wechat()` / `MarkdownFeatures::wechat()` + manager 附件契约
+（local_path 已设跳过通用下载）。全 additive：trait/签名不变、robit-web 零 diff
+（wire 不变）、存储 v7 零迁移、rusqlite 0.42 无连带——QQ 消费代码零适配。
+子木消费面：`wechat_channel.rs` 双 manager 接线 + `channel_push.rs` caps 参数化
+推送；缺口批 R13 登记移交，零绕过）。
 上一版 0.2.1（M1 收尾，2026-11-14 同日发版：附件
 标注行携带本地保存路径——`describe_with_local` 相对 working_dir 显示，
 非图数据文件对模型从「能发现、够不着」变为路径可见；内容读取仍需宿主
@@ -475,7 +488,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.3.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.4.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use robit_chatbot::ChatbotManager;
 use robit_qq::{QqConfig, QqPlatformAdapter};
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_bridge::AgentBridge;
 use crate::channel::ChannelHandle;
@@ -47,7 +47,7 @@ pub fn spawn(
     pending: zimu_server::pending_bindings::PendingBindings,
 ) -> ChannelHandle {
     let stop = Arc::new(AtomicBool::new(false));
-    let shutdown = Arc::new(Notify::new());
+    let shutdown = CancellationToken::new();
     let handle = tokio::spawn(run_supervisor(
         bridge,
         store,
@@ -67,7 +67,7 @@ async fn run_supervisor(
     working_dir: PathBuf,
     online: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
-    shutdown: Arc<Notify>,
+    shutdown: CancellationToken,
     active: ActiveAdapter,
     pending: zimu_server::pending_bindings::PendingBindings,
 ) {
@@ -94,7 +94,7 @@ async fn run_supervisor(
         }
         // 退避睡眠可被关停即时打断
         tokio::select! {
-            _ = shutdown.notified() => break,
+            _ = shutdown.cancelled() => break,
             _ = tokio::time::sleep(backoff) => {}
         }
         backoff = (backoff * 2).min(Duration::from_secs(30));
@@ -108,7 +108,7 @@ async fn run_once(
     bridge: &Arc<AgentBridge>,
     store: &SharedStore,
     working_dir: &PathBuf,
-    shutdown: &Arc<Notify>,
+    shutdown: &CancellationToken,
     stop: &Arc<AtomicBool>,
     online: &Arc<AtomicBool>,
     active: &ActiveAdapter,
@@ -147,11 +147,11 @@ async fn run_once(
     online.store(true, Ordering::SeqCst);
     tracing::info!("QQ 通道已连接：会话按 chat_id 独立管理（ADR-0011 拍板①），入站过绑定白名单（拍板⑤）");
 
-    // 与关停通知赛跑：manager.run 自身 select shutdown（返回 Ok），这里再兜一层
+    // 与关停令牌赛跑：manager.run 自身收 CancellationToken（返回 Ok），这里再兜一层
     // 保证 stop 置位后第一时间收束，不等平台事件（Disconnected 实际不触发，见模块头）
     tokio::select! {
         biased;
-        _ = shutdown.notified() => {
+        _ = shutdown.cancelled() => {
             stop.store(true, Ordering::SeqCst);
             Ok(())
         }

@@ -2406,9 +2406,9 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4c3447b823ed7475fbb1ebf059e31353060ee1a9bcff5641a9e1e2c8267ac8a"
+checksum = "e9120b87b524f571b46d0e6f900808c7945a03f1e119bf02aaae66cd011bb9d6"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2437,9 +2437,9 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90703c5d3475fd24538f7e9cc2d81dccc8e6d8a89571d9e80df552ed7f6f0d9a"
+checksum = "900633e83505648650cfeda0dff0102d65ba49d2f2925fa724a7ca874b4bbc15"
 dependencies = [
  "async-openai",
  "bytes",
@@ -2459,9 +2459,9 @@ dependencies = [
 
 [[package]]
 name = "robit-chatbot"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b620c4244bdb3bdf476e6ebd8c1e28c9b9c117d5f87153ed2e74917ace3329"
+checksum = "96fe866644ae8709b2229e2b99f7dc76aa0ebe56a2dfae114420ac40ffcc123d"
 dependencies = [
  "async-trait",
  "pulldown-cmark",
@@ -2472,15 +2472,16 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "robit-qq"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cec9c7f525cfec60500965fa6896a2179397f6791d61a2936bba4461477b9c1"
+checksum = "96437b98b488c148835018e2ac76f35eb1942fa7fa09a8326e975038d66c5eaa"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2502,9 +2503,9 @@ dependencies = [
 
 [[package]]
 name = "robit-web"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d69f6e2962f22aeb64c4245e6cb34e399ce4c5e2b1b9e5670d0823967a17fc42"
+checksum = "94b461441845c36bdb368edab6d372a1ef9afa6aa87d375350f89816d45f1a51"
 dependencies = [
  "async-trait",
  "robit-agent",
@@ -2516,9 +2517,9 @@ dependencies = [
 
 [[package]]
 name = "robit-wechat"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bdf10e21b06df56bc001a913fea50c2799d4278a2e3add76035981a719a9265"
+checksum = "7748ae04b5883c46b708378c50c13868e61a69a631517075de7e1547cb36696f"
 dependencies = [
  "async-trait",
  "clap",
@@ -4088,6 +4089,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml",
  "tower-http 0.7.1",
  "tracing",
