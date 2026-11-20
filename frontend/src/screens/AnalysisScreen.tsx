@@ -260,6 +260,11 @@ export default function AnalysisScreen() {
   const adviceDeepLink = `/chat?q=${encodeURIComponent(
     item ? `/建议 ${item.held ? item.code : (sym ?? item.code)}` : "/建议",
   )}&send=1`;
+  /** 「刷新留档」（原名「重新分析」，2026-11-20 诚实化改名）：只读重读建议留档
+   *  + 该标的 K 线 + 自选行情，**不触发新分析生成**——建议只由盘后复盘 / 问答
+   *  「/建议」产出（ADR-0007 数字归规则、文字归模型；本屏是留档只读视图，绝不
+   *  伪造建议）。留档无新增时重读结果不变，故盘中点击通常无可见数字变化，仅 toast
+   *  反馈；与顶栏刷新（拉行情 + recalc 重算组合）互补而非等价。 */
   const rerun = () => {
     void useAdvice.getState().load();
     if (code) void useAdvice.getState().loadForCode(code, 50);
@@ -290,7 +295,14 @@ export default function AnalysisScreen() {
             <button type="button" data-s="hold" aria-pressed={scope === "hold"} onClick={() => switchScope("hold")}>我的持仓</button>
             <button type="button" data-s="watch" aria-pressed={scope === "watch"} onClick={() => switchScope("watch")}>自选</button>
           </div>
-          <button className="btn" id="rerun" onClick={rerun}>重新分析</button>
+          <button
+            className="btn"
+            id="rerun"
+            onClick={rerun}
+            title="重读最新建议留档与 K 线/行情（只读刷新）。新建议由盘后复盘 / 问答「/建议」生成，本屏不凭空产出结论。"
+          >
+            刷新留档
+          </button>
         </div>
       </div>
 
