@@ -54,12 +54,14 @@ const REVIEW_TRIGGER_TEXT: &str = "/复盘";
 pub type ReviewTrigger =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
-/// 预警推送回调（T6/ADR-0011）：收到一条新预警的落库原值（name/alert_type/
-/// level/text），返回是否送达至少一个目标。**文案组装、多目标循环与 push_log
-/// 留痕全在宿主侧**——本 crate 只说「推这条」，不认通道、不依赖 robit
-/// （边界与 ReviewTrigger 同构，scheduler.rs 头部纪律）。
-pub type AlertPusher =
-    Arc<dyn Fn(NewAlertInfo) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
+/// 预警推送回调（T6/ADR-0011；ADR-0019 批面）：收到**本轮全部新预警**（≥1 条，
+/// 空批不调用）的落库原值（name/alert_type/level/text），返回这批消息是否送达
+/// 至少一个目标（合并后送达粒度是消息级，不存在条级计数）。**文案组装（N=1
+/// 单条格式 / N≥2 合并一条）、多目标循环与 push_log 留痕全在宿主侧**——本
+/// crate 只说「推这一批」，不认通道、不依赖 robit（scheduler.rs 头部纪律）。
+pub type AlertPusher = Arc<
+    dyn Fn(Vec<NewAlertInfo>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync,
+>;
 
 /// 盘后摘要推送回调（T6）：携带当日 `equity_snapshots` 行原值（数字 = recalc
 /// agg 原值，03 §12 不现编）；返回是否送达至少一个目标。同样：格式化与留痕归宿主。
@@ -79,7 +81,8 @@ pub struct TickReport {
     pub polled: bool,
     pub quotes_updated: usize,
     pub new_alerts: Vec<NewAlertInfo>,
-    /// 预警推送送达至少一目标的数量（T6；未接推送恒 0）
+    /// 预警推送送达的数量（T6；ADR-0019 批语义：整批一条消息，送达即全批
+    /// 条数、失败即 0；未接推送恒 0）
     pub alerts_pushed: usize,
     pub snapshot_written: bool,
     /// None = 本轮未触发复盘链（时刻未到/当日快照已存在）
@@ -191,13 +194,14 @@ impl SchedulerCore {
         // 盘中分钟级轮询（集合竞价/早盘/午盘 = clock.live）
         if clock.live {
             self.poll_once(&today, now, &mut rep).await;
-            // 新预警推送（T6）：落库与同日去重在 poll_once 已完成——每条 (code,type)
-            // 至多推一次；送达失败不重试（下轮已被去重挡住，如实接受），宿主留痕。
+            // 新预警推送（T6；ADR-0019 轮内合并）：落库与同日去重在 poll_once 已
+            // 完成——本轮全部新预警作为**一批**交宿主（N=1 仍单条格式、N≥2 合并
+            // 一条，零延迟）；空批不调用（避免「本轮 0 条」废消息）。批送达 =
+            // 全批条数、批失败 = 0；送达失败不重试（下轮已被去重挡住，如实接受），
+            // 宿主留痕。
             if let Some(pusher) = &self.push_alert {
-                for a in rep.new_alerts.clone() {
-                    if pusher(a).await {
-                        rep.alerts_pushed += 1;
-                    }
+                if !rep.new_alerts.is_empty() && pusher(rep.new_alerts.clone()).await {
+                    rep.alerts_pushed = rep.new_alerts.len();
                 }
             }
         }

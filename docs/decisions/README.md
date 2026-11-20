@@ -58,3 +58,4 @@ B …
 | [0016](./0016-holdings-sector-sina-source.md) | 持仓行业数据源：新浪行业板，挂刷新链顺带补 sector | 接受 |
 | [0017](./0017-wechat-channel-ilink-bot.md) | 微信通道接入：iLink Bot 双 manager + CLI 扫码绑定（C4 关闭） | 接受 |
 | [0018](./0018-docker-ghcr-release.md) | 发布模式：Docker 双镜像 + GHCR + GitHub Actions tag 驱动流水线 | 接受 |
+| [0019](./0019-alert-push-in-tick-batch.md) | 预警推送轮内合并：AlertPusher 边界批化，1 条原样、≥2 条合并 | 接受 |

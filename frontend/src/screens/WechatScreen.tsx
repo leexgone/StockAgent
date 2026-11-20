@@ -459,8 +459,15 @@ export default function WechatScreen() {
               <div className="wxmsg">
                 {summaryPreview ?? "还没有快照 · 交易日 15:05 盘后链写入后，这里按真实数字渲染"}
               </div>
-              <div className="hint" style={{ margin: "12px 0 6px" }}>预警推送（样例，文案 = 判定产出原值）：</div>
+              <div className="hint" style={{ margin: "12px 0 6px" }}>预警推送 · 单条（样例，文案 = 判定产出原值）：</div>
               <div className="wxmsg">{"子木预警 · 样例标的 跌破止损线 0000.00（样例）"}</div>
+              {/* ADR-0019 轮内合并：静态样例（同轮 ≥2 条时合并一条）——明确标样例，
+                  不承担 summary 那种后端行格式镜像同步义务（格式真值在
+                  channel_push.rs alert_batch_message 与 docs/03 §12 推送打包） */}
+              <div className="hint" style={{ margin: "12px 0 6px" }}>预警推送 · 爆发轮合并（样例，同轮 ≥2 条时一条发出，ADR-0019）：</div>
+              <div className="wxmsg">
+                {"子木预警 · 本轮 3 条（样例）\n1. 样例标的A（600000）跌破止损线 0000.00（样例）\n2. 样例标的B（127000）当日累计量为近20日均量的 2.8 倍，涨跌幅 -6.20%（样例）\n3. 样例标的C（510300）现价 1.230 已触及涨停价 1.234（样例）"}
+              </div>
             </div>
           </section>
 

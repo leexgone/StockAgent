@@ -1,5 +1,6 @@
-//! 通道推送出站（T6/ADR-0011 → ADR-0017 D5 caps 参数化）——文案组装、多目标
-//! 循环、逐目标留痕都在宿主；调度器只说「推这条」（scheduler trait 通道无关）。
+//! 通道推送出站（T6/ADR-0011 → ADR-0017 D5 caps 参数化 → ADR-0019 轮内合并）
+//! ——文案组装（预警 N=1 单条 / N≥2 合并一条）、多目标循环、逐目标留痕都在
+//! 宿主；调度器只说「推这一批」（scheduler trait 通道无关）。
 //!
 //! **零硬编码通道词汇**：通道名取 `T::platform_name()`（恰为 channel_bindings
 //! 的 channel 词汇），清洗与截断参数取 `T::capabilities()`——QQ 数值行为逐位
@@ -147,6 +148,33 @@ pub fn alert_message(a: &NewAlertInfo) -> (String, String) {
     )
 }
 
+/// 预警推送文案 · 批面（ADR-0019 轮内合并）：N=1 逐位保持单条格式
+/// （`alert_message`，fixture 兼容）；N≥2 合并为一条多行消息——标题行
+/// `子木预警 · 本轮 {n} 条` + 逐行 `{序}. {name}（{code}）{text}`（含 code
+/// 便于回查 alerts 表）。**行序 = 判定产出序，不按 level 重排**（level 是
+/// 方向/动作词汇非严重度轴，03 §11/§12 词汇纪律）。留痕主题 `预警批次 {n} 条`
+/// （不带 code 列表——subject 复制进每个目标的 push_log detail 行，N 大时
+/// 膨胀日志；单条 code 可由 alerts 表同 ts 前缀回查）。超长由 push_to_bound
+/// 内 clip_by_lines 按行截断（与盘后摘要同语义），截掉的预警在 alerts 表与
+/// Web 可查。
+pub fn alert_batch_message(alerts: &[NewAlertInfo]) -> (String, String) {
+    match alerts {
+        [one] => alert_message(one),
+        many => (
+            format!(
+                "子木预警 · 本轮 {} 条\n{}",
+                many.len(),
+                many.iter()
+                    .enumerate()
+                    .map(|(i, a)| format!("{}. {}（{}）{}", i + 1, a.name, a.code, a.text))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            format!("预警批次 {} 条", many.len()),
+        ),
+    }
+}
+
 /// 盘后数字摘要文案（数字 = equity_snapshots 落库原值，03 §12 不现编；
 /// 复盘正文留在 Web 会话，这里只推数字摘要）。**前端 wechat 屏预览卡按同款
 /// 行格式渲染（WechatScreen summary 预览），改这里须同步那边**。
@@ -188,14 +216,15 @@ pub fn make_channel_push<T: PlatformAdapter + 'static>(
     })
 }
 
-/// 复合预警 pusher：逐通道顺序执行取 OR（个人规模 ≤2 通道，顺序保证 push_log
-/// 时序确定、store 锁竞争最小）。空 vec → false（未启用任何通道 = 未接线语义）。
-/// 文案只组装一次，逐通道 clone（NewAlertInfo/EquitySnapshotRow 均 Clone）。
+/// 复合预警 pusher（ADR-0019 批面）：收本轮全部新预警（≥1 条），文案按
+/// `alert_batch_message` 合并组装恰一次（N=1 单条格式 / N≥2 合并一条），
+/// 逐通道顺序执行取 OR（个人规模 ≤2 通道，顺序保证 push_log 时序确定、
+/// store 锁竞争最小）。空 vec → false（未启用任何通道 = 未接线语义）。
 pub fn combine_alert_pushers(channels: Vec<ChannelPush>) -> AlertPusher {
-    Arc::new(move |a: NewAlertInfo| {
+    Arc::new(move |batch: Vec<NewAlertInfo>| {
         let channels = channels.clone();
         Box::pin(async move {
-            let (msg, subject) = alert_message(&a);
+            let (msg, subject) = alert_batch_message(&batch);
             let mut any = false;
             for ch in channels.iter() {
                 any |= ch("alert_push", msg.clone(), subject.clone()).await;
@@ -389,7 +418,7 @@ mod tests {
             level: "danger".into(),
             text: "跌破止损线 1420.00".into(),
         };
-        assert!(alert(info.clone()).await);
+        assert!(alert(vec![info.clone()]).await);
         // 双通道各收一条，文案同款（数字原值）
         assert_eq!(qq.sent.lock().unwrap()[0].1, "子木预警 · 贵州茅台 跌破止损线 1420.00");
         assert_eq!(wx.sent.lock().unwrap()[0].1, "子木预警 · 贵州茅台 跌破止损线 1420.00");
@@ -414,14 +443,14 @@ mod tests {
             top3_sector: 80.0,
         };
         assert!(summary(snap).await);
-        let body = &wx.sent.lock().unwrap()[1].1;
+        let body = wx.sent.lock().unwrap()[1].1.clone();
         assert!(body.starts_with("子木盘后摘要 2026-11-17\n总资产 290362.30\n"));
         assert!(body.contains("当日盈亏 +1234.56（+0.43%）"));
         assert!(body.contains("累计盈亏 -5678.90（-1.92%）"));
         assert!(body.contains("现金 90362.30 · 仓位 68.9% · 集中度 0.25"));
 
         // 空 vec = 未接线语义
-        assert!(!combine_alert_pushers(vec![])(info).await);
+        assert!(!combine_alert_pushers(vec![])(vec![info]).await);
         assert!(!combine_summary_pushers(vec![])(EquitySnapshotRow {
             date: "2026-11-17".into(),
             ts: String::new(),
@@ -436,6 +465,97 @@ mod tests {
             hhi: 0.0,
             top3_sector: 0.0,
         }).await);
+    }
+
+    /// ADR-0019 合并格式钉：N=1 与 alert_message 逐字节相等；N=3 正文精确钉
+    /// （标题行 + 逐行含 code）、subject「预警批次 3 条」、**行序 = 输入序**
+    /// （用非字典序输入钉「不按 level/名称重排」）
+    #[test]
+    fn alert_batch_message_formats() {
+        let one = NewAlertInfo {
+            id: 1,
+            code: "600519".into(),
+            name: "贵州茅台".into(),
+            alert_type: "跌破成本".into(),
+            level: "down".into(),
+            text: "现价 105.00 低于成本 110.05，浮亏 -4.59%".into(),
+        };
+        assert_eq!(alert_batch_message(std::slice::from_ref(&one)), alert_message(&one));
+
+        let mk = |id: i64, code: &str, name: &str, t: &str, level: &str, text: &str| NewAlertInfo {
+            id,
+            code: code.into(),
+            name: name.into(),
+            alert_type: t.into(),
+            level: level.into(),
+            text: text.into(),
+        };
+        // 输入序刻意非字典序（涨跌停/成本/放量混排）：输出必须原样保序
+        let batch = vec![
+            mk(2, "000858", "五粮液", "触及止损线", "down", "现价 118.20 已触及止损线 120.00"),
+            mk(3, "601012", "隆基绿能", "放量", "down", "当日累计量为近20日均量的 2.8 倍，涨跌幅 -6.20%"),
+            mk(1, "600519", "贵州茅台", "跌破成本", "down", "现价 105.00 低于成本 110.05，浮亏 -4.59%"),
+        ];
+        let (msg, subject) = alert_batch_message(&batch);
+        assert_eq!(
+            msg,
+            "子木预警 · 本轮 3 条\n\
+             1. 五粮液（000858）现价 118.20 已触及止损线 120.00\n\
+             2. 隆基绿能（601012）当日累计量为近20日均量的 2.8 倍，涨跌幅 -6.20%\n\
+             3. 贵州茅台（600519）现价 105.00 低于成本 110.05，浮亏 -4.59%"
+        );
+        assert_eq!(subject, "预警批次 3 条");
+    }
+
+    /// ADR-0019 端到端：3 条预警一批 → 每通道恰收 **1 条**合并消息（不是 3 条），
+    /// push_log 每通道一行、kind 恒 alert_push、detail 含批次主题
+    #[tokio::test]
+    async fn batch_push_sends_one_merged_message_per_channel() {
+        let store = tmp_store("push-batch");
+        bind(&store, "qq", "private:QQME");
+        bind(&store, "wechat", "private:WXME");
+        let qq = QqMock::with(vec![]);
+        let wx = WechatMock::with(vec![]);
+        let qq_active = ActiveAdapter::<QqMock>::default();
+        qq_active.set(qq.clone());
+        let wx_active = ActiveAdapter::<WechatMock>::default();
+        wx_active.set(wx.clone());
+
+        let channels = vec![
+            make_channel_push::<QqMock>(store.clone(), qq_active),
+            make_channel_push::<WechatMock>(store.clone(), wx_active),
+        ];
+        let alert = combine_alert_pushers(channels);
+
+        let mk = |id: i64, code: &str, name: &str, t: &str, level: &str, text: &str| NewAlertInfo {
+            id,
+            code: code.into(),
+            name: name.into(),
+            alert_type: t.into(),
+            level: level.into(),
+            text: text.into(),
+        };
+        let batch = vec![
+            mk(1, "600519", "贵州茅台", "跌破成本", "down", "现价 105.00 低于成本 110.05，浮亏 -4.59%"),
+            mk(2, "000858", "五粮液", "触及止损线", "down", "现价 118.20 已触及止损线 120.00"),
+            mk(3, "601012", "隆基绿能", "放量", "down", "当日累计量为近20日均量的 2.8 倍，涨跌幅 -6.20%"),
+        ];
+        assert!(alert(batch).await);
+
+        // 每通道恰 1 条合并消息（合并形态生效）
+        let sent = qq.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1, "qq 通道应恰收 1 条合并消息");
+        assert!(sent[0].1.starts_with("子木预警 · 本轮 3 条\n"), "qq 正文形态：{}", sent[0].1);
+        assert!(sent[0].1.contains("3. 隆基绿能（601012）"), "逐行含序号+code");
+        drop(sent);
+        let sent = wx.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1, "wechat 通道应恰收 1 条合并消息");
+        assert!(sent[0].1.starts_with("子木预警 · 本轮 3 条\n"), "wechat 正文形态：{}", sent[0].1);
+        assert!(sent[0].1.contains("3. 隆基绿能（601012）"), "逐行含序号+code");
+        let rows = logs(&store);
+        assert_eq!(rows.len(), 2, "每通道每绑定一行留痕");
+        assert!(rows.iter().all(|r| r.kind == "alert_push"));
+        assert!(rows.iter().all(|r| r.detail.contains("预警批次 3 条")));
     }
 
     /// clip_by_lines 三态：短文本原样 / 多行超限按行截 / 单行超限硬截

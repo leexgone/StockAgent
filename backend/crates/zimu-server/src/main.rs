@@ -224,9 +224,10 @@ fn agent_offline() -> Response {
         .into_response()
 }
 
-// 通道推送出站（T6/ADR-0011 → ADR-0017 D5）已收口进 lib `channel_push`：
-// caps 参数化的 push_to_bound / 文案组装（alert_message/summary_message）/
-// 按行截断 / 复合 pusher（combine_*）——零硬编码通道词汇，QQ/微信共用。
+// 通道推送出站（T6/ADR-0011 → ADR-0017 D5 → ADR-0019 轮内合并）已收口进 lib
+// `channel_push`：caps 参数化的 push_to_bound / 文案组装（alert_batch_message/
+// summary_message）/ 按行截断 / 复合 pusher（combine_*）——零硬编码通道词汇，
+// QQ/微信共用。
 
 // ============================================================================
 // 启动装配
@@ -427,8 +428,9 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 推送通道组合（ADR-0017 D5）：按实际 spawn 的通道收集 caps 参数化闭包，
-    // 复合 pusher 顺序 OR——调度器 trait 不动，文案组装在 combine 闭包内恰一次。
+    // 推送通道组合（ADR-0017 D5 → ADR-0019 批面）：按实际 spawn 的通道收集
+    // caps 参数化闭包，复合 pusher 顺序 OR——调度器 trait 为预警批面（轮内
+    // 合并），文案组装在 combine 闭包内恰一次。
     let mut push_channels: Vec<zimu_server::channel_push::ChannelPush> = Vec::new();
     if qq_channel.is_some() {
         push_channels.push(zimu_server::channel_push::make_channel_push::<QqPlatformAdapter>(
@@ -472,10 +474,12 @@ async fn main() -> anyhow::Result<()> {
                     Box::pin(async move { bridge.submit_user_text(text).await.is_ok() })
                 }) as ReviewTrigger
             });
-            // 通道推送回调（T6/ADR-0011 → ADR-0017 D5）：按实际 spawn 的通道接线
-            // （push_channels 在装配处收集），未启用任何通道 = None（与 review
-            // 同构降级）。送达 = 逐通道对全部已绑定会话逐条发 + 逐目标 push_log
-            // 留痕；文案在 combine 闭包内组装恰一次（数字 = 落库原值不现编）。
+            // 通道推送回调（T6/ADR-0011 → ADR-0017 D5 → ADR-0019 批面）：按实际
+            // spawn 的通道接线（push_channels 在装配处收集），未启用任何通道 =
+            // None（与 review 同构降级）。预警 = 本轮全部新预警一批合并一条消息
+            // （N=1 单条格式、N≥2 合并，零延迟）；送达 = 逐通道对全部已绑定会话
+            // 发 + 逐目标 push_log 留痕；文案在 combine 闭包内组装恰一次
+            // （数字 = 落库原值不现编）。
             let (push_alert, push_summary) = if push_channels.is_empty() {
                 (None, None)
             } else {

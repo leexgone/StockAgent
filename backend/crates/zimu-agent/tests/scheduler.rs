@@ -335,14 +335,21 @@ fn core_with_push(
     SchedulerCore::new(AgentDeps::new(store, fake), review, alert, summary)
 }
 
-/// 记录送达调用（返回定值 ok）的预警推送回调
+/// 记录送达调用（返回定值 ok）的预警推送回调（ADR-0019 批面：每次调用记
+/// 一条「code|type,code|type,…」，逗号分段数 = 批内条数，保留批边界可断言）
 fn recording_alert_pusher(
     log: Arc<Mutex<Vec<String>>>,
     ok: bool,
 ) -> AlertPusher {
     Arc::new(
-        move |a: zimu_agent::scheduler::NewAlertInfo| -> Pin<Box<dyn Future<Output = bool> + Send>> {
-            log.lock().unwrap().push(format!("{}|{}", a.code, a.alert_type));
+        move |batch: Vec<zimu_agent::scheduler::NewAlertInfo>| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+            log.lock().unwrap().push(
+                batch
+                    .iter()
+                    .map(|a| format!("{}|{}", a.code, a.alert_type))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
             Box::pin(async move { ok })
         },
     )
@@ -868,14 +875,56 @@ async fn alert_push_fires_once_per_dedup_and_failures_reported() {
 
     let rep = core.tick(sh(29, 10, 30)).await;
     assert!(!rep.new_alerts.is_empty(), "本轮有预警");
-    assert_eq!(rep.alerts_pushed, rep.new_alerts.len(), "每条新预警推送恰一次并送达");
-    assert_eq!(hits.lock().unwrap().len(), rep.new_alerts.len());
+    assert_eq!(rep.alerts_pushed, rep.new_alerts.len(), "批送达 = 全批条数（ADR-0019）");
+    let hits1 = hits.lock().unwrap().clone();
+    assert_eq!(hits1.len(), 1, "一轮一批、恰一次调用（ADR-0019 轮内合并）");
+    assert_eq!(
+        hits1[0].split(',').count(),
+        rep.new_alerts.len(),
+        "批内含本轮全部新预警"
+    );
 
-    // 第二轮（10:31）：同日去重 → 不重复落库，也**不再推送**
+    // 第二轮（10:31）：同日去重 → 不重复落库，也**不再推送**（空批不调用）
     let rep2 = core.tick(sh(29, 10, 31)).await;
     assert!(rep2.new_alerts.is_empty());
     assert_eq!(rep2.alerts_pushed, 0);
-    assert_eq!(hits.lock().unwrap().len(), rep.new_alerts.len(), "推送不重复");
+    assert_eq!(hits.lock().unwrap().len(), 1, "推送不重复");
+}
+
+/// ADR-0019 批边界：恰 1 条新预警 → 宿主收到长度恰 1 的批（N=1 仍走批通道，
+/// 单条格式由宿主组装）；无新预警轮 → 回调不被调用（空批守卫，不出「本轮 0 条」）
+#[tokio::test]
+async fn alert_push_batch_boundary_single_and_empty() {
+    let store = seeded_store();
+    let fake = standard_fake();
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 105.0, 110.0, 1000.0,
+    )]));
+    let hits = Arc::new(Mutex::new(Vec::new()));
+    let core = core_with_push(
+        store.clone(),
+        fake.clone(),
+        None,
+        Some(recording_alert_pusher(hits.clone(), true)),
+        None,
+    );
+
+    // 第一轮：现价 105 < 成本 110.05 → 恰 1 条「跌破成本」，作为长度 1 的批送出
+    let rep = core.tick(sh(29, 10, 30)).await;
+    assert_eq!(rep.new_alerts.len(), 1, "恰 1 条新预警");
+    let hits1 = hits.lock().unwrap().clone();
+    assert_eq!(hits1.len(), 1);
+    assert_eq!(hits1[0], "600519|跌破成本", "批内即该条原值");
+    assert_eq!(rep.alerts_pushed, 1);
+
+    // 第二轮：行情回到成本上方 → 无新预警，回调不再被调用
+    *fake.quote.lock().unwrap() = Some(quote_payload(vec![qrow(
+        "sh600519", "600519", "stock", 112.0, 110.0, 1000.0,
+    )]));
+    let rep2 = core.tick(sh(29, 10, 31)).await;
+    assert!(rep2.new_alerts.is_empty());
+    assert_eq!(rep2.alerts_pushed, 0);
+    assert_eq!(hits.lock().unwrap().len(), 1, "空批守卫：无新预警不调用回调");
 }
 
 #[tokio::test]
@@ -894,9 +943,14 @@ async fn alert_push_failure_counts_zero_but_alert_still_persisted() {
         None,
     );
     let rep = core.tick(sh(29, 10, 30)).await;
-    // 送达失败如实计数 0，但预警照常落库（推送是尽力面，不是判定面）
+    // 送达失败如实计数 0（批语义：整批 all-or-nothing），但预警照常落库
+    // （推送是尽力面，不是判定面）
     assert!(rep.alerts_pushed == 0 && !rep.new_alerts.is_empty());
-    assert!(!hits.lock().unwrap().is_empty(), "失败也要被调用（宿主侧留痕归宿主）");
+    assert_eq!(
+        hits.lock().unwrap().len(),
+        1,
+        "批失败仍被调用一次（宿主侧留痕归宿主）"
+    );
     assert!(!lock(&store).list_alerts(None, 50).unwrap().is_empty());
 }
 
