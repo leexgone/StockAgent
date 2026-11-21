@@ -79,7 +79,7 @@ use tokio_stream::wrappers::{BroadcastStream, WatchStream};
 use tokio_stream::{Stream, StreamExt};
 use tower_http::{
     services::{ServeDir, ServeFile},
-    trace::TraceLayer,
+    trace::{DefaultOnEos, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -567,7 +567,14 @@ async fn main() -> anyhow::Result<()> {
         .fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html"))),
         )
-        .layer(TraceLayer::new_for_http());
+        // HTTP 访问日志（started/finished/eos）降为 TRACE（2026-11-21 拍板）：默认 DEBUG
+        // 下前端轮询（/api/market/status 等）每分钟刷屏；调故障时 log_level=trace 再开
+        .layer(
+            TraceLayer::new_for_http()
+                .on_request(DefaultOnRequest::new().level(tracing::Level::TRACE))
+                .on_response(DefaultOnResponse::new().level(tracing::Level::TRACE))
+                .on_eos(DefaultOnEos::new().level(tracing::Level::TRACE)),
+        );
 
     // 仅内网/本机监听；LAN 部署改 ZIMU_ADDR，公网入站默认禁止（ADR-0005 第 3 条）
     let addr = std::env::var("ZIMU_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".into());

@@ -674,7 +674,9 @@ fn log_tick(rep: &TickReport) {
             "调度轮"
         );
     } else {
-        tracing::debug!(
+        // 无事件空转轮降 TRACE（2026-11-21 拍板）：非交易日每 60s 一条 DEBUG 刷屏，
+        // 排查节奏问题时 log_level=trace 再看
+        tracing::trace!(
             state = %rep.state,
             polled = rep.polled,
             updated = rep.quotes_updated,
