@@ -7,7 +7,7 @@
 ## 现在这个仓库里有什么
 
 ```
-backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管 + Agent SSE 会话 + Web 文件上传（multipart，ADR-0015）+ 会话档案与重置端点 + 通道绑定管理 + 持仓录入/直接维护 API + 行情 API + 预警/快照 API + OpenAPI 契约；bin 侧启动调度器 + QQ/微信双 IM 通道（ADR-0011/0017：`[zimu.channels]` 缺省停用 fail-closed；`ChatbotManager<BoundOnly<…>>` 双 manager 同 working_dir，robit 0.3.0 + robit-wechat；微信 = 官方 iLink Bot，CLI 扫码登录停服约定、token 失效 60s 探测恢复；推送链 caps 参数化 channel_push.rs）+ Ctrl+C 优雅关闭（逐通道））
+backend/           Rust 服务（Cargo workspace）：crates/zimu-server（axum，health + SPA 静态托管 + Agent SSE 会话 + Web 文件上传（multipart，ADR-0015）+ 会话档案与重置端点 + 通道绑定管理 + 持仓录入/直接维护 API + 行情 API + 预警/快照 API + OpenAPI 契约；bin 侧启动调度器 + QQ/微信双 IM 通道（ADR-0011/0017：`[zimu.channels]` 缺省停用 fail-closed；`ChatbotManager<BoundOnly<…>>` 双 manager 同 working_dir，robit 0.4.0 + robit-wechat（出站节流缺省启用，R14）；微信 = 官方 iLink Bot，CLI 扫码登录停服约定、token 失效 60s 探测恢复；推送链 caps 参数化 channel_push.rs）+ Ctrl+C 优雅关闭（逐通道））
                    crates/zimu-agent（agent 应用层，P4-T6/T7 + ADR-0011/0012/0013/0014：领域工具 14 件（含写账本五件 record_trade/adjust_cash/get_trades/upsert_holding/remove_holding，自动落账+读回）+ robit 标准工具面（read/write/edit/ls/find/grep/bash 等，确认关闭自动执行）+ send_file（IM 发文件/图片，平台扩展自守卫，ADR-0017 D9；注册 26–28 随配置）+ Skill 加载 + 刷新链应用服务 + 调度预警引擎 scheduler + 唯一装配线 assembly::AgentCore（Web 桥/IM 通道/CLI 共用三 Arc）+ 通道推送回调面（AlertPusher/SummaryPusher，T6；AlertPusher 为批面——轮内合并 1 条原样、≥2 条合并一条，ADR-0019）——server 与 CLI 共用，数字口径只在 zimu-domain）
                    crates/zimu-agent-cli（Agent 调试 REPL：P2-T2 spike 起，P4-T6 换装与 server 相同的领域工具面与 Skill）
                    crates/zimu-domain（领域纯函数库，P3-T3：03 数字口径唯一 Rust 实现 + 黄金向量测试；P4-T6 增 advice 打分、P4-T7 增 alert 预警判定）
