@@ -180,6 +180,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat/push_last": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["chat_push_last"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/reset": {
         parameters: {
             query?: never;
@@ -783,6 +799,13 @@ export interface components {
             /** @description 上海时刻 YYYY-MM-DD HH:MM（与 push_log/trades 同格式） */
             ts: string;
         };
+        /** @description `POST /api/chat/push_last` 响应（P7-T8）。 */
+        ChatPushResult: {
+            /** @description 人读结果说明（可直接 toast）；逐会话送达细节在 push_log（kind chat_push） */
+            detail: string;
+            /** @description 是否送达至少一个通道（OR 语义，与预警/摘要复合 pusher 同款） */
+            ok: boolean;
+        };
         /** @description `POST /api/chat/reset` 响应。 */
         ChatResetResult: {
             /** @description 是否已通知在线 agent 清内存历史（false = agent 离线，档案照常已清） */
@@ -1143,7 +1166,10 @@ export interface components {
             detail: string;
             /** Format: int64 */
             id: number;
-            /** @description post_market_review / alert_push / …（封闭词汇随渠道落地扩展） */
+            /**
+             * @description post_market_review / alert_push / post_market_review_push / chat_push /
+             *     web_session_reset（封闭词汇随渠道落地扩展，03 §12）
+             */
             kind: string;
             ok: boolean;
             /** @description 上海时刻 YYYY-MM-DD HH:MM */
@@ -1765,6 +1791,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatHistory"];
+                };
+            };
+            /** @description 存储层内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    chat_push_last: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 手动问答推送（P7-T8，03 §12）：取档案最后一条已归档 assistant 消息推给微信/QQ 全部绑定会话（kind chat_push，全文透传——长度守卫归 robit adapter，R16）。ok=送达至少一通道；双通道均未启用 ok=false 如实说明；逐会话细节在 push_log。流式中途点击取上一条完成消息，不等待在途轮次。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatPushResult"];
+                };
+            };
+            /** @description 档案里没有可推送的助手消息（bad_input） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description 存储层内部错误 */

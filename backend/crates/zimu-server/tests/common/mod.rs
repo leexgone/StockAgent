@@ -140,7 +140,7 @@ pub async fn spawn_api_with_pending(
     pending: zimu_server::pending_bindings::PendingBindings,
 ) -> String {
     let shared: SharedStore = Arc::new(Mutex::new(store));
-    let router = api_router(shared, market_api::new_market(Arc::new(fake)), no_reset_hook(), pending);
+    let router = api_router(shared, market_api::new_market(Arc::new(fake)), no_reset_hook(), pending, Vec::new());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });

@@ -594,6 +594,13 @@ async fn live_responses_and_samples_pass_schema() {
     assert_eq!(b["has_more"], json!(false));
     check(&doc, "chat_history", "get", "/api/chat/history", 200, &b);
 
+    // 问答推送（P7-T8）：契约服务器未装配通道闭包（空 vec）→ ok=false 如实
+    let (s, b) = post(&http, &base, "/api/chat/push_last", json!(null)).await;
+    assert_eq!(s, 200);
+    assert_eq!(b["ok"], json!(false));
+    assert!(b["detail"].as_str().unwrap().contains("均未启用"));
+    check(&doc, "chat_push_last", "post", "/api/chat/push_last", 200, &b);
+
     let (s, b) = post(&http, &base, "/api/chat/reset", json!(null)).await;
     assert_eq!(s, 200);
     assert_eq!(b["cleared"], json!(3));
@@ -604,6 +611,16 @@ async fn live_responses_and_samples_pass_schema() {
     let (s, b) = get(&http, &base, "/api/chat/history").await;
     assert_eq!(s, 200);
     assert!(b["messages"].as_array().unwrap().is_empty(), "reset 后档案为空");
+
+    // reset 后无 assistant 消息 → push_last 400 bad_input（如实拒绝）
+    let (s, b) = post(&http, &base, "/api/chat/push_last", json!(null)).await;
+    assert_eq!(s, 400);
+    assert_eq!(b["error"], json!("bad_input"));
+    validate(
+        "实时响应 push_last 400",
+        &response_validator(&doc, "post", "/api/chat/push_last", 400),
+        &b,
+    );
 
     // ---- 通道绑定（T5/拍板⑤）：列表 → 绑定 → 非法 kind → 解绑 → 幂等 404 ----
     let (s, b) = get(&http, &base, "/api/channel_bindings").await;

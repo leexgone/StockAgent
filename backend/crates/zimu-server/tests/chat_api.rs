@@ -23,12 +23,22 @@ fn tmp_store(tag: &str) -> Store {
 }
 
 async fn serve(store: Store, reset: ResetHook) -> (String, SharedStore) {
+    serve_with_push(store, reset, Vec::new()).await
+}
+
+/// P7-T8：问答推送通道闭包可注入（recording 闭包断言 kind/正文，无需 mock 平台）
+async fn serve_with_push(
+    store: Store,
+    reset: ResetHook,
+    push: Vec<zimu_server::channel_push::ChannelPush>,
+) -> (String, SharedStore) {
     let shared: SharedStore = Arc::new(Mutex::new(store));
     let router = api_router(
         shared.clone(),
         market_api::new_market(Arc::new(FakeApi::new())),
         reset,
         Default::default(), // 待绑定队列（本测试不消费）
+        push,
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -131,6 +141,111 @@ async fn reset_with_online_agent_clears_notifies_and_logs() {
     assert!(logs.ok);
     assert_eq!(logs.channel, "agent");
     assert!(logs.detail.contains("2 条"));
+}
+
+/// P7-T8：档案有 assistant 消息 → 200 ok=true；闭包恰收 kind=chat_push +
+/// 头部行 + 档案原文（最后一条，不是第一条）；主题带档案 ts
+#[tokio::test]
+async fn push_last_sends_last_archived_assistant_message() {
+    let s = tmp_store("push-last");
+    s.append_chat_message("web", "user", "第一问", None, "2026-11-21 09:00").unwrap();
+    s.append_chat_message("web", "assistant", "第一答", None, "2026-11-21 09:01").unwrap();
+    s.append_chat_message("web", "user", "第二问", None, "2026-11-21 09:02").unwrap();
+    s.append_chat_message("web", "tool", "", Some(r#"{"name":"get_quote"}"#), "2026-11-21 09:02")
+        .unwrap();
+    s.append_chat_message("web", "assistant", "第二答（最后一条）", None, "2026-11-21 09:03")
+        .unwrap();
+    // 其他会话的 assistant 行不得被取到（通道独立）
+    s.append_chat_message("qq", "assistant", "串台答", None, "2026-11-21 09:04").unwrap();
+
+    type Hit = (&'static str, String, String);
+    let hits: Arc<Mutex<Vec<Hit>>> = Arc::new(Mutex::new(Vec::new()));
+    let h = hits.clone();
+    let ch: zimu_server::channel_push::ChannelPush = Arc::new(move |kind, msg, subject| {
+        let h = h.clone();
+        Box::pin(async move {
+            h.lock().unwrap().push((kind, msg, subject));
+            true
+        })
+    });
+    let (base, _shared) = serve_with_push(s, common::no_reset_hook(), vec![ch]).await;
+    let http = reqwest::Client::new();
+
+    let r = http.post(format!("{base}/api/chat/push_last")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let b: Value = r.json().await.unwrap();
+    assert_eq!(b["ok"], json!(true));
+    assert!(b["detail"].as_str().unwrap().contains("1/1"));
+
+    let hits = hits.lock().unwrap();
+    assert_eq!(hits.len(), 1, "单通道闭包恰被调一次");
+    assert_eq!(hits[0].0, "chat_push");
+    assert_eq!(
+        hits[0].1,
+        "子木问答 · 应主人要求转发最后一条回答\n\n第二答（最后一条）",
+        "取最后一条已归档 assistant（跳过其后的 qq 串台行与本会话 user/tool 行）"
+    );
+    assert_eq!(hits[0].2, "问答推送 2026-11-21 09:03");
+}
+
+/// P7-T8：档案只有 user/tool 行（或空 assistant）→ 400 如实拒绝，闭包不被调
+#[tokio::test]
+async fn push_last_without_assistant_message_is_400() {
+    let s = tmp_store("push-empty");
+    s.append_chat_message("web", "user", "只有问", None, "2026-11-21 09:00").unwrap();
+    s.append_chat_message("web", "assistant", "   ", None, "2026-11-21 09:01").unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let h = hits.clone();
+    let ch: zimu_server::channel_push::ChannelPush = Arc::new(move |_k, _m, _s| {
+        let h = h.clone();
+        Box::pin(async move {
+            h.fetch_add(1, Ordering::SeqCst);
+            true
+        })
+    });
+    let (base, _shared) = serve_with_push(s, common::no_reset_hook(), vec![ch]).await;
+    let http = reqwest::Client::new();
+    let r = http.post(format!("{base}/api/chat/push_last")).send().await.unwrap();
+    assert_eq!(r.status(), 400);
+    let b: Value = r.json().await.unwrap();
+    assert_eq!(b["error"], json!("bad_input"));
+    assert_eq!(hits.load(Ordering::SeqCst), 0, "无可推消息不得触发发送");
+}
+
+/// P7-T8：双通道均未启用（空 vec）→ 200 ok=false 如实说明；全通道失败 → ok=false
+#[tokio::test]
+async fn push_last_no_channels_or_all_failed_is_honest() {
+    let s = tmp_store("push-nochan");
+    s.append_chat_message("web", "assistant", "有答无通道", None, "2026-11-21 09:01").unwrap();
+    let (base, _shared) = serve_with_push(s, common::no_reset_hook(), Vec::new()).await;
+    let http = reqwest::Client::new();
+    let b: Value = http
+        .post(format!("{base}/api/chat/push_last"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(b["ok"], json!(false));
+    assert!(b["detail"].as_str().unwrap().contains("均未启用"));
+
+    // 有通道但全部失败（闭包恒 false）→ ok=false，不装送达
+    let s2 = tmp_store("push-allfail");
+    s2.append_chat_message("web", "assistant", "有答通道败", None, "2026-11-21 09:01").unwrap();
+    let ch: zimu_server::channel_push::ChannelPush =
+        Arc::new(|_k, _m, _s| Box::pin(async { false }));
+    let (base2, _shared2) = serve_with_push(s2, common::no_reset_hook(), vec![ch]).await;
+    let b2: Value = http
+        .post(format!("{base2}/api/chat/push_last"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(b2["ok"], json!(false));
+    assert!(b2["detail"].as_str().unwrap().contains("失败"));
 }
 
 #[tokio::test]

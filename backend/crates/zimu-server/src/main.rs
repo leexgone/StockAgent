@@ -445,6 +445,23 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
 
+    // 问答推送通道闭包（P7-T8）：与调度器 push_channels 同源（同 store/active），
+    // 唯形态为**透传**（全文不自截，长度守卫归 robit adapter，R16）——独立收集，
+    // 不随 ZIMU_SCHEDULER_DISABLE 消失（手动推送与调度器无关）。
+    let mut chat_push_channels: Vec<zimu_server::channel_push::ChannelPush> = Vec::new();
+    if qq_channel.is_some() {
+        chat_push_channels.push(zimu_server::channel_push::make_channel_push_passthrough::<QqPlatformAdapter>(
+            store.clone(),
+            qq_active.clone(),
+        ));
+    }
+    if wechat_channel.is_some() {
+        chat_push_channels.push(zimu_server::channel_push::make_channel_push_passthrough::<WechatPlatformAdapter>(
+            store.clone(),
+            wechat_active.clone(),
+        ));
+    }
+
     // 优雅关闭句柄收集（QQ 先微信后，与启动序一致）
     let mut channel_handles: Vec<ChannelHandle> = Vec::new();
     if let Some(q) = qq_channel {
@@ -560,7 +577,7 @@ async fn main() -> anyhow::Result<()> {
         // Web 上传（ADR-0015）：POST /api/chat multipart，自带 UploadState（与 AppState 解耦）
         .merge(zimu_server::chat_upload::router(upload_state))
         // 业务路由（持仓 P4-T1 + 行情 P4-T4 + 会话档案 T3）在库目标装配，各自带独立状态
-        .merge(api_router(store, market, chat_reset, pending))
+        .merge(api_router(store, market, chat_reset, pending, chat_push_channels))
         // SPA 回落：dist 里不存在的路径返回 index.html。
         // 注意必须用 .fallback() 而不是 .not_found_service()：后者会把状态码强制成 404
         //（tower-http 0.6 的设计，body 照常返回），客户端路由刷新就会拿到 404。

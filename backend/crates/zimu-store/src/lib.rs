@@ -1391,7 +1391,8 @@ pub struct PushLogRow {
     pub ts: String,
     /// agent / wechat / qq（P6 渠道落地后扩展）
     pub channel: String,
-    /// post_market_review / alert_push / …（封闭词汇随渠道落地扩展）
+    /// post_market_review / alert_push / post_market_review_push / chat_push /
+    /// web_session_reset（封闭词汇随渠道落地扩展，03 §12）
     pub kind: String,
     pub ok: bool,
     pub detail: String,

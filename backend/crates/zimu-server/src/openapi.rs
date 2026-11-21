@@ -28,7 +28,7 @@ use utoipa::{OpenApi, ToSchema};
 // （这些 import 全部被 ApiDoc derive 的展开消费，不是死代码。）
 use crate::channel_bindings::{BindingRequest, UnbindResult};
 use crate::pending_bindings::PendingAttempt;
-use crate::chat_api::{ChatHistory, ChatResetResult};
+use crate::chat_api::{ChatHistory, ChatPushResult, ChatResetResult};
 use crate::holdings_api::{AccountPatch, HoldingEditRequest};
 use crate::market_api::{
     CalendarStatus, KlineResponse, MarketStatusResponse, RefreshResponse, SidecarStatus, SkippedRow,
@@ -238,6 +238,7 @@ fn chat_cancel_doc() {}
         health_doc, chat_stream_doc, chat_doc, chat_confirm_doc, chat_cancel_doc,
         crate::chat_api::get_history,
         crate::chat_api::reset_session,
+        crate::chat_api::push_last,
         crate::channel_bindings::list_bindings,
         crate::channel_bindings::list_pending,
         crate::channel_bindings::bind,
@@ -267,7 +268,7 @@ fn chat_cancel_doc() {}
     ),
     components(schemas(
         ApiError, Health, ChatUploadForm, ConfirmRequest,
-        ChatHistory, ChatResetResult, ChatMessageRow,
+        ChatHistory, ChatResetResult, ChatPushResult, ChatMessageRow,
         BindingRequest, ChannelBindingRow, UnbindResult, PendingAttempt,
         AccountPatch,
         CalendarStatus, KlineResponse, MarketStatusResponse, RefreshResponse,

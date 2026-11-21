@@ -10,6 +10,7 @@ export const PUSH_KIND_LABEL: Record<string, string> = {
   post_market_review: "盘后复盘",
   alert_push: "预警推送",
   post_market_review_push: "盘后摘要推送",
+  chat_push: "问答推送",
 };
 
 export function pushKindLabel(kind: string): string {

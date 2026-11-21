@@ -1,0 +1,4 @@
+{
+  "ok": false,
+  "detail": "微信/QQ 通道均未启用，无法推送（通道开关见 backend/.robit/config.toml）"
+}

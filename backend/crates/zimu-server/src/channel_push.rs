@@ -1,6 +1,11 @@
-//! 通道推送出站（T6/ADR-0011 → ADR-0017 D5 caps 参数化 → ADR-0019 轮内合并）
-//! ——文案组装（预警 N=1 单条 / N≥2 合并一条）、多目标循环、逐目标留痕都在
-//! 宿主；调度器只说「推这一批」（scheduler trait 通道无关）。
+//! 通道推送出站（T6/ADR-0011 → ADR-0017 D5 caps 参数化 → ADR-0019 轮内合并
+//! → P7-T8 问答推送透传）——文案组装（预警 N=1 单条 / N≥2 合并一条）、多目标
+//! 循环、逐目标留痕都在宿主；调度器只说「推这一批」（scheduler trait 通道无关）。
+//!
+//! 长度处理两形态（P7-T8）：预警/摘要走宿主 `clip_by_lines` 按行截断（既有
+//! 语义逐位不变）；**问答推送全文透传不自截**——长度守卫归 robit adapter
+//! 透明封装（R16 移交，用户拍板不在宿主复刻分段器）。robit 发版前超长文本
+//! 原样出站、可能被服务端拒绝，失败如实留痕；发版后直调自动分段，子木零改动。
 //!
 //! **零硬编码通道词汇**：通道名取 `T::platform_name()`（恰为 channel_bindings
 //! 的 channel 词汇），清洗与截断参数取 `T::capabilities()`——QQ 数值行为逐位
@@ -64,12 +69,40 @@ impl<T: PlatformAdapter> ActiveAdapter<T> {
 
 /// 一条系统消息 → 该通道全部已绑定会话，逐目标 push_log 留痕。
 /// 返回是否送达至少一目标。通道词汇与投影参数全部来自 T 的静态能力面。
+/// 超长按 caps 上限**按行截断**（预警/摘要既有语义，逐位不变）。
 pub async fn push_to_bound<T: PlatformAdapter>(
     store: &SharedStore,
     active: &ActiveAdapter<T>,
     kind: &'static str,
     text: &str,
     subject: &str,
+) -> bool {
+    push_text::<T>(store, active, kind, text, subject, true).await
+}
+
+/// 问答推送形态（P7-T8，03 §12）：与 `push_to_bound` 同链路，唯**全文透传
+/// 不做宿主自截**——长度守卫归 robit adapter 透明封装（R16：直调发送路径
+/// 按 caps 自动分段/截断）。robit 发版前超长原样出站、可能被服务端拒绝，
+/// 失败如实留痕不装送达；发版后直调自动获得分段，本函数零改动。
+pub async fn push_to_bound_passthrough<T: PlatformAdapter>(
+    store: &SharedStore,
+    active: &ActiveAdapter<T>,
+    kind: &'static str,
+    text: &str,
+    subject: &str,
+) -> bool {
+    push_text::<T>(store, active, kind, text, subject, false).await
+}
+
+/// 推送共同链路：绑定枚举 → Markdown 面投影 → （可选）按行截断 → 逐目标
+/// 发送 + 留痕。`clip=false` 即透传形态（P7-T8）。
+async fn push_text<T: PlatformAdapter>(
+    store: &SharedStore,
+    active: &ActiveAdapter<T>,
+    kind: &'static str,
+    text: &str,
+    subject: &str,
+    clip: bool,
 ) -> bool {
     let channel = T::platform_name();
     let targets = match zimu_agent::lock(store).channel_bindings(Some(channel)) {
@@ -90,13 +123,18 @@ pub async fn push_to_bound<T: PlatformAdapter>(
         return false;
     }
     // 平台 Markdown 面投影：过 robit-chatbot 现成清洗器降级为该平台可读文本
-    // （QQ 只有 code_blocks；微信全 false → 纯文本），再按 caps 上限截断。
+    // （QQ 只有 code_blocks；微信全 false → 纯文本）；截断仅 clip 形态
+    // （透传形态长度归 robit adapter 守卫，R16）。
     let caps = T::capabilities();
     let cleaned = robit_chatbot::markdown::prepare_markdown_for_platform(text, &caps.markdown_features);
-    let clipped = clip_by_lines(&cleaned, caps.max_message_length);
+    let body = if clip {
+        clip_by_lines(&cleaned, caps.max_message_length)
+    } else {
+        cleaned
+    };
     let mut any = false;
     for t in targets {
-        let (ok, note): (bool, String) = match active.send(&t.chat_id, &clipped).await {
+        let (ok, note): (bool, String) = match active.send(&t.chat_id, &body).await {
             None => (false, "通道未在线（发送放弃）".into()),
             Some(Ok(_)) => (true, "已送达".into()),
             Some(Err(e)) => (false, format!("发送失败：{e}")),
@@ -213,6 +251,22 @@ pub fn make_channel_push<T: PlatformAdapter + 'static>(
         let store = store.clone();
         let active = active.clone();
         Box::pin(async move { push_to_bound::<T>(&store, &active, kind, &msg, &subject).await })
+    })
+}
+
+/// 透传形态闭包（P7-T8 问答推送）：形状与 `make_channel_push` 完全一致
+/// （同一 `ChannelPush` 面，端点装配不认形态差异），唯链路走
+/// `push_to_bound_passthrough`（全文不自截，长度归 robit，R16）。
+pub fn make_channel_push_passthrough<T: PlatformAdapter + 'static>(
+    store: SharedStore,
+    active: ActiveAdapter<T>,
+) -> ChannelPush {
+    Arc::new(move |kind: &'static str, msg: String, subject: String| {
+        let store = store.clone();
+        let active = active.clone();
+        Box::pin(async move {
+            push_to_bound_passthrough::<T>(&store, &active, kind, &msg, &subject).await
+        })
     })
 }
 
@@ -556,6 +610,48 @@ mod tests {
         assert_eq!(rows.len(), 2, "每通道每绑定一行留痕");
         assert!(rows.iter().all(|r| r.kind == "alert_push"));
         assert!(rows.iter().all(|r| r.detail.contains("预警批次 3 条")));
+    }
+
+    /// P7-T8 透传形态：超长文本**全文出站不自截**（长度守卫归 robit adapter，
+    /// R16）——与 Clip 形态对照钉死两形态差异；Markdown 清洗仍生效
+    #[tokio::test]
+    async fn passthrough_push_sends_full_text_without_clipping() {
+        let store = tmp_store("push-passthrough");
+        bind(&store, "wechat", "private:WXME");
+        let mock = WechatMock::with(vec![]);
+        let active = ActiveAdapter::<WechatMock>::default();
+        active.set(mock.clone());
+
+        // 200 行 × 20 字符 ≈ 4200 字符 > 2000；首行带 bold 标记（清洗仍生效）
+        let mut text = String::from("**加粗**开头\n");
+        for i in 0..200 {
+            text.push_str(&format!("第{i:03}行内容十字符号填充\n"));
+        }
+        let ok = push_to_bound_passthrough::<WechatMock>(
+            &store, &active, "chat_push", &text, "问答推送 2026-11-21 09:03",
+        )
+        .await;
+        assert!(ok);
+        // 锁只活在语句内（clone 出来再断言）——跨 await 持锁禁止
+        let sent = mock.sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1, "透传 = 单条全文（分段是 robit adapter 的事，mock 不模拟）");
+        let body = &sent[0].1;
+        assert!(body.contains("第199行"), "尾行必须在——不做宿主自截");
+        assert!(!body.contains("**"), "Markdown 清洗仍生效");
+        assert!(!body.contains("已截断"), "透传形态无截断标记");
+        let rows = logs(&store);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, "chat_push");
+        assert!(rows[0].ok);
+
+        // 对照：同文本走 Clip 形态必截（既有语义回归钉）
+        let mock2 = WechatMock::with(vec![]);
+        let active2 = ActiveAdapter::<WechatMock>::default();
+        active2.set(mock2.clone());
+        assert!(push_to_bound::<WechatMock>(&store, &active2, "chat_push", &text, "对照").await);
+        let sent2 = mock2.sent.lock().unwrap();
+        assert!(sent2[0].1.ends_with("…（已截断）"));
+        assert!(!sent2[0].1.contains("第199行"));
     }
 
     /// clip_by_lines 三态：短文本原样 / 多行超限按行截 / 单行超限硬截

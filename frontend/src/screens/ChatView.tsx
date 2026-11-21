@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { api, apiErrorMessage } from "../api/client";
 import ChatPanel from "../components/ChatPanel";
 import { clockView, marketClock } from "../lib/clock";
 import { fixed, money } from "../lib/format";
@@ -97,6 +98,24 @@ export default function ChatView({ now }: { now: Date }) {
   );
 
   const ask = (text: string) => setPrefill((p) => ({ text, nonce: p.nonce + 1 }));
+  // 手动问答推送（P7-T8，03 §12）：服务端取档案最后一条已归档 assistant 消息
+  // 推给微信/QQ 全部绑定会话；结果 toast 如实（ok=false 也展示 detail），
+  // 成功后刷新推送日志让「最近会话」卡即时可见。流式中途点击取上一条完成消息。
+  const [pushing, setPushing] = useState(false);
+  const handlePushLast = async () => {
+    setPushing(true);
+    try {
+      const { data, error } = await api.POST("/api/chat/push_last", {});
+      if (error) {
+        toast(apiErrorMessage(error, "推送失败"));
+        return;
+      }
+      toast(data.detail);
+      if (data.ok) void usePushLog.getState().load();
+    } finally {
+      setPushing(false);
+    }
+  };
   // 清空（T4）：服务端为准——POST reset 成功才清本地缓存；失败保留本地并如实报错
   // （本地缓存不该比真值先消失）
   const handleClear = async () => {
@@ -143,8 +162,8 @@ export default function ChatView({ now }: { now: Date }) {
           <button className="btn" id="clear-btn" onClick={() => void handleClear()}>
             清空会话
           </button>
-          <button className="btn" id="push-last" onClick={() => toast("即时推送端点另案——预警与盘后摘要已自动推送绑定的微信/QQ 会话")}>
-            把最后一条推送到微信
+          <button className="btn" id="push-last" disabled={pushing} onClick={() => void handlePushLast()}>
+            {pushing ? "推送中…" : "把最后一条推送给我"}
           </button>
         </div>
       </div>

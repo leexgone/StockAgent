@@ -89,13 +89,16 @@ pub fn watchlist_router(store: holdings_api::SharedStore) -> Router {
 
 /// 全部 `/api/*` 业务路由（持仓 + 行情 + 预警 + 会话档案 + 契约文档）。不含
 /// `/api/chat`（发送）与 `/api/chat/stream|confirm|cancel`——那些依赖 robit 装配
-/// 留在 bin 侧；`/api/chat/history|reset` 只依赖 store + ResetHook，在这里装配
-/// （T3：档案是服务端真值，agent 离线也能读历史）。
+/// 留在 bin 侧；`/api/chat/history|reset|push_last` 只依赖 store + 注入钩子，
+/// 在这里装配（T3：档案是服务端真值，agent 离线也能读历史）。
+/// `chat_push` = 问答推送通道闭包（P7-T8，bin 按实际 spawn 的通道装配透传
+/// 形态；测试/未启用通道传空 vec，端点如实报「通道均未启用」）。
 pub fn api_router(
     store: holdings_api::SharedStore,
     market: market_api::SharedMarket,
     chat_reset: chat_api::ResetHook,
     pending: pending_bindings::PendingBindings,
+    chat_push: Vec<channel_push::ChannelPush>,
 ) -> Router {
     Router::new()
         .route("/api/openapi.json", get(openapi::openapi_doc))
@@ -103,7 +106,7 @@ pub fn api_router(
         .merge(alerts_router(store.clone()))
         .merge(advice_router(store.clone()))
         .merge(watchlist_router(store.clone()))
-        .merge(chat_api::router(store.clone(), chat_reset))
+        .merge(chat_api::router(store.clone(), chat_reset, chat_push))
         .merge(channel_bindings::router(store.clone(), pending))
         .merge(market_api::router(store, market))
 }

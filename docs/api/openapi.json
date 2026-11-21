@@ -520,6 +520,46 @@
         }
       }
     },
+    "/api/chat/push_last": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "operationId": "chat_push_last",
+        "responses": {
+          "200": {
+            "description": "手动问答推送（P7-T8，03 §12）：取档案最后一条已归档 assistant 消息推给微信/QQ 全部绑定会话（kind chat_push，全文透传——长度守卫归 robit adapter，R16）。ok=送达至少一通道；双通道均未启用 ok=false 如实说明；逐会话细节在 push_log。流式中途点击取上一条完成消息，不等待在途轮次。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPushResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "档案里没有可推送的助手消息（bad_input）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "存储层内部错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/chat/reset": {
       "post": {
         "tags": [
@@ -2235,6 +2275,24 @@
           }
         }
       },
+      "ChatPushResult": {
+        "type": "object",
+        "description": "`POST /api/chat/push_last` 响应（P7-T8）。",
+        "required": [
+          "ok",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "人读结果说明（可直接 toast）；逐会话送达细节在 push_log（kind chat_push）"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "是否送达至少一个通道（OR 语义，与预警/摘要复合 pusher 同款）"
+          }
+        }
+      },
       "ChatResetResult": {
         "type": "object",
         "description": "`POST /api/chat/reset` 响应。",
@@ -3128,7 +3186,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "post_market_review / alert_push / …（封闭词汇随渠道落地扩展）"
+            "description": "post_market_review / alert_push / post_market_review_push / chat_push /\nweb_session_reset（封闭词汇随渠道落地扩展，03 §12）"
           },
           "ok": {
             "type": "boolean"
