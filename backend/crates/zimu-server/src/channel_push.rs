@@ -7,6 +7,9 @@
 //! 透明封装（R16，robit 0.4.1 `outbound::prepare_outbound` 已落地：微信
 //! ≤3 段分段逐段过节流、QQ 编辑平台单条截断+省略号；≤cap 幂等直通。
 //! 用户拍板不在宿主复刻分段器，升版零 diff 获得长文分段）。
+//! robit 0.5.1 起 `prepare_outbound` 扩展为「内容投影 + 长度守卫」（R17 T3：
+//! 表格线性化 + 纯文本投影，先投影后分段）——本链显式清洗器调用保留，
+//! adapter 侧二次投影幂等无操作（线性化输出无表格语法残留）。
 //!
 //! **零硬编码通道词汇**：通道名取 `T::platform_name()`（恰为 channel_bindings
 //! 的 channel 词汇），清洗与截断参数取 `T::capabilities()`——QQ 数值行为逐位
@@ -85,7 +88,8 @@ pub async fn push_to_bound<T: PlatformAdapter>(
 /// 不做宿主自截**——长度守卫归 robit adapter 透明封装（R16，0.4.1 落地：
 /// 微信超长按 caps 自动分段 ≤3 段、每段独立过节流，段失败放弃余段并返回
 /// 已发段成功——push_log ok=true 意味至少首段送达，段级细节在 robit 日志；
-/// QQ 编辑平台单条截断+省略号）。本函数随 robit 升版零改动。
+/// QQ 编辑平台单条截断+省略号）。0.5.1 起同一守卫先做内容投影（R17 T3，
+/// 表格线性化）再分段。本函数随 robit 升版零改动。
 pub async fn push_to_bound_passthrough<T: PlatformAdapter>(
     store: &SharedStore,
     active: &ActiveAdapter<T>,
@@ -125,8 +129,9 @@ async fn push_text<T: PlatformAdapter>(
         return false;
     }
     // 平台 Markdown 面投影：过 robit-chatbot 现成清洗器降级为该平台可读文本
-    // （QQ 只有 code_blocks；微信全 false → 纯文本）；截断仅 clip 形态
-    // （透传形态长度归 robit adapter 守卫，R16）。
+    // （QQ 只有 code_blocks；微信全 false → 纯文本投影，0.5.0 起表格线性化
+    // R17）；截断仅 clip 形态（透传形态投影+长度归 robit adapter 守卫，
+    // R16/R17 T3——adapter 侧二次投影幂等无操作）。
     let caps = T::capabilities();
     let cleaned = robit_chatbot::markdown::prepare_markdown_for_platform(text, &caps.markdown_features);
     let body = if clip {

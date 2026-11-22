@@ -25,7 +25,7 @@ utoipa.workspace = true
 # kline 窗口起点（今天 − 90 天）与留档时间戳格式化
 chrono.workspace = true
 # ADR-0014：装配补 robit 自持会话库 init_db（search_history 三端可用）——
-# Connection 类型须与 robit-agent 同一 crate 实例（workspace 0.42 对齐）
+# Connection 类型须与 robit-agent 同一 crate 实例（workspace 0.43 对齐）
 rusqlite.workspace = true
 
 [dev-dependencies]

@@ -7,6 +7,19 @@ version = "0.1.3"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.5.1（2026-11-22）= 子木第七轮移交 R17 落地（IM 出站 Markdown 表格投影，
+# 交接件 robit/docs/robit-rfc-im-table-projection.md，T1+T2+T3 全收，0.5.0 发版；
+# 0.5.1 为维护版：rusqlite 0.42→0.43 上游 use-after-free 修复 + CI Node 24）。
+# T1 表格线性化（render_table 空格对齐伪表格 → linearize_table：两列 `键: 值`
+# 逐行、N 列 `首列 — 表头: 值 · …` 逐记录，比例字体/CJK 宽度问题整个消失，
+# 输出无管道残留、二次投影幂等）+ T2 纯文本平台也过投影（flush_buffer 删除
+# supports_markdown=false 跳过分支，微信输出与 caps 宣称一致；降级尊重
+# features：字面 **/> /~~ 去除、链接保留 URL）+ T3 prepare_outbound 扩展为
+# 「内容投影 + 长度守卫」统一出站准备（先投影后分段），直调路径透明获得投影。
+# 纯文本快速通道：无 Markdown 触发字符的文本逐字节直通——预警/摘要 Clip 形态
+# 与系统通知行为逐位不变。子木纯升版零适配：推送链显式清洗器调用保留（幂等），
+# IM 表格展示缺口（R17）修复；rusqlite 连带 0.43（与 robit 公共 API 交换
+# Connection/Error 类型须同线）。
 # 0.4.1（2026-11-22）= 子木第六轮移交 R16 落地（出站长度守卫透明封装，交接件
 # robit/docs/robit-rfc-outbound-length-guard.md，方案 A）：robit-chatbot 公开
 # outbound 模块（prepare_outbound / MAX_OUTBOUND_SEGMENTS=3 / TRUNCATION_MARKER，
@@ -59,17 +72,17 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.4.1"
-robit-agent = "0.4.1"
-robit-web = "0.4.1"
+robit-ai = "0.5.1"
+robit-agent = "0.5.1"
+robit-web = "0.5.1"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。
-# rusqlite 0.42 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.4.1"
-robit-qq = "0.4.1"
+# rusqlite 0.43 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
+robit-chatbot = "0.5.1"
+robit-qq = "0.5.1"
 # P6-T2 微信通道（ADR-0017）：robit-wechat iLink Bot adapter（lib 面消费，
 # 登录走部署侧 CLI `robit-wechat login`，bin 不复用）。
-robit-wechat = "0.4.1"
+robit-wechat = "0.5.1"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "1.2"
@@ -98,9 +111,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1.0"
 # P4-T2 存储：bundled 自带 SQLite 编译，不依赖系统库。
-# 版本必须与 robit-agent 的 rusqlite 对齐（0.42，随 robit 0.2.0 从 0.41 升）：
+# 版本必须与 robit-agent 的 rusqlite 对齐（0.43，随 robit 0.5.1 从 0.42 升——
+# 上游 use-after-free 修复；与 robit 公共 API 交换 Connection/Error 类型须同线）：
 # libsqlite3-sys 的 links 约束全依赖图只允许一份 libsqlite3，不同主版本会直接解析冲突。
-rusqlite = { version = "0.42", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 # P4-T4 行情适配器：版本与特性跟 robit 侧的 reqwest 对齐（0.13，default-features
 # 关）——同一份已编译依赖，不引入 native-tls 等新增重量。0.13 起 query() 在
 # 独立 feature 里（serde_urlencoded，robit 已启用，零新增编译单元）。

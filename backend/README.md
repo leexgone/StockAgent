@@ -65,14 +65,14 @@ read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent medi
 （R12 诉求上游公开）；axum 因此启用 `multipart` feature。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.4.1 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.5.1 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
 宿主循环只兜残余退出。health 透出 `qq_online`。
 
 微信 IM 通道（P6-T2，ADR-0017 / C4 关闭）：`[zimu.channels].wechat = true` 时挂
-`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.4.1 库面消费）——
+`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.5.1 库面消费）——
 微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
 长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
 `(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
@@ -89,7 +89,7 @@ health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快�
 ```powershell
 # 先停 zimu-server——WechatState::save 非原子整文件覆盖且运行中无互斥，
 # 健康期并发登录写入的新 token 会被 adapter 旧内存快照覆盖（ADR-0017 D3 / R13④）
-cargo install robit-wechat --version 0.4.1   # 或 robit 仓 cargo run -p robit-wechat -- login
+cargo install robit-wechat --version 0.5.1   # 或 robit 仓 cargo run -p robit-wechat -- login
 robit-wechat -w e:\Github\StockAgent\backend login   # 终端二维码 + 配对码，一次性换长期 token
 # 0.3.1 起 login 支持 Ctrl+C 取消（不写半成品 state 文件）
 # 产物 backend/.robit/wechat-state.json（含 bot_token 凭据，已被 **/.robit/* gitignore
@@ -355,8 +355,8 @@ SQLite 单文件（C9 已决：rusqlite bundled，备份 = 拷文件；`.db` 在
 note）；纯增表，v2 老库自动前进、旧数据无损（`watchlist_migrates_v1_db_to_v2` 覆盖）；八表齐备。
 
 迁移机制：`PRAGMA user_version` 逐版前进，每版一个事务；已发布版本的 SQL 永不修改，
-新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.42，随
-robit 0.2.0 从 0.41 升）——`libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
+新迁移在 `MIGRATIONS` 尾部追加。rusqlite 版本必须与 robit-agent 对齐（0.43，随
+robit 0.5.1 从 0.42 升）——`libsqlite3-sys` 的 links 约束全依赖图只允许一份 libsqlite3。
 
 ```powershell
 cargo test -p zimu-store   # 28 项：录入事务/校验拒绝/回滚/重启不丢数据/行情回写（P4-T4）/建议留档（P4-T6）/
@@ -377,7 +377,23 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.4.1`（0.4.1 = 子木第六轮移交 R16 落地，
+robit 全家消费 crates.io 正式版 `0.5.1`（0.5.1 = 子木第七轮移交 R17 落地，
+2026-11-22 发版，交接件 `robit/docs/robit-rfc-im-table-projection.md` T1+T2+T3
+全收（0.5.0），0.5.1 为维护版（rusqlite 0.42→0.43 上游 use-after-free 修复 +
+CI Node 24，无 API/行为变化）：**T1 表格线性化**——`render_table` 空格对齐
+伪表格（比例字体原理性错位）替换为 `linearize_table`：两列表逐行 `键: 值`、
+N 列表逐记录 `首列 — 表头: 值 · …`（>5 列宽表记录内拆多行、空单元格跳过），
+输出无管道残留、二次投影幂等，`features.tables=true` 直通激活死标志；
+**T2 纯文本平台也过投影**——`flush_buffer` 删除 `supports_markdown=false`
+跳过分支，微信输出与 caps 宣称一致（表格线性化、加粗/栅栏/标题标记去除、
+引用去 `> `），降级尊重 features（QQ 字面 `**`/`~~` 去除、链接保留 URL）；
+**T3 直调透明投影**——`prepare_outbound` 扩展为「内容投影 + 长度守卫」统一
+出站准备（先投影后分段），直调 `send_message` 不调清洗器也自动获得投影，
+与 R16 长度守卫完全同构。纯文本快速通道：无 Markdown 触发字符的文本逐字节
+直通——预警/摘要 Clip 形态与系统通知行为逐位不变。子木纯升版零适配：推送链
+显式清洗器调用保留（adapter 侧二次投影幂等），IM 表格展示缺口修复；
+rusqlite 连带 0.43（与 robit 公共 API 交换 Connection/Error 类型须同线）。
+上一版 0.4.1（子木第六轮移交 R16 落地，
 2026-11-22 发版，交接件 `robit/docs/robit-rfc-outbound-length-guard.md` 方案 A
 透明封装：robit-chatbot 公开 `outbound` 模块 `prepare_outbound`（分段/截断规则
 单源化，`flush_buffer` 改调同一实现，≤cap 幂等直通）+ robit-wechat
@@ -497,7 +513,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.4.1 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.5.1 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
