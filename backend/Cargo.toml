@@ -112,7 +112,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # 文档（docs/api/openapi.json 由测试保证与代码一致）；前端类型自该文档生成。
 utoipa = "6.0"
 # P4-T5 契约测试（仅 zimu-server dev-dep）：实时响应与样例过 schema 校验。
-jsonschema = "0.61"
+jsonschema = "0.62"
 # ADR-0015 上传落盘：文件名消毒空名兜底 + 防覆盖 100 次后兜底（复刻 robit media.rs
 # 私有规则，R12 已诉求上游公开）；与 robit-agent 内部 uuid 同 crate 实例。
 uuid = { version = "1.29", features = ["v4"] }
