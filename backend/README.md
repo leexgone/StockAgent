@@ -65,14 +65,14 @@ read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent medi
 （R12 诉求上游公开）；axum 因此启用 `multipart` feature。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.4.0 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.4.1 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
 宿主循环只兜残余退出。health 透出 `qq_online`。
 
 微信 IM 通道（P6-T2，ADR-0017 / C4 关闭）：`[zimu.channels].wechat = true` 时挂
-`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.4.0 库面消费）——
+`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.4.1 库面消费）——
 微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
 长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
 `(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
@@ -89,7 +89,7 @@ health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快�
 ```powershell
 # 先停 zimu-server——WechatState::save 非原子整文件覆盖且运行中无互斥，
 # 健康期并发登录写入的新 token 会被 adapter 旧内存快照覆盖（ADR-0017 D3 / R13④）
-cargo install robit-wechat --version 0.4.0   # 或 robit 仓 cargo run -p robit-wechat -- login
+cargo install robit-wechat --version 0.4.1   # 或 robit 仓 cargo run -p robit-wechat -- login
 robit-wechat -w e:\Github\StockAgent\backend login   # 终端二维码 + 配对码，一次性换长期 token
 # 0.3.1 起 login 支持 Ctrl+C 取消（不写半成品 state 文件）
 # 产物 backend/.robit/wechat-state.json（含 bot_token 凭据，已被 **/.robit/* gitignore
@@ -377,7 +377,16 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.4.0`（0.4.0 = 子木第五轮移交 R14 落地，
+robit 全家消费 crates.io 正式版 `0.4.1`（0.4.1 = 子木第六轮移交 R16 落地，
+2026-11-22 发版，交接件 `robit/docs/robit-rfc-outbound-length-guard.md` 方案 A
+透明封装：robit-chatbot 公开 `outbound` 模块 `prepare_outbound`（分段/截断规则
+单源化，`flush_buffer` 改调同一实现，≤cap 幂等直通）+ robit-wechat
+`send_text_inner` 节流前透明分段（≤3 段每段独立过 `SendLimiter`，部分失败
+放弃余段返回已发段 msg_id）+ robit-qq `send_message` 截断守卫（编辑平台
+单条截断+`…` 省略号，不分段）。`send_message` trait 文档写明长度守卫契约
+（实现方按 caps 强制、调用方不应自截）。子木纯升版零适配——P7-T8 chat_push
+透传链零 diff 获得长文分段，预警/摘要 Clip 形态 ≤cap 直通行为逐位不变）。
+上一版 0.4.0（子木第五轮移交 R14 落地，
 2026-11-20 发版，交接件 `robit/docs/robit-rfc-wechat-outbound-ratelimit.md`
 W1–W4 全收：robit-chatbot 通用 `throttle` 模块（账号级发送预算 = 最小间隔 +
 滑动窗口 + 冷却 + 快照持久化，微信缺省启用：2s 间隔 / 10 条·180s 窗口 /
@@ -488,7 +497,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.4.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.4.1 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

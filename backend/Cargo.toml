@@ -7,6 +7,15 @@ version = "0.1.3"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.4.1（2026-11-22）= 子木第六轮移交 R16 落地（出站长度守卫透明封装，交接件
+# robit/docs/robit-rfc-outbound-length-guard.md，方案 A）：robit-chatbot 公开
+# outbound 模块（prepare_outbound / MAX_OUTBOUND_SEGMENTS=3 / TRUNCATION_MARKER，
+# 分段/截断规则单源化，flush_buffer 改调同一实现）+ robit-wechat send_text_inner
+# 节流前透明分段（每段独立过 SendLimiter，部分失败放弃余段返回已发段 msg_id）
+# + robit-qq send_message 截断守卫（编辑平台单条截断+省略号，不分段）。
+# send_message trait 文档写明长度守卫契约（实现方按 caps 强制，调用方不自截）。
+# 子木纯升版零适配：P7-T8 chat_push 透传链零 diff 获得长文分段；预警/摘要
+# Clip 形态 ≤cap 幂等直通，行为逐位不变。
 # 0.4.0（2026-11-20）= 子木第五轮移交 R14 落地（微信出站反刷限流，交接件
 # robit/docs/robit-rfc-wechat-outbound-ratelimit.md，W1–W4 全收）：
 # robit-chatbot 通用 throttle 模块（账号级预算：最小间隔+滑动窗口+冷却+快照
@@ -50,17 +59,17 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.4.0"
-robit-agent = "0.4.0"
-robit-web = "0.4.0"
+robit-ai = "0.4.1"
+robit-agent = "0.4.1"
+robit-web = "0.4.1"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。
 # rusqlite 0.42 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.4.0"
-robit-qq = "0.4.0"
+robit-chatbot = "0.4.1"
+robit-qq = "0.4.1"
 # P6-T2 微信通道（ADR-0017）：robit-wechat iLink Bot adapter（lib 面消费，
 # 登录走部署侧 CLI `robit-wechat login`，bin 不复用）。
-robit-wechat = "0.4.0"
+robit-wechat = "0.4.1"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "1.2"

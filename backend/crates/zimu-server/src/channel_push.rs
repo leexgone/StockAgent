@@ -4,8 +4,9 @@
 //!
 //! 长度处理两形态（P7-T8）：预警/摘要走宿主 `clip_by_lines` 按行截断（既有
 //! 语义逐位不变）；**问答推送全文透传不自截**——长度守卫归 robit adapter
-//! 透明封装（R16 移交，用户拍板不在宿主复刻分段器）。robit 发版前超长文本
-//! 原样出站、可能被服务端拒绝，失败如实留痕；发版后直调自动分段，子木零改动。
+//! 透明封装（R16，robit 0.4.1 `outbound::prepare_outbound` 已落地：微信
+//! ≤3 段分段逐段过节流、QQ 编辑平台单条截断+省略号；≤cap 幂等直通。
+//! 用户拍板不在宿主复刻分段器，升版零 diff 获得长文分段）。
 //!
 //! **零硬编码通道词汇**：通道名取 `T::platform_name()`（恰为 channel_bindings
 //! 的 channel 词汇），清洗与截断参数取 `T::capabilities()`——QQ 数值行为逐位
@@ -81,9 +82,10 @@ pub async fn push_to_bound<T: PlatformAdapter>(
 }
 
 /// 问答推送形态（P7-T8，03 §12）：与 `push_to_bound` 同链路，唯**全文透传
-/// 不做宿主自截**——长度守卫归 robit adapter 透明封装（R16：直调发送路径
-/// 按 caps 自动分段/截断）。robit 发版前超长原样出站、可能被服务端拒绝，
-/// 失败如实留痕不装送达；发版后直调自动获得分段，本函数零改动。
+/// 不做宿主自截**——长度守卫归 robit adapter 透明封装（R16，0.4.1 落地：
+/// 微信超长按 caps 自动分段 ≤3 段、每段独立过节流，段失败放弃余段并返回
+/// 已发段成功——push_log ok=true 意味至少首段送达，段级细节在 robit 日志；
+/// QQ 编辑平台单条截断+省略号）。本函数随 robit 升版零改动。
 pub async fn push_to_bound_passthrough<T: PlatformAdapter>(
     store: &SharedStore,
     active: &ActiveAdapter<T>,
