@@ -1,6 +1,6 @@
 [project]
 name = "zimu-datafetch"
-version = "0.1.4"
+version = "0.1.5"
 description = "子木行情 sidecar（P4-T3 正式化：/quote /kline /cb_list /calendar，兜底链+熔断+限频+缓存，错误契约）"
 requires-python = ">=3.13"
 dependencies = [

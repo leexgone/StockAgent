@@ -3,7 +3,7 @@ members = ["crates/zimu-server", "crates/zimu-agent-cli", "crates/zimu-domain", 
 resolver = "2"
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
