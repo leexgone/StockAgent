@@ -305,6 +305,19 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|a| a.context.as_ref())
         .and_then(|ctx| ctx.max_media_bytes)
         .unwrap_or(robit_agent::context::DEFAULT_MAX_MEDIA_BYTES);
+    // 控制台层时间戳 = 服务器本地时间（与 robit 文件层同源）：robit 的本地时间
+    // 逻辑是通用的，log_file_layer 已生效（文件日志带本地偏移、本地午夜切文件）；
+    // 控制台层是宿主自组的，tracing-subscriber 缺省计时器为 UTC——这里复用 robit
+    // 公开 local_utc_offset()（取不到偏移回退 UTC 并告警）+ 与 robit local_timer
+    // 同格式的 OffsetTime，控制台/文件时间戳逐位一致。NAS 容器 TZ=Asia/Shanghai
+    //（compose 注入），本地开发随系统时区。
+    let console_timer = tracing_subscriber::fmt::time::OffsetTime::new(
+        robit_ai::logging::local_utc_offset(),
+        time::format_description::parse_borrowed::<3>(
+            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:6][offset_hour sign:mandatory]:[offset_minute]",
+        )
+        .expect("hardcoded log timestamp format is valid"),
+    );
     let filter = robit_ai::build_log_filter(
         app_config,
         &["zimu_server", "zimu_agent", "zimu_market"],
@@ -312,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let file_layer = robit_ai::log_file_layer(app_config, &working_dir, filter.clone());
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .with(tracing_subscriber::fmt::layer().with_timer(console_timer).with_filter(filter))
         .with(file_layer)
         .init();
     robit_ai::install_panic_hook();

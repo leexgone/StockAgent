@@ -108,7 +108,10 @@ tower-http = { version = "0.7", features = ["fs", "trace"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] } # time = OffsetTime 本地时间计时器（控制台层与 robit 文件层同源）
+# 控制台日志本地时间计时器的格式描述解析：与 robit-ai 的 time 同一 crate 实例
+#（依赖图已有，零新增编译单元）；本地偏移判定走 robit_ai::local_utc_offset()。
+time = { version = "0.3", features = ["formatting", "parsing"] }
 anyhow = "1.0"
 # P4-T2 存储：bundled 自带 SQLite 编译，不依赖系统库。
 # 版本必须与 robit-agent 的 rusqlite 对齐（0.43，随 robit 0.5.1 从 0.42 升——

@@ -50,6 +50,16 @@ fn main() -> anyhow::Result<()> {
     // robit 0.1.27 R3 可组合原语（与 zimu-server 同款单一初始化路径）。
     // host_targets 顺带修正旧写法：原来只传 "zimu_agent"，CLI 自身 crate
     // （zimu_agent_cli）的日志反而没被放行。
+    // 控制台层时间戳 = 本地时间（与 zimu-server / robit 文件层同款）：复用 robit
+    // 公开 local_utc_offset() + 与 robit local_timer 同格式的 OffsetTime，
+    // 替代 tracing-subscriber 缺省 UTC 计时器。
+    let console_timer = tracing_subscriber::fmt::time::OffsetTime::new(
+        robit_ai::logging::local_utc_offset(),
+        time::format_description::parse_borrowed::<3>(
+            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:6][offset_hour sign:mandatory]:[offset_minute]",
+        )
+        .expect("hardcoded log timestamp format is valid"),
+    );
     let filter = build_log_filter(
         config.app.as_ref(),
         &["zimu_agent_cli", "zimu_agent", "zimu_market"],
@@ -57,7 +67,7 @@ fn main() -> anyhow::Result<()> {
     );
     let file_layer = log_file_layer(config.app.as_ref(), &working_dir, filter.clone());
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_filter(filter))
+        .with(tracing_subscriber::fmt::layer().with_timer(console_timer).with_filter(filter))
         .with(file_layer)
         .init();
     install_panic_hook();

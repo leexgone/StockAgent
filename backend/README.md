@@ -449,6 +449,9 @@ R2–R5 宿主形态需求 → robit `feat/host-ergonomics-r2-r5` 落地发布�
 **R3 日志可组合原语已消费**——`build_log_filter(host_targets)` + `log_file_layer` +
 `install_panic_hook`，server/cli 单一初始化路径（删「有无 robit 配置」二选一分支，
 宿主 workspace 全 crate 日志可见，CLI 顺带修正自身 crate 未被放行的旧 bug）；
+**控制台时间戳已对齐本地时间**（2026-11-23：宿主 fmt 层复用 robit 公开
+`local_utc_offset()` + 与 robit `local_timer` 同格式的 `OffsetTime`，与文件层逐位
+一致——此前文件层已是本地时间而控制台缺省 UTC；NAS 容器 TZ=Asia/Shanghai）；
 **R4 额外技能目录已消费**——`load_zimu_skills` 内部切 `load_skills_from_dirs`；
 **R5 有意不消费**（存储错误维持脱敏话术不用 cause 链直传）；**R2 经 ADR-0014
 整体推翻**（2026-11-14：标准工具面全量消费——`create_tools_from_config_with`
