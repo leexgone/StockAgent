@@ -1,20 +1,20 @@
 //! 通道推送出站（T6/ADR-0011 → ADR-0017 D5 caps 参数化 → ADR-0019 轮内合并
-//! → P7-T8 问答推送透传）——文案组装（预警 N=1 单条 / N≥2 合并一条）、多目标
-//! 循环、逐目标留痕都在宿主；调度器只说「推这一批」（scheduler trait 通道无关）。
+//! → P7-T8 问答推送透传 → ADR-0020 长度全量归 robit）——文案组装（预警
+//! N=1 单条 / N≥2 合并一条）、多目标循环、逐目标留痕都在宿主；调度器只说
+//! 「推这一批」（scheduler trait 通道无关）。
 //!
-//! 长度处理两形态（P7-T8）：预警/摘要走宿主 `clip_by_lines` 按行截断（既有
-//! 语义逐位不变）；**问答推送全文透传不自截**——长度守卫归 robit adapter
-//! 透明封装（R16，robit 0.4.1 `outbound::prepare_outbound` 已落地：微信
-//! ≤3 段分段逐段过节流、QQ 编辑平台单条截断+省略号；≤cap 幂等直通。
-//! 用户拍板不在宿主复刻分段器，升版零 diff 获得长文分段）。
+//! **全文透传不自截**（ADR-0020，2026-11-23 移除宿主 clip_by_lines 自截层）：
+//! 三类推送（预警/摘要/问答）长度守卫统一归 robit adapter 透明封装（R16，
+//! robit 0.4.1 `outbound::prepare_outbound`：微信 ≤3 段分段逐段过节流、
+//! QQ 编辑平台单条截断+省略号；≤cap 幂等直通。用户拍板不在宿主复刻分段器）。
 //! robit 0.5.1 起 `prepare_outbound` 扩展为「内容投影 + 长度守卫」（R17 T3：
 //! 表格线性化 + 纯文本投影，先投影后分段）——本链显式清洗器调用保留，
 //! adapter 侧二次投影幂等无操作（线性化输出无表格语法残留）。
 //!
 //! **零硬编码通道词汇**：通道名取 `T::platform_name()`（恰为 channel_bindings
-//! 的 channel 词汇），清洗与截断参数取 `T::capabilities()`——QQ 数值行为逐位
+//! 的 channel 词汇），投影参数取 `T::capabilities()`——QQ 数值行为逐位
 //! 不变（caps.qq 的 features/2000 上限有回归钉单测），微信纯文本投影自动成立
-//! （MarkdownFeatures::wechat() 全 false → 可读纯文本 + 2000 字按行截断）。
+//! （MarkdownFeatures::wechat() 全 false → 可读纯文本）。
 //!
 //! 纪律（ADR-0011 后果段）：送达失败如实记、**不自动重试**（调度器同日去重已
 //! 定格，失败的可补救面就是留痕本身，与「受理 ≠ 完成」同纪律）；未在线/无绑定
@@ -73,42 +73,18 @@ impl<T: PlatformAdapter> ActiveAdapter<T> {
 
 /// 一条系统消息 → 该通道全部已绑定会话，逐目标 push_log 留痕。
 /// 返回是否送达至少一目标。通道词汇与投影参数全部来自 T 的静态能力面。
-/// 超长按 caps 上限**按行截断**（预警/摘要既有语义，逐位不变）。
+///
+/// **全文透传不自截**（ADR-0020）：长度守卫归 robit adapter 透明封装
+/// （R16：微信超长自动分段 ≤3 段、每段独立过节流，段失败放弃余段并返回
+/// 已发段成功——push_log ok=true 意味至少首段送达，段级细节在 robit 日志；
+/// QQ 编辑平台单条截断+省略号）。0.5.1 起同一守卫先做内容投影（R17 T3，
+/// 表格线性化）再分段。本函数随 robit 升版零改动。
 pub async fn push_to_bound<T: PlatformAdapter>(
     store: &SharedStore,
     active: &ActiveAdapter<T>,
     kind: &'static str,
     text: &str,
     subject: &str,
-) -> bool {
-    push_text::<T>(store, active, kind, text, subject, true).await
-}
-
-/// 问答推送形态（P7-T8，03 §12）：与 `push_to_bound` 同链路，唯**全文透传
-/// 不做宿主自截**——长度守卫归 robit adapter 透明封装（R16，0.4.1 落地：
-/// 微信超长按 caps 自动分段 ≤3 段、每段独立过节流，段失败放弃余段并返回
-/// 已发段成功——push_log ok=true 意味至少首段送达，段级细节在 robit 日志；
-/// QQ 编辑平台单条截断+省略号）。0.5.1 起同一守卫先做内容投影（R17 T3，
-/// 表格线性化）再分段。本函数随 robit 升版零改动。
-pub async fn push_to_bound_passthrough<T: PlatformAdapter>(
-    store: &SharedStore,
-    active: &ActiveAdapter<T>,
-    kind: &'static str,
-    text: &str,
-    subject: &str,
-) -> bool {
-    push_text::<T>(store, active, kind, text, subject, false).await
-}
-
-/// 推送共同链路：绑定枚举 → Markdown 面投影 → （可选）按行截断 → 逐目标
-/// 发送 + 留痕。`clip=false` 即透传形态（P7-T8）。
-async fn push_text<T: PlatformAdapter>(
-    store: &SharedStore,
-    active: &ActiveAdapter<T>,
-    kind: &'static str,
-    text: &str,
-    subject: &str,
-    clip: bool,
 ) -> bool {
     let channel = T::platform_name();
     let targets = match zimu_agent::lock(store).channel_bindings(Some(channel)) {
@@ -130,18 +106,17 @@ async fn push_text<T: PlatformAdapter>(
     }
     // 平台 Markdown 面投影：过 robit-chatbot 现成清洗器降级为该平台可读文本
     // （QQ 只有 code_blocks；微信全 false → 纯文本投影，0.5.0 起表格线性化
-    // R17）；截断仅 clip 形态（透传形态投影+长度归 robit adapter 守卫，
-    // R16/R17 T3——adapter 侧二次投影幂等无操作）。
+    // R17）；**不截断**——长度归 robit adapter 守卫（R16/R17 T3，先投影后
+    // 分段；adapter 侧二次投影幂等无操作，ADR-0020）。
     let caps = T::capabilities();
-    let cleaned = robit_chatbot::markdown::prepare_markdown_for_platform(text, &caps.markdown_features);
-    let body = if clip {
-        clip_by_lines(&cleaned, caps.max_message_length)
-    } else {
-        cleaned
-    };
+    let projected = robit_chatbot::markdown::prepare_markdown_for_platform(text, &caps.markdown_features);
+    // 清洗器非快速通道恒在末尾追加一个换行（robit markdown.rs `trim_end() + "\n"`）
+    // ——剥掉这个排版尾部换行（非内容截断）：预警/摘要消息字节钉逐位不变
+    // （旧 clip_by_lines 的 lines() 重构曾隐式剥掉它），IM 消息也不带多余尾空行。
+    let body = projected.trim_end_matches('\n');
     let mut any = false;
     for t in targets {
-        let (ok, note): (bool, String) = match active.send(&t.chat_id, &body).await {
+        let (ok, note): (bool, String) = match active.send(&t.chat_id, body).await {
             None => (false, "通道未在线（发送放弃）".into()),
             Some(Ok(_)) => (true, "已送达".into()),
             Some(Err(e)) => (false, format!("发送失败：{e}")),
@@ -160,30 +135,6 @@ async fn push_text<T: PlatformAdapter>(
     any
 }
 
-/// 按行截到 cap 字符内（不切半行；超限省略标记）——保证多行摘要不被拦腰截断。
-/// 注意：省略标记「\n…（已截断）」追加在截断点之后，总长可达 cap+8（QQ 既有
-/// 语义，原样迁移保持逐位不变；真实摘要 ~10 行远小于上限，标记路径罕触）。
-pub fn clip_by_lines(s: &str, cap: usize) -> String {
-    let mut out = String::new();
-    for line in s.lines() {
-        let candidate = if out.is_empty() {
-            line.to_string()
-        } else {
-            format!("{out}\n{line}")
-        };
-        if candidate.chars().count() > cap {
-            if out.is_empty() {
-                // 单行超限：按字符硬截（至少给出开头）
-                return s.chars().take(cap.saturating_sub(4)).collect::<String>() + "…截";
-            }
-            out.push_str("\n…（已截断）");
-            return out;
-        }
-        out = candidate;
-    }
-    out
-}
-
 /// 预警推送文案（原 main.rs 装配处抽出，数字 = 判定产出原值不二次加工）：
 /// 返回 (消息正文, 留痕主题)。
 pub fn alert_message(a: &NewAlertInfo) -> (String, String) {
@@ -199,9 +150,9 @@ pub fn alert_message(a: &NewAlertInfo) -> (String, String) {
 /// 便于回查 alerts 表）。**行序 = 判定产出序，不按 level 重排**（level 是
 /// 方向/动作词汇非严重度轴，03 §11/§12 词汇纪律）。留痕主题 `预警批次 {n} 条`
 /// （不带 code 列表——subject 复制进每个目标的 push_log detail 行，N 大时
-/// 膨胀日志；单条 code 可由 alerts 表同 ts 前缀回查）。超长由 push_to_bound
-/// 内 clip_by_lines 按行截断（与盘后摘要同语义），截掉的预警在 alerts 表与
-/// Web 可查。
+/// 膨胀日志；单条 code 可由 alerts 表同 ts 前缀回查）。超长全文透传归 robit
+/// 长度守卫（ADR-0020：微信 ≤3 段分段 / QQ 单条截断+省略号），超出部分在
+/// alerts 表与 Web 可查。
 pub fn alert_batch_message(alerts: &[NewAlertInfo]) -> (String, String) {
     match alerts {
         [one] => alert_message(one),
@@ -250,6 +201,8 @@ pub type ChannelPush = Arc<
         + Sync,
 >;
 
+/// 单源闭包（ADR-0020）：调度器复合 pusher 与手动问答推送共用同一工厂——
+/// 链路恒全文透传（长度归 robit，R16/R17），不再有 Clip/透传形态分叉。
 pub fn make_channel_push<T: PlatformAdapter + 'static>(
     store: SharedStore,
     active: ActiveAdapter<T>,
@@ -258,22 +211,6 @@ pub fn make_channel_push<T: PlatformAdapter + 'static>(
         let store = store.clone();
         let active = active.clone();
         Box::pin(async move { push_to_bound::<T>(&store, &active, kind, &msg, &subject).await })
-    })
-}
-
-/// 透传形态闭包（P7-T8 问答推送）：形状与 `make_channel_push` 完全一致
-/// （同一 `ChannelPush` 面，端点装配不认形态差异），唯链路走
-/// `push_to_bound_passthrough`（全文不自截，长度归 robit，R16）。
-pub fn make_channel_push_passthrough<T: PlatformAdapter + 'static>(
-    store: SharedStore,
-    active: ActiveAdapter<T>,
-) -> ChannelPush {
-    Arc::new(move |kind: &'static str, msg: String, subject: String| {
-        let store = store.clone();
-        let active = active.clone();
-        Box::pin(async move {
-            push_to_bound_passthrough::<T>(&store, &active, kind, &msg, &subject).await
-        })
     })
 }
 
@@ -373,9 +310,10 @@ mod tests {
         assert!(rows[0].detail.contains("已送达"));
     }
 
-    /// 微信推送：Markdown 剥成纯文本 + 超 2000 字按行截断，留痕 channel="wechat"
+    /// 微信推送：Markdown 剥成纯文本 + **超长全文出站不自截**（ADR-0020，
+    /// 长度归 robit adapter——mock 不模拟分段），留痕 channel="wechat"
     #[tokio::test]
-    async fn wechat_push_cleans_markdown_and_clips() {
+    async fn wechat_push_cleans_markdown_keeps_full_text() {
         let store = tmp_store("push-wx");
         bind(&store, "wechat", "private:WXME");
         let mock = WechatMock::with(vec![]);
@@ -395,11 +333,9 @@ mod tests {
         let body = &sent[0].1;
         assert!(body.contains("加粗 与 斜体"), "bold/italic 标记应剥除：{body:.60}");
         assert!(!body.contains("**"));
-        // clip_by_lines 原样迁移（QQ 行为逐位不变）：正文截到 cap 内，省略标记
-        // 「\n…（已截断）」（8 字符）追加在截断点之后——上限语义 = cap + 标记长
-        assert!(body.chars().count() <= 2000 + 8, "超长必须截断");
-        assert!(body.ends_with("…（已截断）"), "按行截断省略标记");
-        assert!(!body.contains("第199行"), "尾部行应被截掉");
+        // ADR-0020：宿主零截断——尾行必须在、无截断标记（分段是 robit adapter 的事）
+        assert!(body.contains("第199行"), "尾行必须在——不做宿主自截");
+        assert!(!body.contains("已截断"), "透传形态无截断标记");
         let rows = logs(&store);
         assert_eq!(rows[0].channel, "wechat");
         assert_eq!(rows[0].kind, "post_market_review_push");
@@ -619,10 +555,10 @@ mod tests {
         assert!(rows.iter().all(|r| r.detail.contains("预警批次 3 条")));
     }
 
-    /// P7-T8 透传形态：超长文本**全文出站不自截**（长度守卫归 robit adapter，
-    /// R16）——与 Clip 形态对照钉死两形态差异；Markdown 清洗仍生效
+    /// 问答推送（P7-T8 / ADR-0020 单一透传形态）：超长文本**全文出站不自截**
+    /// （长度守卫归 robit adapter，R16）；Markdown 清洗仍生效
     #[tokio::test]
-    async fn passthrough_push_sends_full_text_without_clipping() {
+    async fn chat_push_sends_full_text_without_clipping() {
         let store = tmp_store("push-passthrough");
         bind(&store, "wechat", "private:WXME");
         let mock = WechatMock::with(vec![]);
@@ -634,7 +570,7 @@ mod tests {
         for i in 0..200 {
             text.push_str(&format!("第{i:03}行内容十字符号填充\n"));
         }
-        let ok = push_to_bound_passthrough::<WechatMock>(
+        let ok = push_to_bound::<WechatMock>(
             &store, &active, "chat_push", &text, "问答推送 2026-11-21 09:03",
         )
         .await;
@@ -650,25 +586,5 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].kind, "chat_push");
         assert!(rows[0].ok);
-
-        // 对照：同文本走 Clip 形态必截（既有语义回归钉）
-        let mock2 = WechatMock::with(vec![]);
-        let active2 = ActiveAdapter::<WechatMock>::default();
-        active2.set(mock2.clone());
-        assert!(push_to_bound::<WechatMock>(&store, &active2, "chat_push", &text, "对照").await);
-        let sent2 = mock2.sent.lock().unwrap();
-        assert!(sent2[0].1.ends_with("…（已截断）"));
-        assert!(!sent2[0].1.contains("第199行"));
-    }
-
-    /// clip_by_lines 三态：短文本原样 / 多行超限按行截 / 单行超限硬截
-    #[test]
-    fn clip_by_lines_three_states() {
-        assert_eq!(clip_by_lines("短\n文本", 100), "短\n文本");
-        let long = format!("{}\n{}\n{}", "a".repeat(10), "b".repeat(10), "c".repeat(10));
-        let clipped = clip_by_lines(&long, 25);
-        assert_eq!(clipped, format!("{}\n{}\n…（已截断）", "a".repeat(10), "b".repeat(10)));
-        let single = clip_by_lines(&"x".repeat(50), 20);
-        assert_eq!(single, format!("{}…截", "x".repeat(16)));
     }
 }

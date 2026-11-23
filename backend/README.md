@@ -79,8 +79,9 @@ robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定�
 入站过同一绑定白名单（装饰器零改动换词汇；**待绑定观察队列** D3 补记：未绑定
 来消息丢弃时自动入列，`GET /api/channel_bindings/pending` 透出、绑定卡一键绑定，
 绑定成功即移除——观察自动化、授权仍人工，内存态重启清零），出站推送共用 **caps 参数化链**
-（`channel_push.rs`：通道词汇 = `T::platform_name()`、清洗/截断 = `T::capabilities()`，
-QQ 数值行为逐位不变；复合 pusher 逐通道顺序 OR，`SchedulerCore` 签名不动）。
+（`channel_push.rs`：通道词汇 = `T::platform_name()`、清洗 = `T::capabilities()`，
+**全文透传不自截**——长度守卫归 robit adapter（ADR-0020，微信 ≤3 段分段 / QQ 单条截断+省略号）；
+复合 pusher 逐通道顺序 OR，`SchedulerCore` 签名不动）。
 health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快照，
 界面只读区分「未启用」与「离线」，拍板⑤⑥）。
 

@@ -42,8 +42,8 @@ pub type ResetHook =
 struct ChatState {
     store: SharedStore,
     reset: ResetHook,
-    /// 问答推送通道闭包（P7-T8）：bin 按实际 spawn 的通道装配**透传形态**
-    /// （make_channel_push_passthrough）；空 vec = 双通道均未启用。
+    /// 问答推送通道闭包（P7-T8）：bin 按实际 spawn 的通道装配（make_channel_push，
+    /// 全文透传——长度守卫归 robit adapter，ADR-0020）；空 vec = 双通道均未启用。
     /// 形状照 ResetHook 注入范式——lib 不依赖 bin 的 adapter 类型，测试注入
     /// recording 闭包即可断言 kind/正文/留痕。
     push: Vec<ChannelPush>,

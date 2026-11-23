@@ -451,7 +451,7 @@ export default function WechatScreen() {
             <div className="card-head">
               <div>
                 <div className="card-title">推送长这样</div>
-                <div className="card-sub">纯文本 · 2000 字上限超长截断</div>
+                <div className="card-sub">纯文本 · 超长自动分段（≤3 段）</div>
               </div>
             </div>
             <div className="card-body">

@@ -224,10 +224,10 @@ fn agent_offline() -> Response {
         .into_response()
 }
 
-// 通道推送出站（T6/ADR-0011 → ADR-0017 D5 → ADR-0019 轮内合并）已收口进 lib
-// `channel_push`：caps 参数化的 push_to_bound / 文案组装（alert_batch_message/
-// summary_message）/ 按行截断 / 复合 pusher（combine_*）——零硬编码通道词汇，
-// QQ/微信共用。
+// 通道推送出站（T6/ADR-0011 → ADR-0017 D5 → ADR-0019 轮内合并 → ADR-0020
+// 长度全量归 robit）已收口进 lib `channel_push`：caps 参数化的 push_to_bound
+// （全文透传不自截）/ 文案组装（alert_batch_message/summary_message）/
+// 复合 pusher（combine_*）——零硬编码通道词汇，QQ/微信共用。
 
 // ============================================================================
 // 启动装配
@@ -428,9 +428,11 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 推送通道组合（ADR-0017 D5 → ADR-0019 批面）：按实际 spawn 的通道收集
-    // caps 参数化闭包，复合 pusher 顺序 OR——调度器 trait 为预警批面（轮内
-    // 合并），文案组装在 combine 闭包内恰一次。
+    // 推送通道组合（ADR-0017 D5 → ADR-0019 批面 → ADR-0020 单源）：按实际
+    // spawn 的通道收集 caps 参数化闭包（全文透传，长度归 robit adapter），
+    // 复合 pusher 顺序 OR——调度器 trait 为预警批面（轮内合并），文案组装在
+    // combine 闭包内恰一次。手动问答推送（P7-T8）共享同一份闭包（clone 分发），
+    // 不随 ZIMU_SCHEDULER_DISABLE 消失（手动推送与调度器无关）。
     let mut push_channels: Vec<zimu_server::channel_push::ChannelPush> = Vec::new();
     if qq_channel.is_some() {
         push_channels.push(zimu_server::channel_push::make_channel_push::<QqPlatformAdapter>(
@@ -444,23 +446,7 @@ async fn main() -> anyhow::Result<()> {
             wechat_active.clone(),
         ));
     }
-
-    // 问答推送通道闭包（P7-T8）：与调度器 push_channels 同源（同 store/active），
-    // 唯形态为**透传**（全文不自截，长度守卫归 robit adapter，R16）——独立收集，
-    // 不随 ZIMU_SCHEDULER_DISABLE 消失（手动推送与调度器无关）。
-    let mut chat_push_channels: Vec<zimu_server::channel_push::ChannelPush> = Vec::new();
-    if qq_channel.is_some() {
-        chat_push_channels.push(zimu_server::channel_push::make_channel_push_passthrough::<QqPlatformAdapter>(
-            store.clone(),
-            qq_active.clone(),
-        ));
-    }
-    if wechat_channel.is_some() {
-        chat_push_channels.push(zimu_server::channel_push::make_channel_push_passthrough::<WechatPlatformAdapter>(
-            store.clone(),
-            wechat_active.clone(),
-        ));
-    }
+    let chat_push_channels = push_channels.clone();
 
     // 优雅关闭句柄收集（QQ 先微信后，与启动序一致）
     let mut channel_handles: Vec<ChannelHandle> = Vec::new();
