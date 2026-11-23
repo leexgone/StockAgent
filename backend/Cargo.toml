@@ -7,6 +7,16 @@ version = "0.1.4"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.6.0（2026-11-23）= Bot 忙碌状态信号（typing）统一抽象 + PlatformCaps 一次性
+# 破坏加固（设计件 robit/docs/robit-rfc-bot-typing-design.md，W-D 终态/路径 B）：
+# chatbot 层 typing 钩子（trait 新方法带默认 no-op 实现，运行时行为零变化，
+# 无平台启用）+ PlatformCaps #[non_exhaustive] + Default（保守基线）——crate 外
+# 结构体字面量构造一次性编译失败，迁移为 default() + 字段覆写，此后增补能力
+# 字段永久非破坏。微信 typing 实际实现依赖上游 weixin-agent 0.4.0（SDK PR #4），
+# robit feat/wechat-typing 分支等上游发版后合并，不含在本版（R13⑦ 框架侧落地、
+# 实现待上游）。子木适配面 = 唯一一处测试 mock caps 字面量迁移
+# （channel_adapter.rs），其余（读字段 / qq()/wechat() 构造器 / BoundOnly
+# trait 实现吃默认方法）零改动；rusqlite 维持 0.43 无连带。
 # 0.5.1（2026-11-22）= 子木第七轮移交 R17 落地（IM 出站 Markdown 表格投影，
 # 交接件 robit/docs/robit-rfc-im-table-projection.md，T1+T2+T3 全收，0.5.0 发版；
 # 0.5.1 为维护版：rusqlite 0.42→0.43 上游 use-after-free 修复 + CI Node 24）。
@@ -72,17 +82,17 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.5.1"
-robit-agent = "0.5.1"
-robit-web = "0.5.1"
+robit-ai = "0.6.0"
+robit-agent = "0.6.0"
+robit-web = "0.6.0"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。
 # rusqlite 0.43 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.5.1"
-robit-qq = "0.5.1"
+robit-chatbot = "0.6.0"
+robit-qq = "0.6.0"
 # P6-T2 微信通道（ADR-0017）：robit-wechat iLink Bot adapter（lib 面消费，
 # 登录走部署侧 CLI `robit-wechat login`，bin 不复用）。
-robit-wechat = "0.5.1"
+robit-wechat = "0.6.0"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "1.2"

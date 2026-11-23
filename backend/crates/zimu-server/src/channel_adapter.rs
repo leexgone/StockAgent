@@ -121,17 +121,21 @@ mod tests {
 
     // 事件队列 + 出站记录（共享装置 testutil，ADR-0017 B3；caps 保持原 100 上限）
     // progress_hints（robit 0.4.0 新字段）：mock 平台缺省 always——提示策略不在
-    // 白名单测试面，任何值不影响断言
-    mock_platform!(MockPlatform, "mock", PlatformCaps {
-        supports_edit: false,
-        returns_msg_id: true,
-        supports_markdown: false,
-        markdown_features: MarkdownFeatures::default(),
-        max_message_length: 100,
-        supports_images: false,
-        supports_files: false,
-        max_upload_size: 0,
-        progress_hints: robit_chatbot::HintPolicy::Always,
+    // 白名单测试面，任何值不影响断言。
+    // robit 0.6.0 起 PlatformCaps #[non_exhaustive]：字面量构造迁移为
+    // default() + 逐字段覆写（全仓库唯一迁移点），字段值逐位保持原样。
+    mock_platform!(MockPlatform, "mock", {
+        let mut caps = PlatformCaps::default();
+        caps.supports_edit = false;
+        caps.returns_msg_id = true;
+        caps.supports_markdown = false;
+        caps.markdown_features = MarkdownFeatures::default();
+        caps.max_message_length = 100;
+        caps.supports_images = false;
+        caps.supports_files = false;
+        caps.max_upload_size = 0;
+        caps.progress_hints = robit_chatbot::HintPolicy::Always;
+        caps
     });
 
     #[tokio::test]
