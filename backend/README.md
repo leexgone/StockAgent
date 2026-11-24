@@ -156,11 +156,15 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `echo` | 只读 | P2-T2 链路验证保留（网关排查不依赖数据） |
 | `send_file` | IM 出站 | 发本地文件/图片给用户（ADR-0017 D9，robit-chatbot SendFileTool）：平台扩展自守卫——QQ 真实 CDN 上传、微信 SDK send_media；Web/CLI 无平台扩展调用如实报错，无副作用 |
 
-Skill 模板在**仓库根 `skills/`**（robit SKILL.md 约定：YAML frontmatter +
-Markdown 正文；`/触发词` 命中时正文以临时 system message 注入本轮）。不放
-`<workdir>/.robit/skills/` 是因为 `.robit/` 整目录被 gitignore，而模板是
+Skill 系统模板在**仓库根 `skills/`**（robit SKILL.md 约定：YAML frontmatter +
+Markdown 正文；`/触发词` 命中时正文以临时 system message 注入本轮），是
 **产品文案资产**（内嵌 03 口径引用、免责边界、「文案数字必须原样取自工具
-返回」硬规则），必须入库评审：
+返回」硬规则），必须入库评审。**ADR-0021 起仓库 `skills/` 任播种源**：应用
+初始化（AgentCore 装配）把系统技能播种进 `<workdir>/.robit/skills/`（robit
+项目级技能目录约定），**加载单源 = 该目录**——缺则播种永不覆盖（粒度 = 技能
+子目录，根目录已含用户技能时仍逐个补缺系统技能），用户可在该目录自增技能；
+`.robit/` 整目录被 gitignore，用户技能不入库。`ZIMU_SKILLS_DIR` 覆盖播种源
+（容器烘焙 `/app/skills`）：
 
 | Skill | 触发 | 流程要点 |
 |---|---|---|
@@ -461,7 +465,9 @@ R2–R5 宿主形态需求 → robit `feat/host-ergonomics-r2-r5` 落地发布�
 **控制台时间戳已对齐本地时间**（2026-11-23：宿主 fmt 层复用 robit 公开
 `local_utc_offset()` + 与 robit `local_timer` 同格式的 `OffsetTime`，与文件层逐位
 一致——此前文件层已是本地时间而控制台缺省 UTC；NAS 容器 TZ=Asia/Shanghai）；
-**R4 额外技能目录已消费**——`load_zimu_skills` 内部切 `load_skills_from_dirs`；
+**R4 额外技能目录已消费**——`load_zimu_skills` 内部切 `load_skills_from_dirs`
+（ADR-0021 起目录策略演进：加载 `<workdir>/.robit/skills`，系统技能应用初始化
+播种、缺则播种永不覆盖，用户可自增；仓库 `skills/` 改任播种源）；
 **R5 有意不消费**（存储错误维持脱敏话术不用 cause 链直传）；**R2 经 ADR-0014
 整体推翻**（2026-11-14：标准工具面全量消费——`create_tools_from_config_with`
 内核 + 领域注册，skill 单源主权保留；确认关闭自动执行 `auto_approve=true`，
@@ -519,7 +525,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 | `ZIMU_DB_PATH` | `zimu.db`（启动目录，即 `backend/`） | 持仓 SQLite 路径；`.db` 已被 .gitignore 覆盖，真实数据永不入库（C9/ADR-0005） |
 | `ZIMU_MARKET_URL` | `http://127.0.0.1:8300` | 行情 sidecar 基地址（P4-T4；不可达时行情端点降级 503，服务照常） |
 | `ZIMU_MARKET_TIMEOUT_MS` | `10000` | sidecar 请求超时（毫秒） |
-| `ZIMU_SKILLS_DIR` | `仓库根/skills`（按编译期 manifest 定位） | Skill 模板目录（P4-T6；每子目录一个 SKILL.md，robit 约定） |
+| `ZIMU_SKILLS_DIR` | `仓库根/skills`（按编译期 manifest 定位） | 系统技能**播种源**（P4-T6；ADR-0021 起语义从加载目录改为播种源——应用初始化播种进 `<cwd>/.robit/skills`，加载单源是该目录，用户可自增技能） |
 | `ZIMU_SCHEDULER_DISABLE` | 未设置（调度器随服务启动） | 设任意值停用调度与预警引擎（P4-T7，开发/测试用；手动 refresh 与 agent 工具不受影响） |
 | `RUST_LOG` | 未设置时按 robit config `log_level`（缺省 info，含 tower_http=debug 与 `zimu_agent`/`zimu_market` 同级放行） | 设置了则优先于 robit 配置；有 robit 配置时日志由 `init_logging` 接管（控制台 + `<cwd>/.robit/logs`），无配置时回落服务自己的 tracing_subscriber。**注意**：robit 的过滤器只放行 target crate 与 robit 系 target，宿主其余 crate 必须走附加 directive 显式放行（P4-T7 已接 `zimu_agent={level}` `zimu_market={level}`——调度器日志否则被默认底线静默吞掉，R3，见 `docs/07-backlog.md`） |
 
@@ -550,8 +556,8 @@ crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill
                             ├─ tools/            领域 14 件（mod.rs register_domain_tools；market/portfolio/advice 三组，portfolio 含 ADR-0012/0013 写账本五件；robit 标准面经 assembly 内核叠加，ADR-0014）
                             ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链；P4-T7 增 detailed 变体供调度器复用——多回 quote 原始行，wire 契约不变）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
                             ├─ scheduler.rs      调度与预警引擎（P4-T7 + B13，03 §12 纯编排：tick(now) 时刻注入可测、盘中轮询判定落 alerts（持仓 + 自选无持仓形态）、日级缓存（kline 量窗口/cb_list）、15:05 快照 + /复盘 触发 + push_log）
-                            ├─ skills.rs         Skill 目录解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ robit loader 接线
-                            └─ tests/            tools.rs 20 项（黄金向量端到端/留档/降级/Skill 完整性/写账本九例/注册面组成）· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
+                            ├─ skills.rs         Skill 播种源解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ 应用初始化播种进 <wd>/.robit/skills（缺则播种永不覆盖，ADR-0021）+ robit loader 接线
+                            └─ tests/            tools.rs 27 项（黄金向量端到端/留档/降级/Skill 完整性 + 播种五例（ADR-0021：用户自增/永不覆盖/幂等/源缺失/附属文件）/写账本九例/注册面组成）· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
                             └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 108 用例）

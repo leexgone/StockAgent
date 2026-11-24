@@ -19,8 +19,10 @@
 //!   快照校正整行覆盖先读后改、删除持仓对话内两步确认；「永不代下单」是
 //!   表述纪律，不是能力限制。
 //!
-//! Skill 模板在仓库根 `skills/`（每目录一个 SKILL.md，robit 约定），内嵌
-//! `03` 口径引用与免责边界；`ZIMU_SKILLS_DIR` 可覆盖目录。
+//! Skill 系统模板在仓库根 `skills/`（每目录一个 SKILL.md，robit 约定），内嵌
+//! `03` 口径引用与免责边界；ADR-0021 起任播种源——应用初始化播种进
+//! `<wd>/.robit/skills`（缺则播种永不覆盖），加载单源 = 该目录，用户可自增技能；
+//! `ZIMU_SKILLS_DIR` 可覆盖播种源。
 
 pub mod assembly;
 pub mod echo;

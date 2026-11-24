@@ -14,6 +14,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -27,7 +28,7 @@ use robit_agent::{
 use robit_ai::RobitConfig;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
-use zimu_agent::skills::load_zimu_skills;
+use zimu_agent::skills::{load_zimu_skills, runtime_skills_dir, seed_system_skills_from};
 use zimu_agent::tools::{register_domain_tools, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_market::clock::now_shanghai;
@@ -912,16 +913,44 @@ fn snapshot_tools_are_auto_commit_per_adr_0013() {
 }
 
 // ============================================================================
-// Skill 模板（仓库根 skills/）
+// Skill 模板（ADR-0021：系统技能自仓库根 skills/ 播种进 <wd>/.robit/skills，
+// 缺则播种永不覆盖，粒度 = 技能子目录；加载单源 = 该目录，用户可自增）
 // ============================================================================
+
+/// 独立 temp working_dir（每测试一名避免并行碰撞，进程 id 防跨进程残留），
+/// 用完清理。**不改 ZIMU_SKILLS_DIR env**——并行测试共享进程 env，可测性走
+/// `seed_system_skills_from` 路径参数。
+fn temp_working_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("zimu_skills_test_{tag}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// 写一个技能目录（SKILL.md 全文）
+fn write_skill_dir(root: &Path, dir_name: &str, content: &str) {
+    let d = root.join(dir_name);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("SKILL.md"), content).unwrap();
+}
 
 #[tokio::test]
 async fn skills_load_with_unique_triggers_and_registered_tools() {
-    let (skills, errors) = load_zimu_skills();
+    let wd = temp_working_dir("load");
+    let (skills, errors) = load_zimu_skills(&wd);
     assert!(errors.is_empty(), "Skill 加载错误：{errors:?}");
     let names: Vec<&str> = skills.iter().map(|s| s.frontmatter.name.as_str()).collect();
     for expect in ["post-market-review", "pre-market-watch", "generate-advice"] {
         assert!(names.contains(&expect), "缺 Skill {expect}，实有 {names:?}");
+    }
+
+    // 播种落盘：三系统技能目录在 <wd>/.robit/skills（ADR-0021 D2/D3）
+    let runtime = runtime_skills_dir(&wd);
+    for expect in ["post-market-review", "pre-market-watch", "generate-advice"] {
+        assert!(
+            runtime.join(expect).join("SKILL.md").is_file(),
+            "系统技能 {expect} 未播种到磁盘"
+        );
     }
 
     // 触发词唯一且覆盖中英文
@@ -950,6 +979,125 @@ async fn skills_load_with_unique_triggers_and_registered_tools() {
         assert!(s.content.contains("不构成投资建议"), "{} 缺免责声明", s.frontmatter.name);
         assert!(s.content.contains("工具返回"), "{} 缺数字来源硬规则", s.frontmatter.name);
     }
+    let _ = std::fs::remove_dir_all(&wd);
+}
+
+/// NAS 现状场景（ADR-0021 D3 粒度钉）：skills 根目录已存在且含用户自增技能，
+/// 系统技能仍逐个补缺播种，用户技能共加载、用户目录逐字节未动。
+#[tokio::test]
+async fn user_added_skill_loaded_and_system_skills_seeded_into_existing_root() {
+    let wd = temp_working_dir("user_ext");
+    let runtime = runtime_skills_dir(&wd);
+    let user_md = "---\nname: my-skill\ndescription: 用户自增技能\ntriggers:\n  - /myskill\n---\n\n用户技能正文";
+    write_skill_dir(&runtime, "my-skill", user_md);
+
+    let (skills, errors) = load_zimu_skills(&wd);
+    assert!(errors.is_empty(), "Skill 加载错误：{errors:?}");
+    let names: Vec<&str> = skills.iter().map(|s| s.frontmatter.name.as_str()).collect();
+    assert_eq!(skills.len(), 4, "三系统技能逐个补缺 + 用户技能，实有 {names:?}");
+    for expect in ["post-market-review", "pre-market-watch", "generate-advice", "my-skill"] {
+        assert!(names.contains(&expect), "缺 Skill {expect}，实有 {names:?}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(runtime.join("my-skill/SKILL.md")).unwrap(),
+        user_md,
+        "用户自增目录必须逐字节未动"
+    );
+    let _ = std::fs::remove_dir_all(&wd);
+}
+
+/// 缺则播种永不覆盖（ADR-0021 D3）：用户改过的系统技能目录保留原样，
+/// 加载的是用户版本；其余缺失系统技能照常播种。
+#[tokio::test]
+async fn seed_never_overwrites_existing_system_skill() {
+    let wd = temp_working_dir("no_overwrite");
+    let runtime = runtime_skills_dir(&wd);
+    let edited = "---\nname: post-market-review\ndescription: 用户改过的复盘\ntriggers:\n  - /review\n  - /复盘\n---\n\n用户改过的正文";
+    write_skill_dir(&runtime, "post-market-review", edited);
+
+    let (skills, errors) = load_zimu_skills(&wd);
+    assert!(errors.is_empty(), "Skill 加载错误：{errors:?}");
+    let review = skills
+        .iter()
+        .find(|s| s.frontmatter.name == "post-market-review")
+        .expect("改过的系统技能仍应加载");
+    assert_eq!(review.frontmatter.description, "用户改过的复盘");
+    assert!(review.content.contains("用户改过的正文"), "加载的必须是用户改过的版本");
+    assert_eq!(
+        std::fs::read_to_string(runtime.join("post-market-review/SKILL.md")).unwrap(),
+        edited,
+        "已有系统技能目录永不覆盖"
+    );
+    assert!(runtime.join("pre-market-watch/SKILL.md").is_file(), "缺失系统技能照常播种");
+    assert!(runtime.join("generate-advice/SKILL.md").is_file(), "缺失系统技能照常播种");
+    let _ = std::fs::remove_dir_all(&wd);
+}
+
+/// 二次加载幂等：技能集不变、磁盘内容不变、无临时播种目录残留。
+#[tokio::test]
+async fn seed_idempotent_second_load() {
+    let wd = temp_working_dir("idempotent");
+    let (first, e1) = load_zimu_skills(&wd);
+    assert!(e1.is_empty(), "Skill 加载错误：{e1:?}");
+    let runtime = runtime_skills_dir(&wd);
+    let snapshot = std::fs::read_to_string(runtime.join("post-market-review/SKILL.md")).unwrap();
+
+    let (second, e2) = load_zimu_skills(&wd);
+    assert!(e2.is_empty(), "Skill 加载错误：{e2:?}");
+    assert_eq!(first.len(), second.len());
+    assert_eq!(
+        std::fs::read_to_string(runtime.join("post-market-review/SKILL.md")).unwrap(),
+        snapshot
+    );
+    let leftovers: Vec<String> = std::fs::read_dir(&runtime)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".tmp-"))
+        .collect();
+    assert!(leftovers.is_empty(), "临时播种目录残留：{leftovers:?}");
+    let _ = std::fs::remove_dir_all(&wd);
+}
+
+/// 播种源缺失：不 panic、不创建任何文件（加载如实降级缺席）。
+#[test]
+fn missing_seed_source_degrades_without_writing() {
+    let wd = temp_working_dir("missing_src");
+    let runtime = runtime_skills_dir(&wd);
+    seed_system_skills_from(&wd.join("no-such-source"), &runtime);
+    assert!(!runtime.exists(), "播种源缺失时不应创建任何文件");
+    let _ = std::fs::remove_dir_all(&wd);
+}
+
+/// 路径参数化播种：整目录复制（含附属文件）、同名目录跳过、用户目录不碰。
+#[test]
+fn seed_from_synthetic_source_copies_aux_files_and_skips_existing() {
+    let wd = temp_working_dir("synthetic");
+    let source = wd.join("source");
+    let runtime = wd.join("runtime");
+    let a_md = "---\nname: skill-a\ndescription: a\n---\n\nA";
+    write_skill_dir(&source, "skill-a", a_md);
+    std::fs::write(source.join("skill-a/notes.md"), "附属文件").unwrap();
+    write_skill_dir(&source, "skill-b", "---\nname: skill-b\ndescription: b\n---\n\nB");
+    write_skill_dir(&runtime, "skill-b", "---\nname: skill-b\ndescription: 已有\n---\n\n已有正文");
+    write_skill_dir(&runtime, "user-own", "---\nname: user-own\ndescription: 用户\n---\n\n用户目录");
+
+    seed_system_skills_from(&source, &runtime);
+    assert_eq!(std::fs::read_to_string(runtime.join("skill-a/SKILL.md")).unwrap(), a_md);
+    assert_eq!(
+        std::fs::read_to_string(runtime.join("skill-a/notes.md")).unwrap(),
+        "附属文件",
+        "整目录复制须含附属文件"
+    );
+    assert!(
+        std::fs::read_to_string(runtime.join("skill-b/SKILL.md")).unwrap().contains("已有正文"),
+        "同名目录跳过不覆盖"
+    );
+    assert!(
+        std::fs::read_to_string(runtime.join("user-own/SKILL.md")).unwrap().contains("用户目录"),
+        "用户自增目录永不碰"
+    );
+    let _ = std::fs::remove_dir_all(&wd);
 }
 
 // ============================================================================

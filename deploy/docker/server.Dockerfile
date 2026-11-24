@@ -72,6 +72,8 @@ COPY --from=build /opt/cli/bin/robit-wechat /usr/local/bin/robit-wechat
 COPY deploy/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 # 容器几何（D5）：static/skills 缺省是编译期路径，必须 env 指回烘焙资产；
+# ZIMU_SKILLS_DIR 语义 = 系统技能播种源（ADR-0021）：应用初始化播种进卷内
+# /data/.robit/skills（缺则播种永不覆盖，用户可自增技能），加载单源是该目录；
 # ZIMU_DB_PATH 不设——缺省 cwd 相对天然落 /data/zimu.db
 ENV ZIMU_STATIC_DIR=/app/static \
     ZIMU_SKILLS_DIR=/app/skills \

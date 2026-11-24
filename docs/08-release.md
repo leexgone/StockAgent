@@ -23,8 +23,8 @@ docker compose up -d
 ```
 
 - 端口缺省 **127.0.0.1:8080**（内网监听面，ADR-0005）；局域网/反代自行改 compose `ports`（公网暴露前请自加鉴权——服务本身无鉴权，IM 信任边界 = 绑定白名单）。
-- 数据落**命名卷 `zimu-data`**（/data）：zimu.db、.robit/（config/人格/记忆/日志/微信 state）、media/、images/ 全在卷内。
-- 首跑 entrypoint 自动播种 `.robit/config.toml`（示例模板）与 `.robit/prompts/agent.md`（子木人格），**永不覆盖已有文件**。
+- 数据落**命名卷 `zimu-data`**（/data）：zimu.db、.robit/（config/人格/技能/记忆/日志/微信 state）、media/、images/ 全在卷内。
+- 首跑 entrypoint 自动播种 `.robit/config.toml`（示例模板）与 `.robit/prompts/agent.md`（子木人格），**永不覆盖已有文件**；系统技能（三模板）由**应用初始化**（AgentCore 装配，非 entrypoint）播种进 `.robit/skills/`——同样缺则播种永不覆盖，用户可在该目录自增技能（ADR-0021）。
 - 健康：`curl http://127.0.0.1:8080/api/health`——恒 200 只做存活探针；`agent_online`/`static_ready`/`qq_online`/`wechat_online` 读响应体判断降级面。
 
 **Docker Desktop（Windows/macOS）**：命名卷缺省即可，勿改 bind 挂载（gRPC-FUSE/9p 上 SQLite WAL 锁语义有风险）。
@@ -83,7 +83,7 @@ docker compose start zimu
 
 ## 5. 数据卷与备份
 
-卷内即全部真相：`zimu.db`（账本/会话档案/绑定）、`.robit/`（config/人格/记忆/robit.db IM 会话/日志/微信 state）、`media/`（上传与附件）、`images/`（生图产物）。
+卷内即全部真相：`zimu.db`（账本/会话档案/绑定）、`.robit/`（config/人格/技能/记忆/robit.db IM 会话/日志/微信 state）、`media/`（上传与附件）、`images/`（生图产物）。
 
 ```bash
 docker compose stop zimu        # 静默后备份（SQLite WAL 一致性）
@@ -102,6 +102,7 @@ docker compose pull && docker compose up -d
 ```
 
 - 数据卷原样保留；entrypoint 播种幂等——**卷内人格/config 不会被新版本覆盖**。想采用新版默认人格：对比 `/app/defaults/agent.md` 与卷内 `.robit/prompts/agent.md` 手工合并（或删除卷内文件让 entrypoint 重播种，自定义会丢）。
+- 技能同款语义（ADR-0021）：**卷内 `.robit/skills/` 已有技能目录（含用户自增与改过的系统技能）不会被新版本覆盖**；系统技能新版模板在镜像 `/app/skills/`，想采用新版须删除卷内对应技能目录让应用初始化重播种（自定义会丢）。用户自增技能目录不受升级影响。
 - 版本真值：`/api/health` 的 `version` 字段 = 镜像版本（与 git tag 一致）。
 - 回滚：compose `image:` 钉旧版 tag（如 `ghcr.io/leexgone/zimu:v0.1.0`）重新 up。
 

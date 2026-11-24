@@ -60,3 +60,4 @@ B …
 | [0018](./0018-docker-ghcr-release.md) | 发布模式：Docker 双镜像 + GHCR + GitHub Actions tag 驱动流水线 | 接受 |
 | [0019](./0019-alert-push-in-tick-batch.md) | 预警推送轮内合并：AlertPusher 边界批化，1 条原样、≥2 条合并 | 接受 |
 | [0020](./0020-push-length-fully-robit.md) | 推送长度守卫全量归 robit：移除宿主自截层，三类推送统一透传 | 接受 |
+| [0021](./0021-skill-dir-seed-and-user-extension.md) | 技能目录改回 .robit/skills：系统技能初始化播种 + 用户自增 | 接受 |

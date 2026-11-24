@@ -8,8 +8,10 @@
 //! - robit 标准面：read / write / edit / ls / find / grep / bash / load_skill /
 //!   search_history / query_task（+ generate_image 随 key、read_image 随 vision
 //!   配置按需）——确认关闭自动执行（auto_approve=true，ADR-0014）；
-//! - Skill 模板：仓库根 `skills/`（盘后复盘 /review /复盘、盘前关注 /watch /盘前、
-//!   建议生成 /advice /建议 <代码>），`ZIMU_SKILLS_DIR` 可覆盖。
+//! - Skill 模板：系统技能（盘后复盘 /review /复盘、盘前关注 /watch /盘前、
+//!   建议生成 /advice /建议 <代码>）应用初始化自仓库根 `skills/` 播种进
+//!   `<cwd>/.robit/skills`（缺则播种永不覆盖，用户可自增技能，ADR-0021），
+//!   `ZIMU_SKILLS_DIR` 可覆盖播种源。
 //!
 //! 用法（在 `backend/` 下）：`cargo run -p zimu-agent-cli`
 //!

@@ -91,8 +91,10 @@ impl AgentCore {
         }
 
         // Skill 模板先行（LoadSkillTool 构造需要 Arc<SkillRegistry>）：
-        // 仓库根 skills/，ZIMU_SKILLS_DIR 可覆盖；坏文件逐条上报不致命。
-        let (loaded, errors) = load_zimu_skills();
+        // ADR-0021——系统技能（播种源 skills_dir()，ZIMU_SKILLS_DIR 可覆盖）播种进
+        // <wd>/.robit/skills（缺则播种永不覆盖），单源加载该目录（用户可自增技能）；
+        // 坏文件逐条上报不致命。
+        let (loaded, errors) = load_zimu_skills(&working_dir);
         for e in &errors {
             tracing::warn!("Skill 加载失败（跳过该文件）：{e}");
         }

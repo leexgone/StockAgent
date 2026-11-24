@@ -12,7 +12,7 @@ R2 的历史顾虑（server 工作目录有 `.env`，通用 read 暴露给 LLM �
 
 ## 决定
 
-1. **标准工具面全量消费**：装配走 robit 公开内核 `create_tools_from_config_with(&config, skills_arc, None)`（与 bootstrap 同一实现：截断缺省 500 行/51200 字节/图像最长边 1024、image provider 解析、memory 模式判定、file 模式守卫全内置），领域 14 件随后注册（同名零冲突）。**不用 `bootstrap_with`**——它强引 `~/.robit/skills` 与 `<wd>/.robit/skills` 全局目录，违背子木 skill 单源政策（仓库 `skills/` 为准，个人全局模板不进服务）；内核路径 skill 加载主权完全留子木。
+1. **标准工具面全量消费**：装配走 robit 公开内核 `create_tools_from_config_with(&config, skills_arc, None)`（与 bootstrap 同一实现：截断缺省 500 行/51200 字节/图像最长边 1024、image provider 解析、memory 模式判定、file 模式守卫全内置），领域 14 件随后注册（同名零冲突）。**不用 `bootstrap_with`**——它强引 `~/.robit/skills` 与 `<wd>/.robit/skills` 全局目录，违背子木 skill 单源政策（仓库 `skills/` 为准，个人全局模板不进服务）；内核路径 skill 加载主权完全留子木。**（2026-11-24 补记：skill 目录约定经 [0021](./0021-skill-dir-seed-and-user-extension.md) 演进为 `<wd>/.robit/skills` 初始化播种 + 用户自增，仓库 `skills/` 改任播种源；不用 bootstrap_with、全局目录不叠、加载主权留子木的决策不变。）**
 2. **确认关闭、自动执行**：本地 config `[app] auto_approve = true`（robit 官方键）。agent 层跳过全部确认（robit-agent agent.rs:896-930）、QQ Confirmer 直接放行不注册 pending（关键词不再截消息）。write/edit/bash/generate_image 工具层 `requires_confirmation=true` 是 robit 事实，被此键覆盖。**确认回路本轮不承压**，C13 两洞暂不承重（将来若重开确认须先补，robit 修复登记保留）。
 3. **read_image 按需注册**：内核因主模型 `supports_images=true` 强制跳过 read_image（bootstrap.rs:361-371，视其冗余）；子木装配层补条件注册——`resolve_vision_model(&config)` 解析成功即注册 `ReadImageTool`（独立 vision 模型描述图片，与 read 的图像注入分支互补而非冗余），未配 `default_vision_model` 则不在册。全 pub API，宿主装配政策，非绕过框架。
 4. **条件注册与记忆模式**：generate_image 随 image provider 配置（default_image_model 已配 wanxiang，取决于 BAILIAN_API_KEY 解析）；记忆四件不注册（`memory_mode` 缺省 file，memory.md 形态维持，落盘经 write/edit 自动执行）。
