@@ -413,8 +413,19 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
+]
+
+[[package]]
+name = "chrono-tz"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+dependencies = [
+ "chrono",
+ "phf",
 ]
 
 [[package]]
@@ -578,6 +589,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b929dd2a135771f40afabd1073f85eed59c800b7c61901e5c254270497dad64"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "cron"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5877d3fbf742507b66bc2a1945106bd30dd8504019d596901ddd012a4dd01740"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "winnow 0.6.26",
 ]
 
 [[package]]
@@ -2014,6 +2036,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "phf"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+dependencies = [
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
+dependencies = [
+ "siphasher",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2406,14 +2446,17 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d3a336e7c52fc87817f75351c90a894eb912add8315f835f615246bb4d310cb"
+checksum = "aa6605534200f0b28142afa564fb337bd283d5594819e6b588a78827eb5628db"
 dependencies = [
  "anyhow",
  "async-openai",
  "async-trait",
  "base64 0.23.1",
+ "chrono",
+ "chrono-tz",
+ "cron",
  "dirs",
  "encoding_rs",
  "fs2",
@@ -2437,9 +2480,9 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9645f0f764bc2a4692a50174985bd6f7051cd535e7de6ab9fb8620752a365974"
+checksum = "a95e93a86e812371fafeeba8803dcb3cf58417c9fd9ad755228906712f29b52e"
 dependencies = [
  "async-openai",
  "bytes",
@@ -2459,11 +2502,12 @@ dependencies = [
 
 [[package]]
 name = "robit-chatbot"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb0e9b9829da499ccd02a8682772e93ad12a719f8518f9f3e69cbb0e0c160de0"
+checksum = "32d7a169738e7a5d4bb4b5d27b0cb849767e58e7589710732339652129557efa"
 dependencies = [
  "async-trait",
+ "chrono",
  "pulldown-cmark",
  "robit-agent",
  "robit-ai",
@@ -2479,9 +2523,9 @@ dependencies = [
 
 [[package]]
 name = "robit-qq"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9914ee4be13c376f2edd04704e3455b21c13ffb2bacbb999a110b0c1b54e6084"
+checksum = "7b86e246ae6b1b5eefec5c6683f34ef7292f9de9e71e41181ce7fa66b4134f50"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2503,9 +2547,9 @@ dependencies = [
 
 [[package]]
 name = "robit-web"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6db54d64b530b208742c10ad256e6b2d0025fd9bab35e8d0562995b8b8fc8e3a"
+checksum = "470c92b765145b4ce543cea3a83ecd3e29410a9574668b731105c209f61cc57b"
 dependencies = [
  "async-trait",
  "robit-agent",
@@ -2517,9 +2561,9 @@ dependencies = [
 
 [[package]]
 name = "robit-wechat"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "862c11df017f89a4ada2197a8a017698bbddff6c32dfa56807a7405ccec4576a"
+checksum = "a19a39bad506f92ac20748d0bc01ef732e3e4976bbcbc9660bf1f355a22b9019"
 dependencies = [
  "async-trait",
  "clap",
@@ -2890,6 +2934,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "siphasher"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3199,7 +3249,7 @@ dependencies = [
  "toml_datetime",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 1.0.5",
 ]
 
 [[package]]
@@ -3217,7 +3267,7 @@ version = "1.1.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6769c452d71ba30696c6b37770c439a9cc9110f47f7d5cdbeda79840ef5ea31"
 dependencies = [
- "winnow",
+ "winnow 1.0.5",
 ]
 
 [[package]]
@@ -3885,6 +3935,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "0.6.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

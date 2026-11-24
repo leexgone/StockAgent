@@ -103,6 +103,14 @@ docker compose pull && docker compose up -d
 
 - 数据卷原样保留；entrypoint 播种幂等——**卷内人格/config 不会被新版本覆盖**。想采用新版默认人格：对比 `/app/defaults/agent.md` 与卷内 `.robit/prompts/agent.md` 手工合并（或删除卷内文件让 entrypoint 重播种，自定义会丢）。
 - 技能同款语义（ADR-0021）：**卷内 `.robit/skills/` 已有技能目录（含用户自增与改过的系统技能）不会被新版本覆盖**；系统技能新版模板在镜像 `/app/skills/`，想采用新版须删除卷内对应技能目录让应用初始化重播种（自定义会丢）。用户自增技能目录不受升级影响。
+- **计划任务（ADR-0022，robit 0.7.0 M1，仅 IM 通道）**：新装自 example 缺省启用；**既有卷须手工补节**——编辑 `/data/.robit/config.toml` 追加：
+
+  ```toml
+  [app.schedule]
+  enabled = true
+  ```
+
+  然后 `docker compose restart zimu`（播种永不覆盖，升级不会自动加这一节）。启用后微信/QQ 绑定会话可自然语言创建提醒/周期任务 + `/schedule` 直管；Web/CLI 工具如实报不可用（robit M2 另案）。人格计划任务纪律条同款不覆盖语义——可选对照 `/app/defaults/agent.md` 手工合并（工具描述自带核心纪律，不合并也能用）。停用 = `enabled = false` 重启即全关。
 - 版本真值：`/api/health` 的 `version` 字段 = 镜像版本（与 git tag 一致）。
 - 回滚：compose `image:` 钉旧版 tag（如 `ghcr.io/leexgone/zimu:v0.1.0`）重新 up。
 

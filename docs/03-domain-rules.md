@@ -390,6 +390,20 @@ chat 屏「把最后一条推送给我」按钮的**手动转发**口径（与�
 - **超长归 robit 官方透明长度守卫**（R16 落地，robit 0.4.1 `outbound::prepare_outbound`，子木 2026-11-22 升版消费、零 diff；**0.5.1 起同一守卫先做内容投影再分段**——R17 表格线性化：两列表逐行 `键: 值`、N 列表逐记录 `首列 — 表头: 值 · …`，微信/QQ 任何字体下可读，无管道语法残留；投影改变长度故顺序不可反）——三类推送（预警/摘要/问答）统一**全文透传不自截**（ADR-0020，2026-11-23 移除宿主自截层），adapter 直调路径按 caps 强制：**微信**（非编辑平台）最多 **3 段**分段（段边界优先级 `\n\n` > `\n` > 句末（。！？；.!?;）> 空格 > 硬切、窗口前 1/3 的边界拒绝、代码栅栏保护；3 段仍装不下的尾部加 `……（内容过长，已截断）` 标记），每段独立过出站节流（段间隔 ~2s 是正常表现）；任一段失败即放弃余段，adapter 返回已发段成功——**push_log ok=true 意味至少首段送达**，段级失败细节在 robit 日志（warn）。**QQ**（编辑平台）单条截断到 2000 字 + `…` 省略号（保单条编辑模型，不分段——robit 官方语义，与微信不同）。≤cap 文本幂等直通。**子木不在宿主侧复刻分段器、也不自截**（2026-11-21 用户拍板：框架级缺口归 robit，不重复开发；2026-11-23 ADR-0020 移除宿主自截层，长度守卫单源 robit）。
 - 段失败语义：任一段失败即**放弃该 target 余段**（避免错误后继续刷），push_log 如实记失败原因；不重试（ADR-0011）。
 
+### 计划任务（robit schedule，仅 IM 通道，ADR-0022 启用 2026-11-24）
+
+robit 0.7.0 M1 的用户自定义提醒/周期任务（与上节行情预警调度**独立并存**）：主人在绑定 IM 会话里用自然语言创建（「每天 21:00 提醒我复盘」），到点自主触发 agent 回合投递回所属会话。启用 = `[app.schedule] enabled = true`（config.example 缺省 true；既有卷手工补，播种永不覆盖），ChatbotManager 官方接线宿主零代码。
+
+- 触发器三种：`once`（RFC3339 带显式偏移、须未来）/ `interval`（≥ `min_interval_secs` 缺省 60s）/ `cron`（标准 5 段，任务级 IANA 时区，缺省宿主本地 = NAS `Asia/Shanghai`；首两次触发间隔也受最小间隔守卫）。
+- 配额与护栏：`max_active_tasks` 缺省 50/归属；投递重试 `delivery_retries` 缺省 3（退避 5s/30s/120s），终败 `failed` 留痕、任务仍 active（next_run 已推进）。
+- 停机补触发：`missed_policy` 缺省 `latest`——重启后每任务补**最近一次** missed（`catch_up=true`），不风暴补发；`skip` 写 skipped 审计不触发。
+- 投递语义：触发经 `wrap_prompt` 头部行（`[计划任务「{title}」(id=…) 于 {本地时间} 触发（停机补触发）]`）+ `inject_message(chat_id, text, "scheduler")`——绕过斜杠解析、入 IM 档案（source="scheduler"）、回合内工具走正常确认流程（auto_approve=true 直接执行）。`delivered` = 交给通道，**非回合产出成功**；所属会话被空闲清理时自愈重建。
+- 隔离：任务归属键 `(source, namespace[, chat_id])`——QQ/微信 source 不同互不串台；认领事务（条件 UPDATE + claimed 审计同事务）保证同归属双进程也不双触发，崩溃认领启动对账。
+- 管理：IM 直管命令 `/schedule [list|pause|resume|delete <id前缀>]`（前缀歧义拒绝）；工具面 `schedule_create/edit/list/view`（create/edit 须主人明确要求，创建后宣读回执；乐观并发令牌 `expected_updated_at`）。
+- **Web/CLI 不可用**：共享内核注册工具但无调度上下文，调用如实报不可用（robit M2 再接线，人格引导去 IM）。
+- 与行情调度独立：SchedulerCore（zimu.db alerts/equity_snapshots）vs robit Scheduler（robit.db `scheduled_tasks`/`task_runs`，schema v8 自动迁移，task_runs 每任务保留 100 条）；`ZIMU_SCHEDULER_DISABLE` 只停行情调度，计划任务随 `[app.schedule]` 开关。
+- 信任边界（ADR-0022 D3）：任务触发 = 无人值守自主回合，ADR-0014 的时间维延伸——任务只能由主人经绑定会话创建，人格纪律仍是唯一软约束，**自主回合不扩张授权**（破坏性操作仍须主人明示、数字纪律不变）。
+
 ### 常量（改这里 = 改口径，先动 fixture 再动两边实现）
 
 放量倍数 `VOL_SURGE_MULT = 2.0`；均量窗口 20 根、最少有效样本 5 根；转债期限窗口 `CB_DEADLINE_DAYS = 5`（自然日）；盘后链时刻 `15:05`；轮询间隔 60 秒。

@@ -166,6 +166,7 @@ fn test_ctx() -> ToolContext {
         async_runner: AsyncTaskRunner::new(done_tx),
         cancel_token: CancellationToken::new(),
         task_registry: TaskRegistry::new(),
+        schedule: None, // 0.7.0：计划任务未启用（[app.schedule] 缺省关），测试占位即可
     }
 }
 
@@ -1147,4 +1148,48 @@ fn standard_surface_plus_domain_composition_per_adr_0014() {
     }
     assert!(names.contains(&"send_file"), "IM 发文件工具缺位，实有 {names:?}");
     assert_eq!(names.len(), 25, "空配置下应恰 10 标准 + 14 领域 + send_file，实有 {names:?}");
+}
+
+/// ADR-0022：`[app.schedule] enabled=true` 注册计划任务四件，且不受 standard_tools
+/// 白名单排除（系统工具语义，镜像 robit bootstrap 测试）；enabled=false 缺席
+/// （enabled=None 缺席由上方 app:None 的 25 件计数测试承接）。
+#[test]
+fn schedule_tools_register_when_enabled_per_adr_0022() {
+    use robit_ai::{config::ScheduleConfig, AppConfig};
+    let config = RobitConfig {
+        app: Some(AppConfig {
+            schedule: Some(ScheduleConfig {
+                enabled: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..empty_config()
+    };
+    let skills = Arc::new(SkillRegistry::new(vec![], &[]));
+    // 白名单只留 read，schedule 四件仍在册（系统工具不受白名单门控）
+    let whitelist = vec!["read".to_string()];
+    let registry = create_tools_from_config_with(&config, skills, Some(&whitelist));
+    let names = registry.tool_names();
+    for t in ["schedule_create", "schedule_edit", "schedule_list", "schedule_view"] {
+        assert!(names.contains(&t), "schedule 启用应注册 {t}，实有 {names:?}");
+    }
+    assert!(!names.contains(&"bash"), "白名单语义：bash 应被排除");
+
+    // enabled=false → 四件缺席（行为回 0.6.0）
+    let off = RobitConfig {
+        app: Some(AppConfig {
+            schedule: Some(ScheduleConfig {
+                enabled: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..empty_config()
+    };
+    let registry =
+        create_tools_from_config_with(&off, Arc::new(SkillRegistry::new(vec![], &[])), None);
+    for t in ["schedule_create", "schedule_edit", "schedule_list", "schedule_view"] {
+        assert!(!registry.contains(t), "schedule 停用 {t} 应缺席");
+    }
 }

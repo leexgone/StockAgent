@@ -39,11 +39,13 @@ use crate::tools::{register_domain_tools, DOMAIN_TOOL_NAMES};
 use crate::{AgentDeps, SharedStore};
 
 /// robit 标准面可能注册的工具名（tools_required 校验名单用，warn-only）。
-/// 条件件（generate_image 随 key、read_image 随 vision 配置）缺席时仅 warn 不阻断；
+/// 条件件（generate_image 随 key、read_image 随 vision 配置、schedule_* 随
+/// `[app.schedule]` ADR-0022）缺席时仅 warn 不阻断；
 /// 记忆四件不在此列——file 模式维持（ADR-0014），memory_mode="tools" 另案。
-const STANDARD_TOOL_NAMES: [&str; 12] = [
+const STANDARD_TOOL_NAMES: [&str; 16] = [
     "read", "write", "edit", "ls", "find", "grep", "bash", "generate_image", "read_image",
     "load_skill", "search_history", "query_task",
+    "schedule_create", "schedule_edit", "schedule_list", "schedule_view",
 ];
 
 /// 装配产物：三 Arc + 通道无关元数据。日志/展示各宿主自便（server tracing、CLI println）。

@@ -7,6 +7,19 @@ version = "0.1.5"
 edition = "2021"
 
 # 共同演进（P2-T5 回路，见 docs/06-roadmap.md）：robit 全家消费 crates.io 正式版。
+# 0.7.0（2026-11-24）= 计划任务 M1（核心调度 + Bot 接线，设计件
+# robit/docs/robit-rfc-scheduled-tasks.md）：robit-agent schedule 模块（SQLite v8
+# scheduled_tasks/task_runs 审计，v7→v8 自动迁移；once/interval/cron 5 段触发器，
+# 任务级 IANA 时区；事件驱动 Scheduler 零任务零空转、停机补触发 latest/skip、
+# 投递失败退避重试）+ schedule_create/edit/list/view 系统工具（[app.schedule]
+# enabled 门控默认关，不受 enabled_tools 白名单影响）+ robit-chatbot Scheduler
+# 随 ChatbotManager::run 启停、触发经 inject_message 回路（source="scheduler"）
+# + /schedule 直管命令。**不配置 [app.schedule] 时行为与 0.6.0 逐字节一致**，
+# Agent/ChatbotManager 公共 API 零签名变更（with_schedule 为新增 builder）。
+# 子木适配面 = 测试 ToolContext 字面量补 schedule: None（新 pub 字段）；计划任务
+# 功能未启用（缺省关，消费另案拍板——子木自有行情调度引擎，robit 计划任务 =
+# 用户自定义提醒，两者不同物）；rusqlite 维持 0.43 无连带；新增传递依赖
+# cron 0.15 / chrono-tz 0.10（chrono 0.4 已有）。
 # 0.6.0（2026-11-23）= Bot 忙碌状态信号（typing）统一抽象 + PlatformCaps 一次性
 # 破坏加固（设计件 robit/docs/robit-rfc-bot-typing-design.md，W-D 终态/路径 B）：
 # chatbot 层 typing 钩子（trait 新方法带默认 no-op 实现，运行时行为零变化，
@@ -82,17 +95,17 @@ edition = "2021"
 # 升级版本前先想 robit 那边的节奏，约定见 CLAUDE.md；开发期可临时改回
 # git = "https://github.com/leexgone/robit", tag/rev = … 消费未发布改动。
 [workspace.dependencies]
-robit-ai = "0.6.0"
-robit-agent = "0.6.0"
-robit-web = "0.6.0"
+robit-ai = "0.7.0"
+robit-agent = "0.7.0"
+robit-web = "0.7.0"
 # PR3/T5 QQ 通道（ADR-0011）：robit-chatbot 平台无关基座（ChatbotManager/PlatformAdapter）
 # + robit-qq 平台 adapter（lib 面消费，二进制不复用）。
 # rusqlite 0.43 对齐由 robit-agent 传递依赖保证（libsqlite3-sys links 单例）。
-robit-chatbot = "0.6.0"
-robit-qq = "0.6.0"
+robit-chatbot = "0.7.0"
+robit-qq = "0.7.0"
 # P6-T2 微信通道（ADR-0017）：robit-wechat iLink Bot adapter（lib 面消费，
 # 登录走部署侧 CLI `robit-wechat login`，bin 不复用）。
-robit-wechat = "0.6.0"
+robit-wechat = "0.7.0"
 # [zimu.channels] 通道开关解析（拍板⑥）：robit 类型化 Config 不认识子木自有节、
 # 会静默忽略——子木侧对同一份 config.toml 做 raw 解析，两处读同一文件互不冲突。
 toml = "1.2"

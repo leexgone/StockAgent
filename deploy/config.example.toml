@@ -75,3 +75,18 @@ global_storage = false
 max_steps = 20
 log_level = "info"
 log_file = true
+
+# ── 计划任务（robit 0.7.0 M1，ADR-0022 启用，仅 IM 通道生效）──
+# ChatbotManager 官方接线：enabled=true 即自启停调度器、逐会话挂上下文，宿主零代码。
+# 微信/QQ 绑定会话可自然语言创建提醒/周期任务 + /schedule 直管；Web/CLI 工具注册
+# 但无调度上下文，调用如实报不可用（robit M2 另案）。任务触发 = 无人值守自主回合，
+# auto_approve=true 下创建/编辑直接执行（信任边界明示于 ADR-0022：绑定白名单 +
+# 人格纪律承接，自主回合不扩张授权）。其余字段吃 robit 缺省：
+#   missed_policy = "latest"   停机补触发：重启后每任务补最近一次 missed，不风暴
+#   min_interval_secs = 60     interval/cron 最小触发间隔
+#   max_active_tasks = 50      每归属（source,namespace,chat_id）活跃任务上限
+#   delivery_retries = 3       投递失败退避重试 5s/30s/120s，终败留痕任务仍 active
+# 停用 = enabled = false 重启即全关（工具不注册、调度器不启）。
+# 注意：既有卷 config 永不覆盖——升级后启用须手工补本节再重启（docs/08 §6）。
+[app.schedule]
+enabled = true

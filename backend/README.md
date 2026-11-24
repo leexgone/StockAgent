@@ -65,14 +65,14 @@ read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent medi
 （R12 诉求上游公开）；axum 因此启用 `multipart` feature。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.6.0 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.7.0 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
 宿主循环只兜残余退出。health 透出 `qq_online`。
 
 微信 IM 通道（P6-T2，ADR-0017 / C4 关闭）：`[zimu.channels].wechat = true` 时挂
-`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.6.0 库面消费）——
+`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.7.0 库面消费）——
 微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
 长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
 `(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
@@ -90,7 +90,7 @@ health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快�
 ```powershell
 # 先停 zimu-server——WechatState::save 非原子整文件覆盖且运行中无互斥，
 # 健康期并发登录写入的新 token 会被 adapter 旧内存快照覆盖（ADR-0017 D3 / R13④）
-cargo install robit-wechat --version 0.6.0   # 或 robit 仓 cargo run -p robit-wechat -- login
+cargo install robit-wechat --version 0.7.0   # 或 robit 仓 cargo run -p robit-wechat -- login
 robit-wechat -w e:\Github\StockAgent\backend login   # 终端二维码 + 配对码，一次性换长期 token
 # 0.3.1 起 login 支持 Ctrl+C 取消（不写半成品 state 文件）
 # 产物 backend/.robit/wechat-state.json（含 bot_token 凭据，已被 **/.robit/* gitignore
@@ -155,6 +155,12 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `finalize_advice` | 写 advice_history 文案列 | 模型文案只回填 reason/risks（risks 至少一条，03 §10）——**数字不经模型转写**（ADR-0007 结构性保证） |
 | `echo` | 只读 | P2-T2 链路验证保留（网关排查不依赖数据） |
 | `send_file` | IM 出站 | 发本地文件/图片给用户（ADR-0017 D9，robit-chatbot SendFileTool）：平台扩展自守卫——QQ 真实 CDN 上传、微信 SDK send_media；Web/CLI 无平台扩展调用如实报错，无副作用 |
+| `schedule_create` | 写任务库（仅 IM） | 创建提醒/周期任务（ADR-0022，robit 0.7.0 M1）：once/interval/cron 触发器、任务级 IANA 时区；主人明确要求才创建、创建后宣读回执；auto_approve 下直接执行 |
+| `schedule_edit` | 写任务库（仅 IM） | 修改/暂停/恢复/删除任务（乐观并发令牌 `expected_updated_at`，冲突如实报错） |
+| `schedule_list` | 只读（仅 IM） | 列当前会话归属的任务（状态过滤/分页，输出含并发令牌） |
+| `schedule_view` | 只读（仅 IM） | 任务详情 + 最近 10 条执行审计（task_runs） |
+
+计划任务四件随 `[app.schedule] enabled` 条件注册（缺省关；子木 config.example 缺省启用，ADR-0022），不受 `enabled_tools` 白名单影响（系统工具语义）；**仅 IM 通道有调度上下文**——Web/CLI 调用如实报不可用（robit M2 另案）。IM 直管命令 `/schedule [list|pause|resume|delete <id前缀>]`；口径见 docs/03 §12 计划任务小节。
 
 Skill 系统模板在**仓库根 `skills/`**（robit SKILL.md 约定：YAML frontmatter +
 Markdown 正文；`/触发词` 命中时正文以临时 system message 注入本轮），是
@@ -382,7 +388,26 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.6.0`（0.6.0 = Bot 忙碌状态信号（typing）
+robit 全家消费 crates.io 正式版 `0.7.0`（0.7.0 = 计划任务 M1（核心调度 +
+Bot 接线），2026-11-24 发版，设计件 `robit/docs/robit-rfc-scheduled-tasks.md`：
+robit-agent schedule 模块（SQLite v8 scheduled_tasks/task_runs 审计，v7→v8
+自动迁移；once/interval/cron 5 段触发器，任务级 IANA 时区；事件驱动 Scheduler
+零任务零空转、停机补触发 latest/skip、投递失败退避重试 5s/30s/120s）+
+schedule_create/edit/list/view 系统工具（`[app.schedule] enabled` 门控默认关，
+不受 enabled_tools 白名单影响，create/edit 需用户确认）+ robit-chatbot
+Scheduler 随 `ChatbotManager::run` 启停、触发经 mpsc 回路复用 inject_message
+（档案 source="scheduler"，绕过斜杠解析）+ `/schedule` 直管命令。
+**不配置 [app.schedule] 时行为与 0.6.0 逐字节一致**，Agent/ChatbotManager
+公共 API 零签名变更（with_schedule 为新增 builder）。子木适配面 = 测试
+ToolContext 字面量补 `schedule: None`（新 pub 字段）；rusqlite 维持 0.43 无连带；
+新增传递依赖 cron 0.15 / chrono-tz 0.10（chrono 0.4 已有）。
+**计划任务已启用消费（ADR-0022，2026-11-24，仅 IM 通道）**：config-only——
+`[app.schedule] enabled=true`（config.example 缺省启用；既有 NAS 卷手工补节，
+播种永不覆盖），ChatbotManager 官方接线自启停调度器/逐会话挂上下文，宿主零代码；
+Web/CLI 工具注册但无调度上下文如实报不可用（robit M2 另案，不预建自接线）；
+任务触发 = 无人值守自主回合，信任边界明示于 ADR-0022（绑定白名单 + 人格纪律承接，
+自主回合不扩张授权）；口径见 docs/03 §12 计划任务小节。
+上一版 0.6.0（Bot 忙碌状态信号（typing）
 统一抽象 + PlatformCaps 一次性破坏加固，2026-11-23 发版，设计件
 `robit/docs/robit-rfc-bot-typing-design.md`：chatbot 层 typing 钩子 trait 新方法
 带默认 no-op 实现——**运行时行为零变化**，无平台启用；微信 typing 实际实现
@@ -532,7 +557,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.6.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.7.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）
@@ -557,7 +582,7 @@ crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill
                             ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链；P4-T7 增 detailed 变体供调度器复用——多回 quote 原始行，wire 契约不变）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
                             ├─ scheduler.rs      调度与预警引擎（P4-T7 + B13，03 §12 纯编排：tick(now) 时刻注入可测、盘中轮询判定落 alerts（持仓 + 自选无持仓形态）、日级缓存（kline 量窗口/cb_list）、15:05 快照 + /复盘 触发 + push_log）
                             ├─ skills.rs         Skill 播种源解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ 应用初始化播种进 <wd>/.robit/skills（缺则播种永不覆盖，ADR-0021）+ robit loader 接线
-                            └─ tests/            tools.rs 27 项（黄金向量端到端/留档/降级/Skill 完整性 + 播种五例（ADR-0021：用户自增/永不覆盖/幂等/源缺失/附属文件）/写账本九例/注册面组成）· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
+                            └─ tests/            tools.rs 28 项（黄金向量端到端/留档/降级/Skill 完整性 + 播种五例（ADR-0021：用户自增/永不覆盖/幂等/源缺失/附属文件）/写账本九例/注册面组成 + schedule 注册（ADR-0022））· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
                             └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 108 用例）

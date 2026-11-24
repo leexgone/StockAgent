@@ -43,6 +43,9 @@ fn persona_prompt_present_and_opens_with_zimu_identity() {
         "bash",
         ".env",
         "直写",
+        // ADR-0022 计划任务纪律（仅 IM 生效 + 自主回合授权不扩张）
+        "计划任务",
+        "自主回合",
     ] {
         assert!(text.contains(must), "人格提示词缺关键边界句：{must}");
     }
