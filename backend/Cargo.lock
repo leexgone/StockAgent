@@ -4068,7 +4068,7 @@ dependencies = [
 
 [[package]]
 name = "zimu-agent"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4090,7 +4090,7 @@ dependencies = [
 
 [[package]]
 name = "zimu-agent-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "zimu-domain"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -4117,7 +4117,7 @@ dependencies = [
 
 [[package]]
 name = "zimu-market"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4131,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "zimu-server"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4165,7 +4165,7 @@ dependencies = [
 
 [[package]]
 name = "zimu-store"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "rusqlite",
