@@ -81,10 +81,13 @@ impl RecorderCore {
                     .to_string(),
                 });
             }
-            // 通知/确认/异常帧不进档案（error 不清缓冲：半截正文留给后续定稿）
+            // 通知/确认/异常帧不进档案（error 不清缓冲：半截正文留给后续定稿）；
+            // ScheduledTaskFired 为 0.8.0 新通知帧——Web 侧无计划任务接线（ADR-0022
+            // 补记），正常不会出现，穷举 match 补臂归不入库组
             WebEvent::SkillTriggered { .. }
             | WebEvent::ConfirmRequest { .. }
             | WebEvent::AsyncToolCompleted { .. }
+            | WebEvent::ScheduledTaskFired { .. }
             | WebEvent::Error { .. } => {}
             WebEvent::TurnComplete => {
                 // 兜底：本轮结束仍无结果的调用（异常轮/被取消轮）按展示行落档，

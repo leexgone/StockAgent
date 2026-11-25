@@ -37,3 +37,9 @@ robit 0.7.0（2026-11-24 发版）落地计划任务 M1（设计件 `robit/docs/
 - 注册面 +4（schedule_* 随配置），工具数文案连带（26–32 随配置）。
 
 **以后要改回来得动哪里**：config.example.toml 与 dev config 删 `[app.schedule]` 节（或 enabled=false）、人格删计划任务纪律条、assembly STANDARD_TOOL_NAMES 还原 12、docs/03 §12 计划任务小节与 02/08 注记还原，并置本 ADR 已取代。Web 接线消费（robit M2 发布后）另案拍板。
+
+## 补记（2026-11-25，robit 0.8.0）
+
+- **robit 0.8.0 发布计划任务 M2/M3**：M2 = GUI/Web 接线（`FrontendMessage::ScheduledInput` + `WebBridge::send_scheduled_input` / `schedule_delivery()` 官方 Web 投递件 + `scheduled_task_fired` wire 帧 + `Agent::with_schedule` 起向系统提示词幂等追加计划任务纪律段）；M3 = GUI 管理面板（Tauri 抽屉，与子木无关）。TUI 接线已取消。D1 当时预留的前提（「Web 接线等 robit M2 官方发布再消费」）**兑现**。
+- **用户拍板：不消费 M2，仅 IM 口径不变**——Web 屏接计划任务涉及前端触发提示渲染、会话档案 source 语义、Web 无 `chat_id` 面等一整套屏级设计，非顺带升级；维持「Web/CLI 如实报不可用」，扩展归另案（届时修订本 ADR）。
+- 0.8.0 升版连带（非本 ADR 领地，仅记录）：LLM 超时/重试修复——IM 通道 ChatbotManager 内部自动接 `[app.retry]`（零宿主代码），Web 桥与 CLI 经 `AgentCore::retry_settings()` 显式接线；两处穷举 match 补臂（zimu-agent-cli / chat_record）。子木自有 Agent 自此获得挂起请求超时释放与瞬时错误退避重试。

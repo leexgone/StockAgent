@@ -160,6 +160,9 @@ pub fn spawn_agent(
     let memory = core.memory()?;
     let context_config = core.context_config();
     let context_window = core.context_window();
+    // 0.8.0：[app.retry] LLM 超时/重试策略——Web 桥自有 Agent 显式接线
+    // （IM 通道由 ChatbotManager 内部同款接线，manager.rs）
+    let retry = core.retry_settings();
     let working_dir = core.working_dir.clone();
     // ADR-0015：bridge 留一份 working_dir 供附件标注 base（本体 move 进 Agent 构造）
     let working_dir_for_bridge = working_dir.clone();
@@ -215,6 +218,7 @@ pub fn spawn_agent(
                 memory,
                 None, // custom_prompt（0.2.0/H6）：Web 桥维持 agent.md 查找路径，人格注入另案拍板
             )
+            .with_retry_settings(retry)
         } else {
             Agent::with_history(
                 core.client,
@@ -231,6 +235,7 @@ pub fn spawn_agent(
                 memory,
                 None, // custom_prompt（0.2.0/H6）：同上
             )
+            .with_retry_settings(retry)
         };
         agent.run(message_rx).await;
         tracing::warn!("Agent 运行循环已退出（/api/chat 将返回 503）");

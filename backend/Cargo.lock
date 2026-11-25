@@ -2446,9 +2446,9 @@ dependencies = [
 
 [[package]]
 name = "robit-agent"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa6605534200f0b28142afa564fb337bd283d5594819e6b588a78827eb5628db"
+checksum = "52d589b0f6dde9cccad1fa7dbf7c2ca1c17a4e559a40407752b3433cb02658aa"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2480,9 +2480,9 @@ dependencies = [
 
 [[package]]
 name = "robit-ai"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95e93a86e812371fafeeba8803dcb3cf58417c9fd9ad755228906712f29b52e"
+checksum = "afbfb6bb487a8c52d687cf3fa07efae59a7ebfe28c069843db0cf9fd6546c3c0"
 dependencies = [
  "async-openai",
  "bytes",
@@ -2502,9 +2502,9 @@ dependencies = [
 
 [[package]]
 name = "robit-chatbot"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32d7a169738e7a5d4bb4b5d27b0cb849767e58e7589710732339652129557efa"
+checksum = "f92670b34d580b69b537004f7603eb994f56d4aa41417fd1ccc3c2a756ae0a0d"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2523,9 +2523,9 @@ dependencies = [
 
 [[package]]
 name = "robit-qq"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b86e246ae6b1b5eefec5c6683f34ef7292f9de9e71e41181ce7fa66b4134f50"
+checksum = "1236a5abe40bd23f229906f15bc099297478ab3fa7d8db6fb003e9df8cfa98e4"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2547,9 +2547,9 @@ dependencies = [
 
 [[package]]
 name = "robit-web"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "470c92b765145b4ce543cea3a83ecd3e29410a9574668b731105c209f61cc57b"
+checksum = "516e2d9c790bc78f03f124bf242a6db65d5e0b5c5f54165dbabd2b33557f91a5"
 dependencies = [
  "async-trait",
  "robit-agent",
@@ -2561,9 +2561,9 @@ dependencies = [
 
 [[package]]
 name = "robit-wechat"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a19a39bad506f92ac20748d0bc01ef732e3e4976bbcbc9660bf1f355a22b9019"
+checksum = "d9601f3e36a14fd9c849c6a9b7b6da1a595ed54662ae58d7cb929d2b66f10ec2"
 dependencies = [
  "async-trait",
  "clap",

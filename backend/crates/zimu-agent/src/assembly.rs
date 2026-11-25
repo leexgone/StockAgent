@@ -27,8 +27,8 @@ use anyhow::Context;
 use robit_agent::storage::{init_db, resolve_db_path};
 use robit_agent::tool::read_image::ReadImageTool;
 use robit_agent::{
-    create_tools_from_config_with, resolve_memory_settings, MemorySettings, SkillRegistry,
-    ToolRegistry,
+    create_tools_from_config_with, resolve_memory_settings, MemorySettings, RetrySettings,
+    SkillRegistry, ToolRegistry,
 };
 use robit_chatbot::tool::SendFileTool;
 use robit_ai::{resolve_vision_model, ContextConfig, LlmClient, RobitConfig};
@@ -195,6 +195,13 @@ impl AgentCore {
     /// Agent::new 的 context_config 参数源（Clone 出来再 move core，避开借用/部分移动冲突）。
     pub fn context_config(&self) -> Option<ContextConfig> {
         self.config.app.as_ref().and_then(|a| a.context.as_ref()).cloned()
+    }
+
+    /// `[app.retry]` 解析结果（robit 0.8.0：LLM 超时/重试策略，缺节取文档默认）。
+    /// 宿主在自有 Agent 构造上链 `.with_retry_settings(core.retry_settings())`——
+    /// IM 通道由 ChatbotManager 内部同款接线（manager.rs），此处覆盖 Web 桥与 CLI。
+    pub fn retry_settings(&self) -> RetrySettings {
+        RetrySettings::from_config(self.config.app.as_ref().and_then(|a| a.retry.as_ref()))
     }
 
     pub fn context_window(&self) -> Option<u64> {

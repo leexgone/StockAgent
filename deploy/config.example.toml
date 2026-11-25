@@ -79,7 +79,7 @@ log_file = true
 # ── 计划任务（robit 0.7.0 M1，ADR-0022 启用，仅 IM 通道生效）──
 # ChatbotManager 官方接线：enabled=true 即自启停调度器、逐会话挂上下文，宿主零代码。
 # 微信/QQ 绑定会话可自然语言创建提醒/周期任务 + /schedule 直管；Web/CLI 工具注册
-# 但无调度上下文，调用如实报不可用（robit M2 另案）。任务触发 = 无人值守自主回合，
+# 但无调度上下文，调用如实报不可用（robit 0.8.0 的 M2 Web 接线件不消费，ADR-0022 补记）。任务触发 = 无人值守自主回合，
 # auto_approve=true 下创建/编辑直接执行（信任边界明示于 ADR-0022：绑定白名单 +
 # 人格纪律承接，自主回合不扩张授权）。其余字段吃 robit 缺省：
 #   missed_policy = "latest"   停机补触发：重启后每任务补最近一次 missed，不风暴
@@ -90,3 +90,14 @@ log_file = true
 # 注意：既有卷 config 永不覆盖——升级后启用须手工补本节再重启（docs/08 §6）。
 [app.schedule]
 enabled = true
+
+# ── LLM 超时/重试（robit 0.8.0 起真正生效；缺节 = 文档默认，无需配置）──
+# 挂起请求防护三层：传输层 reqwest 固定超时（connect 10s / read 90s / keepalive 30s）、
+# 调用层首包 60s + SSE chunk 90s 空闲守卫（转 LlmError::Timeout，释放卡死循环）——
+# 这两层不吃本配置；本节只管瞬时错误（超时/连接失败/5xx/408/429）的退避重试。
+# 已流式输出后不再重试（避免重复文本）。IM 通道由 ChatbotManager 自动读取，
+# Web 桥/CLI 经 AgentCore::retry_settings() 接线——三处同节生效。
+# [app.retry]
+# max_retries = 3            # 首试之外的重试次数（默认 3 → 至多 4 次尝试）
+# initial_backoff_ms = 1000  # 首次退避（指数翻倍）
+# max_backoff_ms = 30000     # 退避封顶

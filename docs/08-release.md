@@ -110,7 +110,8 @@ docker compose pull && docker compose up -d
   enabled = true
   ```
 
-  然后 `docker compose restart zimu`（播种永不覆盖，升级不会自动加这一节）。启用后微信/QQ 绑定会话可自然语言创建提醒/周期任务 + `/schedule` 直管；Web/CLI 工具如实报不可用（robit M2 另案）。人格计划任务纪律条同款不覆盖语义——可选对照 `/app/defaults/agent.md` 手工合并（工具描述自带核心纪律，不合并也能用）。停用 = `enabled = false` 重启即全关。
+  然后 `docker compose restart zimu`（播种永不覆盖，升级不会自动加这一节）。启用后微信/QQ 绑定会话可自然语言创建提醒/周期任务 + `/schedule` 直管；Web/CLI 工具如实报不可用（robit 0.8.0 的 M2 Web 接线件不消费，ADR-0022 补记）。人格计划任务纪律条同款不覆盖语义——可选对照 `/app/defaults/agent.md` 手工合并（工具描述自带核心纪律，不合并也能用）。停用 = `enabled = false` 重启即全关。
+- **LLM 超时/重试（robit 0.8.0 起）**：默认生效、**无需任何动作**——挂起请求不再永久卡死（首包 60s / 流空闲 90s 守卫 + 瞬时错误退避重试 3 次）。想自定义重试参数可在卷内 config 追加可选节 `[app.retry]`（`max_retries` / `initial_backoff_ms` / `max_backoff_ms`，缺省即文档默认；超时两层为固定值不吃配置）。
 - 版本真值：`/api/health` 的 `version` 字段 = 镜像版本（与 git tag 一致）。
 - 回滚：compose `image:` 钉旧版 tag（如 `ghcr.io/leexgone/zimu:v0.1.0`）重新 up。
 

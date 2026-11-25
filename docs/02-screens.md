@@ -117,7 +117,7 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 发送失败如实报因；细节留痕 `push_log`（kind `chat_push`，最近会话卡可见）。
 
 计划任务（提醒/周期）**仅 IM 通道可用**（ADR-0022）：Web 会话调用 `schedule_*` 工具
-如实报不可用（robit M2 再接线），人格引导主人去微信/QQ 绑定会话创建。
+如实报不可用（robit 0.8.0 的 M2 官方 Web 接线件已发布但子木不消费，ADR-0022 补记），人格引导主人去微信/QQ 绑定会话创建。
 
 生产侧深链契约（frontend ChatView/ChatPanel）：`/chat?q=<问题>` 只**预填输入不自动发送**
 （真实 LLM，交用户确认——全局搜索回车、analysis「就这只问我」走此形态）；
@@ -203,6 +203,6 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 
 页头「发送测试推送」**禁用 + hint**（测试推送端点另案——新增 = 新契约面 + 无鉴权服务上的真实发送滥用面，超出本轮范围）。屏挂载即 load bindings/health/pushLog + 屏内 60s 轮询（卸载清理）。状态色 B5：已绑定/在线一律绿 `--ok`、离线/未绑定 warn，绝不用红；`--accent` ≤2（仅绑定提交 btn-primary）；空账户六卡不报错。
 
-IM 会话命令面（robit 自持，非本子木界面；ADR-0022，2026-11-24）：绑定会话里自然语言创建计划任务（提醒/周期，`schedule_*` 工具，**仅 IM 生效**）+ `/schedule [list|pause|resume|delete <id前缀>]` 直管（robit 0.7.0 M1）；口径见 03 §12 计划任务小节。Web 侧 `schedule_*` 如实报不可用（robit M2 另案）。
+IM 会话命令面（robit 自持，非本子木界面；ADR-0022，2026-11-24）：绑定会话里自然语言创建计划任务（提醒/周期，`schedule_*` 工具，**仅 IM 生效**）+ `/schedule [list|pause|resume|delete <id前缀>]` 直管（robit 0.7.0 M1）；口径见 03 §12 计划任务小节。Web 侧 `schedule_*` 如实报不可用（robit 0.8.0 已发布 M2 Web 接线件，子木不消费，ADR-0022 补记）。
 
 **原型语义作废清单**（`design/wechat.html` 冻结参照，生产不实现）：主通道失败自动改备用重试一次（生产推送失败不自动重试，ADR-0011）、服务号参数输入与校验、演示二维码 + TTL 换码（登录 = 部署侧 CLI 扫码）、浏览器桌面通知备用通道、推送卡片按钮（微信纯文本）、「推送内容包含具体价格」开关与 6 类订阅开关（C15 另案）。原型 `localStorage['zimu:wechat:v2']` 状态键不入生产（绑定落 zimu.db、订阅待 C15、屏无本地状态）。密钥类字段永远不进仓库（`.gitignore` 已覆盖 `.env`/`secrets.*`；`wechat-state.json` 含凭据已被 `**/.robit/*` 覆盖，不加豁免）。

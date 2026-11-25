@@ -124,6 +124,7 @@ fn main() -> anyhow::Result<()> {
     let memory = core.memory()?;
     let context_config = core.context_config();
     let context_window = core.context_window();
+    let retry = core.retry_settings(); // 0.8.0：[app.retry] LLM 超时/重试策略
     let agent = Agent::new(
         core.client,
         core.tools,
@@ -136,7 +137,8 @@ fn main() -> anyhow::Result<()> {
         HashMap::new(),
         memory,
         None, // custom_prompt（0.2.0/H6）：调试 REPL 维持 agent.md 查找路径
-    );
+    )
+    .with_retry_settings(retry);
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -295,6 +297,11 @@ fn render_event(event: &AgentEvent, in_thinking: &mut bool) {
                 "\n[异步任务完成] task_id={} tool_call_id={} is_error={}",
                 task_id, tool_call_id, result.is_error
             );
+        }
+        // 0.8.0 新变体（穷举 match 补臂，0.1.28 先例）：调试 REPL 无调度接线，
+        // 正常不会出现；如实打印触发提示（robit example 同款）。
+        AgentEvent::ScheduledTaskFired { task_id, title } => {
+            println!("\n[计划任务触发] {title} (id={task_id})");
         }
     }
 }

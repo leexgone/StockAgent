@@ -166,7 +166,7 @@ fn test_ctx() -> ToolContext {
         async_runner: AsyncTaskRunner::new(done_tx),
         cancel_token: CancellationToken::new(),
         task_registry: TaskRegistry::new(),
-        schedule: None, // 0.7.0：计划任务未启用（[app.schedule] 缺省关），测试占位即可
+        schedule: None, // 0.7.0 增字段：计划任务仅 IM 通道启用（ADR-0022），测试占位即可
     }
 }
 

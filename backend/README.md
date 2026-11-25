@@ -65,14 +65,14 @@ read/bash 自动解析，ADR-0014）。落盘卫生规则复刻 robit-agent medi
 （R12 诉求上游公开）；axum 因此启用 `multipart` feature。
 
 QQ IM 通道（P7-T2/T5，ADR-0011）：`[zimu.channels].qq = true` 时 zimu-server 内
-挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.7.0 库面消费，
+挂 `ChatbotManager<BoundOnly<QqPlatformAdapter>>`（robit-chatbot 0.8.0 库面消费，
 robit-qq 二进制不复用）——缺省停用 fail-closed；入站过绑定白名单（`channel_bindings`
 表，未绑定静默丢弃 + 日志留 chat_id），出站推送（T6：预警 + 15:05 净值摘要，
 文案过 QQ markdown 清洗、逐目标 push_log）；重连归 adapter 内置 supervisor，
 宿主循环只兜残余退出。health 透出 `qq_online`。
 
 微信 IM 通道（P6-T2，ADR-0017 / C4 关闭）：`[zimu.channels].wechat = true` 时挂
-`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.7.0 库面消费）——
+`ChatbotManager<BoundOnly<WechatPlatformAdapter>>`（robit-wechat 0.8.0 库面消费）——
 微信官方 **iLink AI Bot**（1:1 私聊，chat_id 恒 `private:{ilink_user_id}`；出站
 长轮询**无需公网回调**）。与 QQ 同 working_dir 共 robit.db，会话按
 `(chat_id, source, namespace)` 隔离（R8④ 收口，不拆目录——人格/记忆跨通道同源）；
@@ -90,7 +90,7 @@ health 透出 `wechat_online` + `qq_enabled`/`wechat_enabled`（启动开关快�
 ```powershell
 # 先停 zimu-server——WechatState::save 非原子整文件覆盖且运行中无互斥，
 # 健康期并发登录写入的新 token 会被 adapter 旧内存快照覆盖（ADR-0017 D3 / R13④）
-cargo install robit-wechat --version 0.7.0   # 或 robit 仓 cargo run -p robit-wechat -- login
+cargo install robit-wechat --version 0.8.0   # 或 robit 仓 cargo run -p robit-wechat -- login
 robit-wechat -w e:\Github\StockAgent\backend login   # 终端二维码 + 配对码，一次性换长期 token
 # 0.3.1 起 login 支持 Ctrl+C 取消（不写半成品 state 文件）
 # 产物 backend/.robit/wechat-state.json（含 bot_token 凭据，已被 **/.robit/* gitignore
@@ -160,7 +160,7 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `schedule_list` | 只读（仅 IM） | 列当前会话归属的任务（状态过滤/分页，输出含并发令牌） |
 | `schedule_view` | 只读（仅 IM） | 任务详情 + 最近 10 条执行审计（task_runs） |
 
-计划任务四件随 `[app.schedule] enabled` 条件注册（缺省关；子木 config.example 缺省启用，ADR-0022），不受 `enabled_tools` 白名单影响（系统工具语义）；**仅 IM 通道有调度上下文**——Web/CLI 调用如实报不可用（robit M2 另案）。IM 直管命令 `/schedule [list|pause|resume|delete <id前缀>]`；口径见 docs/03 §12 计划任务小节。
+计划任务四件随 `[app.schedule] enabled` 条件注册（缺省关；子木 config.example 缺省启用，ADR-0022），不受 `enabled_tools` 白名单影响（系统工具语义）；**仅 IM 通道有调度上下文**——Web/CLI 调用如实报不可用（robit 0.8.0 的 M2 Web 接线件不消费，ADR-0022 补记）。IM 直管命令 `/schedule [list|pause|resume|delete <id前缀>]`；口径见 docs/03 §12 计划任务小节。
 
 Skill 系统模板在**仓库根 `skills/`**（robit SKILL.md 约定：YAML frontmatter +
 Markdown 正文；`/触发词` 命中时正文以临时 system message 注入本轮），是
@@ -388,25 +388,32 @@ COALESCE 语义——`None` 字段保持原值（数据层配置的 ETF `limit_p
 
 ## 运行 zimu-agent-cli（调试 REPL）
 
-robit 全家消费 crates.io 正式版 `0.7.0`（0.7.0 = 计划任务 M1（核心调度 +
-Bot 接线），2026-11-24 发版，设计件 `robit/docs/robit-rfc-scheduled-tasks.md`：
-robit-agent schedule 模块（SQLite v8 scheduled_tasks/task_runs 审计，v7→v8
-自动迁移；once/interval/cron 5 段触发器，任务级 IANA 时区；事件驱动 Scheduler
-零任务零空转、停机补触发 latest/skip、投递失败退避重试 5s/30s/120s）+
-schedule_create/edit/list/view 系统工具（`[app.schedule] enabled` 门控默认关，
-不受 enabled_tools 白名单影响，create/edit 需用户确认）+ robit-chatbot
-Scheduler 随 `ChatbotManager::run` 启停、触发经 mpsc 回路复用 inject_message
-（档案 source="scheduler"，绕过斜杠解析）+ `/schedule` 直管命令。
-**不配置 [app.schedule] 时行为与 0.6.0 逐字节一致**，Agent/ChatbotManager
-公共 API 零签名变更（with_schedule 为新增 builder）。子木适配面 = 测试
-ToolContext 字面量补 `schedule: None`（新 pub 字段）；rusqlite 维持 0.43 无连带；
-新增传递依赖 cron 0.15 / chrono-tz 0.10（chrono 0.4 已有）。
-**计划任务已启用消费（ADR-0022，2026-11-24，仅 IM 通道）**：config-only——
-`[app.schedule] enabled=true`（config.example 缺省启用；既有 NAS 卷手工补节，
-播种永不覆盖），ChatbotManager 官方接线自启停调度器/逐会话挂上下文，宿主零代码；
-Web/CLI 工具注册但无调度上下文如实报不可用（robit M2 另案，不预建自接线）；
-任务触发 = 无人值守自主回合，信任边界明示于 ADR-0022（绑定白名单 + 人格纪律承接，
-自主回合不扩张授权）；口径见 docs/03 §12 计划任务小节。
+robit 全家消费 crates.io 正式版 `0.8.0`（0.8.0 = 计划任务 M2/M3（GUI/Web 接线 +
+GUI 管理面板，TUI 取消）+ LLM 请求挂起修复，2026-11-25 发版）：传输层 reqwest
+超时（connect 10s / read 90s / pool_idle 15s / keepalive 30s）+ 调用层首包 60s、
+SSE chunk 90s 空闲守卫转 `LlmError::Timeout` 释放卡死循环 + `[app.retry]` 配置节
+**自此真正生效**（`robit_agent::retry` 指数退避，默认 3 次 1s→30s 封顶，已流式
+输出后不再重试；宿主经新增 builder `Agent::with_retry_settings` 接线）。IM 侧
+ChatbotManager 内部自接 `[app.retry]`（宿主零代码），Web 桥/CLI 经
+`AgentCore::retry_settings()` 接线。计划任务面 additive：新变体
+`AgentEvent`/`WebEvent::ScheduledTaskFired`、`FrontendMessage::ScheduledInput`、
+wire 帧 `scheduled_task_fired`；robit-web 官方 Web 接线件
+`WebBridge::send_scheduled_input` / `schedule_delivery()`——**M2 接线件不消费**
+（ADR-0022 补记 2026-11-25：IM-only 口径不变，Web 扩展另案拍板）；
+`with_schedule` 起向系统提示词幂等追加计划任务纪律段（IM 会话生效）。子木适配面 =
+两处穷举 match 补臂（zimu-agent-cli 事件渲染 / zimu-server chat_record，0.1.28
+补臂先例）+ retry 接线（装配线 accessor 一处、构造点三处）；rusqlite 维持 0.43、
+无新增传递依赖；**运行时行为有别于 0.7.0**——挂起请求不再永久卡死而是超时报错
+（2026-11-25 robit-qq 线上事故的修复方向，非配置门控）。
+上一版 0.7.0（计划任务 M1：核心调度 + Bot 接线，2026-11-24 发版，设计件
+`robit/docs/robit-rfc-scheduled-tasks.md`——SQLite v8 + once/interval/cron
+触发器 + schedule_* 四件系统工具 + `/schedule` 直管命令；不配置 `[app.schedule]`
+时行为与 0.6.0 逐字节一致）同日已启用消费（**ADR-0022，仅 IM 通道**）：
+config-only——`[app.schedule] enabled=true`（config.example 缺省启用；既有 NAS
+卷手工补节，播种永不覆盖），ChatbotManager 官方接线自启停调度器/逐会话挂上下文，
+宿主零代码；Web/CLI 工具注册但无调度上下文如实报不可用；任务触发 = 无人值守
+自主回合，信任边界明示于 ADR-0022（绑定白名单 + 人格纪律承接，自主回合不扩张
+授权）；口径见 docs/03 §12 计划任务小节。
 上一版 0.6.0（Bot 忙碌状态信号（typing）
 统一抽象 + PlatformCaps 一次性破坏加固，2026-11-23 发版，设计件
 `robit/docs/robit-rfc-bot-typing-design.md`：chatbot 层 typing 钩子 trait 新方法
@@ -557,7 +564,7 @@ fixtures，两边实现永不互相「对拍」，只对黄金向量。
 ## 目录
 
 ```text
-Cargo.toml                  workspace（robit crates 消费 crates.io 0.7.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
+Cargo.toml                  workspace（robit crates 消费 crates.io 0.8.0 正式版 + robit-wechat，其余依赖版本与 robit workspace 对齐）
 crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话 + 持仓录入/直接维护 API + 行情 API + 预警/快照/留痕 API + 建议留档 API + 自选 API + OpenAPI 契约（Ctrl+C 优雅关闭）
                             ├─ lib.rs            /api/* 业务路由装配（api_router + /api/openapi.json，集成测试同一入口）
                             ├─ main.rs           启动接线（store/market 先于 Agent 装配——工具与 HTTP 同句柄；调度器 spawn + 复盘回调接 WebBridge，P4-T7；robit 配置缺失时优雅降级；bin 侧契约键集单测）

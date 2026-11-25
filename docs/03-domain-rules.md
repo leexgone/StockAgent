@@ -398,9 +398,10 @@ robit 0.7.0 M1 的用户自定义提醒/周期任务（与上节行情预警调�
 - 配额与护栏：`max_active_tasks` 缺省 50/归属；投递重试 `delivery_retries` 缺省 3（退避 5s/30s/120s），终败 `failed` 留痕、任务仍 active（next_run 已推进）。
 - 停机补触发：`missed_policy` 缺省 `latest`——重启后每任务补**最近一次** missed（`catch_up=true`），不风暴补发；`skip` 写 skipped 审计不触发。
 - 投递语义：触发经 `wrap_prompt` 头部行（`[计划任务「{title}」(id=…) 于 {本地时间} 触发（停机补触发）]`）+ `inject_message(chat_id, text, "scheduler")`——绕过斜杠解析、入 IM 档案（source="scheduler"）、回合内工具走正常确认流程（auto_approve=true 直接执行）。`delivered` = 交给通道，**非回合产出成功**；所属会话被空闲清理时自愈重建。
+- 系统提示词：robit 0.8.0 起 `with_schedule` 挂载的会话自动（幂等）追加 robit 内置计划任务纪律段（英文），与子木人格中文纪律条并存互补（ADR-0022 补记）。
 - 隔离：任务归属键 `(source, namespace[, chat_id])`——QQ/微信 source 不同互不串台；认领事务（条件 UPDATE + claimed 审计同事务）保证同归属双进程也不双触发，崩溃认领启动对账。
 - 管理：IM 直管命令 `/schedule [list|pause|resume|delete <id前缀>]`（前缀歧义拒绝）；工具面 `schedule_create/edit/list/view`（create/edit 须主人明确要求，创建后宣读回执；乐观并发令牌 `expected_updated_at`）。
-- **Web/CLI 不可用**：共享内核注册工具但无调度上下文，调用如实报不可用（robit M2 再接线，人格引导去 IM）。
+- **Web/CLI 不可用**：共享内核注册工具但无调度上下文，调用如实报不可用（人格引导去 IM）。robit 0.8.0 已发布 M2 官方 Web 接线件（`WebBridge::send_scheduled_input` / `schedule_delivery()` + `scheduled_task_fired` wire 帧），**子木拍板不消费**（ADR-0022 补记 2026-11-25）——口径维持仅 IM，Web 扩展另案。
 - 与行情调度独立：SchedulerCore（zimu.db alerts/equity_snapshots）vs robit Scheduler（robit.db `scheduled_tasks`/`task_runs`，schema v8 自动迁移，task_runs 每任务保留 100 条）；`ZIMU_SCHEDULER_DISABLE` 只停行情调度，计划任务随 `[app.schedule]` 开关。
 - 信任边界（ADR-0022 D3）：任务触发 = 无人值守自主回合，ADR-0014 的时间维延伸——任务只能由主人经绑定会话创建，人格纪律仍是唯一软约束，**自主回合不扩张授权**（破坏性操作仍须主人明示、数字纪律不变）。
 

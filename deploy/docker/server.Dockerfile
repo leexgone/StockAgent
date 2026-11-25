@@ -23,13 +23,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install cargo-chef --locked
 # 登录 CLI 随镜像（D7）：不依赖 workspace 源码，置于源码 COPY 之前——层近乎
 # 永久缓存（crate 自带 Cargo.lock，--locked 可复现）；独立 target 目录。
-# 版本须与 backend 消费的 robit-wechat lib 同步（0.7.0：计划任务 M1，CLI login
-# 路径不受影响；0.6.0：typing 抽象框架侧落地（微信实现待上游）+ PlatformCaps
-# 加固；0.5.1：直调发送透明内容投影 R17 + 长度守卫 R16；0.4.0 起 login 可
-# Ctrl+C 取消、state 含 outbound 节流快照段）——升 robit 时连带改这里。
+# 版本须与 backend 消费的 robit-wechat lib 同步（0.8.0：计划任务 M2/M3 + LLM
+# 超时/重试修复，CLI login 路径不受影响；0.7.0：计划任务 M1；0.6.0：typing 抽象
+# 框架侧落地（微信实现待上游）+ PlatformCaps 加固；0.5.1：直调发送透明内容投影
+# R17 + 长度守卫 R16；0.4.0 起 login 可 Ctrl+C 取消、state 含 outbound 节流
+# 快照段）——升 robit 时连带改这里。
 ENV CARGO_TARGET_DIR=/src/cli-target
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo install --locked --root /opt/cli --version 0.7.0 robit-wechat
+    cargo install --locked --root /opt/cli --version 0.8.0 robit-wechat
 # 依赖层：workspace + 六成员 manifest（新增成员须补 COPY 行）→ chef 预编依赖
 ENV CARGO_TARGET_DIR=/src/backend/target
 WORKDIR /src/backend

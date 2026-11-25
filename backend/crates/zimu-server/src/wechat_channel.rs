@@ -3,7 +3,7 @@
 //! 同 working_dir 共 robit.db（会话按 `(chat_id, source="wechat", namespace)` 隔离，
 //! D2：R8④ 收口，不拆目录）、入站过绑定白名单（拍板⑤，装饰器零改动换词汇）。
 //!
-//! 渠道 = 微信官方 iLink AI Bot（robit-wechat 0.7.0）：出站长轮询无需公网回调，
+//! 渠道 = 微信官方 iLink AI Bot（robit-wechat 0.8.0）：出站长轮询无需公网回调，
 //! 1:1 私聊（chat_id 恒 `private:{ilink_user_id}`）。登录 = 部署侧 CLI
 //! `robit-wechat -w <backend> login`（**停服约定**，D3：state save 非原子 +
 //! 运行中无互斥，健康期并发登录会覆盖新 token；失效态 adapter 静默，不停服安全）。
