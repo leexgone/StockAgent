@@ -26,6 +26,15 @@
         "t": "无重大公告"
       }
     ],
+    "discipline_refs": [
+      {
+        "rule": "single_stock",
+        "label": "单票仓位参考线",
+        "value": 34.4,
+        "threshold": 25.0,
+        "text": "当前 34.4% 已越 25% 单票参考线：建议锚为上限，是否执行由你拍板"
+      }
+    ],
     "generated_at": "2026-11-17 10:35",
     "id": 1,
     "position": "当前 34.4% → 建议 30%",

@@ -404,6 +404,59 @@ async fn calc_advice_bare_unknown_code_rejected_b7() {
     assert!(err.contains("前缀") && err.contains("B7"), "{err}");
 }
 
+/// ADR-0023 端到端：超 25% 参考线的偏多票不再被拦截——action = 加仓、
+/// suggested 锚上限 25（文案「建议 ≤25%」）、不给反向 sell_qty_hint、
+/// discipline_refs 随返回并落档读回（single_stock + sector 两条，§6 表序）。
+#[tokio::test]
+async fn calc_advice_over_cap_add_with_refs_and_archives() {
+    let store = seeded_store();
+    // 现金压到 2 万：600519 市值 1.1 万 / 总资产 3.1 万 ≈ 35.5% > 25% 参考线；
+    // 现金占比 ≈ 64.5% 过线；单一持仓 → 自身行业（白酒）占市值 100% > 35% 也进参考
+    zimu_agent::lock(&store)
+        .set_account(&AccountRow { cash: 20_000.0, ..AccountRow::default() })
+        .unwrap();
+    let fake = FakeApi::arc();
+    fake.set_kline(bull_kline());
+    fake.set_quote(bull_quote());
+    let tool = CalcAdviceTool { deps: deps_with(store.clone(), fake) };
+
+    let out = exec(&tool, json!({ "code": "600519" })).await;
+
+    // 信号带完整形态：加仓 + 加仓带 target/stop（旧拦截口径下拿不到目标区间）
+    assert_eq!(out["action"], "加仓");
+    assert_eq!(out["action_code"], "add");
+    assert_eq!(out["target"], json!([120.96, 128.8]));
+    assert_eq!(out["stop"].as_f64().unwrap(), 103.04);
+    // 上限锚：suggested = 25，文案读作「建议 ≤25%」，不给反向减仓数量
+    assert_eq!(out["position"]["suggested"].as_f64().unwrap(), 25.0);
+    assert_eq!(out["position"]["mode"], "target");
+    assert!(
+        out["position"]["text"].as_str().unwrap().contains("建议 ≤25%"),
+        "text={}",
+        out["position"]["text"]
+    );
+    assert!(out["position"]["sell_qty_hint"].is_null(), "加仓向不给减仓 hint（ADR-0023 D2）");
+    // 纪律参考：§6 表序 single_stock → sector（现金过线不进；cb 仅转债）
+    let refs = out["discipline_refs"].as_array().unwrap();
+    assert_eq!(refs.len(), 2, "refs={refs:?}");
+    assert_eq!(refs[0]["rule"], "single_stock");
+    assert_eq!(refs[0]["threshold"].as_f64().unwrap(), 25.0);
+    let w = refs[0]["value"].as_f64().unwrap();
+    assert!((w - 11_000.0 / 31_000.0 * 100.0).abs() < 1e-6, "single_stock value={w}");
+    assert_eq!(refs[1]["rule"], "sector");
+    assert_eq!(refs[1]["value"].as_f64().unwrap(), 100.0);
+    // 既有 discipline 四 pass 布尔块（wire 兼容）不受影响
+    assert_eq!(out["discipline"]["single_stock_pass"], false);
+    assert_eq!(out["discipline"]["cash_reserve_pass"], true);
+
+    // 留档读回：refs 列与返回同值（数字不经模型，ADR-0007/0023）
+    let id = out["advice_id"].as_i64().unwrap();
+    let row = zimu_agent::lock(&store).advice(id).unwrap().unwrap();
+    assert_eq!(row.action, "加仓");
+    assert!(row.position.contains("建议 ≤25%"));
+    assert_eq!(row.discipline_refs, out["discipline_refs"]);
+}
+
 // ============================================================================
 // finalize_advice —— 文字归模型，数字不可改写
 // ============================================================================

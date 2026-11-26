@@ -558,6 +558,12 @@ export interface components {
             data_version: string;
             /** @description 四维拆解 `[{k,s,t}]`（03 §10 固定四维；domain `AdviceDim` 序列化，坏 JSON 读回 `[]`） */
             dims: unknown;
+            /**
+             * @description 纪律参考项 `[{rule,label,value,threshold,text}]`（ADR-0023；domain
+             *     `AdviceOutput.discipline_refs` 序列化，仅偏多带非空；旧行 NULL 读回 `[]`，
+             *     坏 JSON 同 dims 兜底——前端恒拿到数组）
+             */
+            discipline_refs: unknown;
             /** @description 生成时刻（上海，YYYY-MM-DD HH:MM） */
             generated_at: string;
             /** Format: int64 */

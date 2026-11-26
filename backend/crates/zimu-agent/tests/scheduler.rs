@@ -394,6 +394,7 @@ async fn simulated_intraday_triggers_alerts_and_dedups() {
             stop: Some(106.0),
             position: "当前 3.7% → 建议 维持".into(),
             dims: json!([]),
+            discipline_refs: json!([]),
             data_version: "adv-v1|k=2026-10-28|q=none".into(),
             generated_at: "2026-10-28 15:05".into(),
         })
@@ -783,6 +784,7 @@ async fn watchlist_alerts_use_positionless_shape_and_dedup() {
         stop: Some(9.2),
         position: "当前 0% → 建议 观察".into(),
         dims: json!([]),
+        discipline_refs: json!([]),
         data_version: "adv-v1|k=none|q=none".into(),
         generated_at: "2026-10-28 15:05".into(),
     })

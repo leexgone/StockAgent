@@ -245,6 +245,9 @@ async fn live_responses_and_samples_pass_schema() {
                 {"k": "资金", "s": 55.0, "t": "北向资金持平"},
                 {"k": "消息", "s": 58.0, "t": "无重大公告"}
             ]),
+            discipline_refs: serde_json::json!([
+                {"rule": "single_stock", "label": "单票仓位参考线", "value": 34.4, "threshold": 25.0, "text": "当前 34.4% 已越 25% 单票参考线：建议锚为上限，是否执行由你拍板"}
+            ]),
             data_version: format!("adv-v1|k=none|q={today} 10:30"),
             generated_at: format!("{today} 10:35"),
         })

@@ -27,7 +27,7 @@ use zimu_domain::{Kind, Side};
 
 /// schema 版本（PRAGMA user_version）。新增迁移在 `MIGRATIONS` 尾部追加，
 /// 永不修改已发布版本的 SQL——迁移只前进（P4-T2 迁移机制约定）。
-pub const CURRENT_VERSION: i64 = 4;
+pub const CURRENT_VERSION: i64 = 5;
 
 const MIGRATIONS: &[(i64, &str)] = &[(
     1,
@@ -193,6 +193,16 @@ CREATE TABLE channel_bindings (
   active   INTEGER NOT NULL DEFAULT 1,   -- unbind 置 0 留痕（不 DELETE：推送历史/审计要能对上号）
   PRIMARY KEY (channel, chat_id)
 );
+"#,
+    ),
+    (
+        5,
+        r#"
+-- ADR-0023（2026-11-26 拍板）：仓位纪律在建议生成链降级为纯参考——advice_history
+-- 附纪律参考列（JSON [{rule,label,value,threshold,text}]，domain AdviceOutput.
+-- discipline_refs 序列化原值；仅偏多带非空）。本表首个 ALTER ADD COLUMN 先例：
+-- 可空列，旧行 NULL 读回 []（map_advice_row 兜底，前端恒拿到数组）。
+ALTER TABLE advice_history ADD COLUMN discipline_refs TEXT;
 "#,
     ),
 ];
@@ -1048,6 +1058,10 @@ pub struct AdviceRow {
     pub reason: String,
     /// 四维拆解 `[{k,s,t}]`（03 §10 固定四维；domain `AdviceDim` 序列化，坏 JSON 读回 `[]`）
     pub dims: serde_json::Value,
+    /// 纪律参考项 `[{rule,label,value,threshold,text}]`（ADR-0023；domain
+    /// `AdviceOutput.discipline_refs` 序列化，仅偏多带非空；旧行 NULL 读回 `[]`，
+    /// 坏 JSON 同 dims 兜底——前端恒拿到数组）
+    pub discipline_refs: serde_json::Value,
     /// 风险自陈（03 §10：至少一条——非空校验在工具层，存储层如实存）
     pub risks: Vec<String>,
     /// 输入数据版本 `adv-v1|k={日线末bar|none}|q={行情as_of|none}`（B9）
@@ -1067,6 +1081,8 @@ pub struct NewAdvice {
     pub stop: Option<f64>,
     pub position: String,
     pub dims: serde_json::Value,
+    /// 纪律参考项（ADR-0023；domain 序列化原值，无参考时 `json!([])`）
+    pub discipline_refs: serde_json::Value,
     pub data_version: String,
     pub generated_at: String,
 }
@@ -1074,6 +1090,8 @@ pub struct NewAdvice {
 fn map_advice_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AdviceRow> {
     let dims_text: String = r.get(10)?;
     let risks_text: String = r.get(11)?;
+    // v5 可空列：旧行 NULL / 坏 JSON 一律兜 []（前端恒拿到数组，ADR-0023）
+    let refs_text: Option<String> = r.get(14)?;
     Ok(AdviceRow {
         id: r.get(0)?,
         code: r.get(1)?,
@@ -1086,6 +1104,10 @@ fn map_advice_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AdviceRow> {
         position: r.get(8)?,
         reason: r.get(9)?,
         dims: serde_json::from_str(&dims_text).unwrap_or_else(|_| serde_json::json!([])),
+        discipline_refs: refs_text
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_else(|| serde_json::json!([])),
         risks: serde_json::from_str(&risks_text).unwrap_or_default(),
         data_version: r.get(12)?,
         generated_at: r.get(13)?,
@@ -1093,17 +1115,19 @@ fn map_advice_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AdviceRow> {
 }
 
 const ADVICE_COLS: &str = "id, code, action, score, conf, target_lo, target_hi, stop,
-     position, reason, dims, risks, data_version, generated_at";
+     position, reason, dims, risks, data_version, generated_at, discipline_refs";
 
 impl Store {
     /// 建议数字列入档，返回行 id（B9：每条建议带生成时间与数据版本）。
     pub fn insert_advice(&self, a: &NewAdvice) -> Result<i64> {
         let dims_text = serde_json::to_string(&a.dims).context("dims 序列化失败")?;
+        let refs_text =
+            serde_json::to_string(&a.discipline_refs).context("discipline_refs 序列化失败")?;
         self.conn.execute(
             "INSERT INTO advice_history
                (code, action, score, conf, target_lo, target_hi, stop,
-                position, reason, dims, risks, data_version, generated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'',?9,'[]',?10,?11)",
+                position, reason, dims, risks, data_version, generated_at, discipline_refs)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'',?9,'[]',?10,?11,?12)",
             params![
                 a.code,
                 a.action,
@@ -1115,7 +1139,8 @@ impl Store {
                 a.position,
                 dims_text,
                 a.data_version,
-                a.generated_at
+                a.generated_at,
+                refs_text
             ],
         )?;
         Ok(self.conn.last_insert_rowid())

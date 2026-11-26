@@ -546,6 +546,9 @@ fn new_advice(code: &str, generated_at: &str) -> NewAdvice {
             { "k": "资金面", "s": 60.0, "t": "量能平稳" },
             { "k": "消息面", "s": 60.0, "t": "未接入消息面数据源，按中性处理" }
         ]),
+        discipline_refs: serde_json::json!([
+            { "rule": "cash_reserve", "label": "现金保留参考线", "value": 8.0, "threshold": 10.0, "text": "现金仅占 8.0%，低于 10% 现金参考线：仅供参考，是否执行由你拍板" }
+        ]),
         data_version: "adv-v1|k=none|q=none".into(),
         generated_at: generated_at.into(),
     }
@@ -590,6 +593,40 @@ fn advice_finalize_missing_id_is_false() {
     let s = seed_store(1.0);
     assert!(!s.finalize_advice(999, "x", &["y".to_string()]).unwrap());
     assert!(s.advice(999).unwrap().is_none());
+}
+
+#[test]
+fn advice_discipline_refs_roundtrip_and_null_fallback() {
+    // ADR-0023：refs 列往返（new_advice 带一条 cash_reserve 参考）
+    let s = seed_store(300_000.0);
+    let id = s.insert_advice(&new_advice("600519", "2026-11-26 10:00")).unwrap();
+    let row = s.advice(id).unwrap().unwrap();
+    let refs = row.discipline_refs.as_array().unwrap();
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0]["rule"], "cash_reserve");
+    assert_eq!(refs[0]["value"], 8.0);
+    assert_eq!(refs[0]["threshold"], 10.0);
+    // list_advice 同款映射
+    assert_eq!(s.list_advice(Some("600519"), 10).unwrap()[0].discipline_refs, row.discipline_refs);
+
+    // 旧行语义：refs 列 NULL → 读回 []（存储层兜底，前端恒拿到数组）——文件库直改列模拟 v4 旧行
+    let dir = std::env::temp_dir().join(format!("zimu-store-refs-null-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("refs-null.db");
+    let _ = std::fs::remove_file(&path);
+    let path_s = path.to_str().expect("临时路径是合法 UTF-8");
+    {
+        let s2 = Store::open(path_s).unwrap();
+        s2.insert_advice(&new_advice("600519", "2026-11-26 10:01")).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("UPDATE advice_history SET discipline_refs = NULL;").unwrap();
+    }
+    let s3 = Store::open(path_s).unwrap();
+    let old_row = s3.list_advice(None, 10).unwrap().remove(0);
+    assert_eq!(old_row.discipline_refs, serde_json::json!([]), "NULL 旧行读回空数组");
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -759,10 +796,12 @@ fn watchlist_migrates_v1_db_to_v2() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         // v1 之后新增的表全删（迁移重放是 CREATE TABLE，表还在会撞 already exists）；
+        // v5 起有 ALTER ADD COLUMN 迁移——重放前须 DROP COLUMN 还原（duplicate column）。
         // 加版迁移时记得在这里补 DROP——本行清单与 CURRENT_VERSION 同步演进。
         conn.execute_batch(
             "DROP TABLE watchlist; DROP TABLE holding_edits;
              DROP TABLE chat_messages; DROP TABLE channel_bindings;
+             ALTER TABLE advice_history DROP COLUMN discipline_refs;
              PRAGMA user_version = 1;",
         )
         .unwrap();
@@ -1044,8 +1083,8 @@ fn upgrade_copy_of_real_db_to_current() {
 }
 
 #[test]
-fn migrates_v3_db_to_v4() {
-    // 合成 v3 老库 → Store::open 自动前进到 v4（迁移只前进），旧表数据不丢、新表可用。
+fn migrates_v3_db_to_current() {
+    // 合成 v3 老库 → Store::open 自动前进到 CURRENT_VERSION（迁移只前进），旧表数据不丢、新表可用。
     let dir = std::env::temp_dir().join(format!("zimu-store-mig4-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("mig-v3.db");
@@ -1057,8 +1096,11 @@ fn migrates_v3_db_to_v4() {
     }
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
+        // v5 是 ALTER ADD COLUMN——重放前还原列，否则 duplicate column（同 v1 重放测试）
         conn.execute_batch(
-            "DROP TABLE chat_messages; DROP TABLE channel_bindings; PRAGMA user_version = 3;",
+            "DROP TABLE chat_messages; DROP TABLE channel_bindings;
+             ALTER TABLE advice_history DROP COLUMN discipline_refs;
+             PRAGMA user_version = 3;",
         )
         .unwrap();
     }

@@ -15,10 +15,10 @@ use async_trait::async_trait;
 use chrono::Days;
 use robit_agent::{Tool, ToolContext, ToolResult};
 use serde_json::{json, Value};
-use zimu_domain::advice::{score_advice, Action, AdviceInput, Horizon, PositionMode};
+use zimu_domain::advice::{score_advice, Action, AdviceInput, DisciplineCtx, Horizon, PositionMode};
 use zimu_domain::discipline::{check, sell_to, SellToInput};
 use zimu_domain::lot::lot_size;
-use zimu_domain::Kind;
+use zimu_domain::{ratio, Kind};
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::MarketError;
 use zimu_market::symbols::symbol_of;
@@ -52,13 +52,18 @@ fn horizon_label(h: Horizon) -> &'static str {
     }
 }
 
-/// position 文案（03 §10：当前值必须是计算值；「当前 x% → 建议 y%」与原型同款）
-fn position_text(current: f64, suggested: Option<f64>, mode: PositionMode) -> String {
+/// position 文案（03 §10：当前值必须是计算值；「当前 x% → 建议 y%」与原型同款）。
+/// ADR-0023：加仓/买入向且 suggested < current（超上限偏多票的上限锚形态）读作
+/// 「建议 ≤y%」——上限锚语义，非降仓指令（减仓数量归 calc_discipline.reduce_hint）。
+fn position_text(current: f64, suggested: Option<f64>, mode: PositionMode, action: Action) -> String {
     match mode {
-        PositionMode::Target => format!(
-            "当前 {current:.1}% → 建议 {:.0}%",
-            suggested.unwrap_or(current)
-        ),
+        PositionMode::Target => match suggested {
+            Some(s) if s < current && matches!(action, Action::Add | Action::Buy) => {
+                format!("当前 {current:.1}% → 建议 ≤{s:.0}%")
+            }
+            Some(s) => format!("当前 {current:.1}% → 建议 {s:.0}%"),
+            None => format!("当前 {current:.1}% → 建议 {current:.0}%"),
+        },
         PositionMode::Maintain => format!("当前 {current:.1}% → 维持"),
         PositionMode::Dca => format!("当前 {current:.1}% → 每月定投"),
         PositionMode::Exit => format!("当前 {current:.1}% → 建议清仓"),
@@ -81,7 +86,7 @@ impl Tool for CalcAdviceTool {
     }
 
     fn description(&self) -> &str {
-        "生成分析结论的全部数字（ADR-0007：数字归规则）——按 03 §10 生产口径打分：score/conf/四维 dims/action/horizon/target 目标区间/stop 止损/position 建议仓位/中间量 stats（MA5/MA20/动量/区间位置/量比/票数），并当场写入 advice_history 数字列（含 generated_at 与 data_version，B9 留档），返回 advice_id。输入依赖近 90 天日线（sidecar），日线拿不到会如实报错拒绝出建议。**返回的每个数字是你文案中数字的唯一来源，不得自行编造或改写**；写完结论/理由/风险文案后必须调用 finalize_advice(advice_id, reason, risks) 归档，否则留档缺文案。"
+        "生成分析结论的全部数字（ADR-0007：数字归规则）——按 03 §10 生产口径打分：score/conf/四维 dims/action/horizon/target 目标区间/stop 止损/position 建议仓位/中间量 stats（MA5/MA20/动量/区间位置/量比/票数），并当场写入 advice_history 数字列（含 generated_at 与 data_version，B9 留档），返回 advice_id。仓位纪律不拦截也不改写 action（ADR-0023）：越线事实以 discipline_refs 参考附注返回，文案须转述并点明由主人拍板。输入依赖近 90 天日线（sidecar），日线拿不到会如实报错拒绝出建议。**返回的每个数字是你文案中数字的唯一来源，不得自行编造或改写**；写完结论/理由/风险文案后必须调用 finalize_advice(advice_id, reason, risks) 归档，否则留档缺文案。"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -146,6 +151,21 @@ impl Tool for CalcAdviceTool {
         let held = holding.is_some();
         let per = portfolio.per.iter().find(|p| p.code == code);
         let weight = per.map(|p| p.weight).unwrap_or(0.0);
+        // 纪律参考上下文（ADR-0023：只作参考附注，不参与 action 决策）。
+        // sector_pct = 该标的**自身行业**占市值比（与 §6 sector 同分子分母；
+        // 未持仓无行业归属 → None，该规则不参与）。
+        let sector_pct = holding.as_ref().map(|h| {
+            let mv_of = |x: &zimu_domain::recalc::Holding| x.price * x.shares;
+            let mv_sector: f64 =
+                inp.holdings.iter().filter(|x| x.sector == h.sector).map(mv_of).sum();
+            let total_mv: f64 = inp.holdings.iter().map(mv_of).sum();
+            ratio(mv_sector, total_mv) * 100.0
+        });
+        let discipline_ctx = DisciplineCtx {
+            cash_pct: Some(report.cash_reserve.value),
+            sector_pct,
+            cb_total_pct: Some(report.cb_total.value),
+        };
 
         // ---- 实时行情（可降级：失败只影响 price 锚与当日 bar 合成）----
         let quote = self.deps.market.quote(&[symbol.clone()]).await;
@@ -235,7 +255,7 @@ impl Tool for CalcAdviceTool {
             price,
             held,
             weight,
-            cash_reserve_pass: report.cash_reserve.pass,
+            discipline_ctx: Some(discipline_ctx),
         });
 
         // ---- 留档（B9：数字列 + generated_at + data_version）----
@@ -246,8 +266,10 @@ impl Tool for CalcAdviceTool {
             .unwrap_or_else(|| "none".into());
         let data_version = format!("adv-v1|k={k_end}|q={}", as_of.clone().unwrap_or_else(|| "none".into()));
         let generated_at = now.format("%Y-%m-%d %H:%M").to_string();
-        let pos_text = position_text(out.position.current, out.position.suggested, out.position.mode);
+        let pos_text =
+            position_text(out.position.current, out.position.suggested, out.position.mode, out.action);
         let dims_json = serde_json::to_value(&out.dims).unwrap_or_else(|_| json!([]));
+        let refs_json = serde_json::to_value(&out.discipline_refs).unwrap_or_else(|_| json!([]));
         let advice_id = {
             let s = crate::lock(&self.deps.store);
             store_try!(s.insert_advice(&NewAdvice {
@@ -260,15 +282,19 @@ impl Tool for CalcAdviceTool {
                 stop: out.stop,
                 position: pos_text.clone(),
                 dims: dims_json,
+                discipline_refs: refs_json.clone(),
                 data_version: data_version.clone(),
                 generated_at: generated_at.clone(),
             }))
         };
 
         // ---- 降仓数量提示（§6 sell_to：建议仓位低于当前时给可卖股数）----
+        // ADR-0023：加仓/买入向不给（超上限偏多票的 suggested=25 是上限锚读法「建议 ≤25%」，
+        // 不是降仓指令）；单票超限的减仓数量归 calc_discipline.reduce_hint 本家链路。
+        let add_side = matches!(out.action, Action::Add | Action::Buy);
         let sell_qty_hint = match (held, out.position.mode, out.position.suggested) {
             (true, PositionMode::Exit, _) => holding.as_ref().map(|h| h.shares),
-            (true, PositionMode::Target, Some(target)) if target < weight => {
+            (true, PositionMode::Target, Some(target)) if target < weight && !add_side => {
                 let shares = holding.as_ref().map(|h| h.shares).unwrap_or(0);
                 sell_to(&SellToInput {
                     mv: price * shares as f64,
@@ -312,6 +338,7 @@ impl Tool for CalcAdviceTool {
             },
             "dims": out.dims,
             "stats": out.stats,
+            "discipline_refs": refs_json,
             "discipline": {
                 "single_stock_pass": report.single_stock.pass,
                 "sector_pass": report.sector.pass,
@@ -330,7 +357,7 @@ impl Tool for CalcAdviceTool {
             },
             "data_version": data_version,
             "generated_at": generated_at,
-            "note": "以上数字全部由规则函数产出（03 §10 生产口径，ADR-0007 数字归规则），数字列已写入 advice_history；你文案中出现的每个数字必须原样取自本返回（conf 是样本内信号一致性、不是胜率，不得写成涨跌概率）。写完文案后调用 finalize_advice(advice_id, reason, risks) 归档，risks 至少一条。",
+            "note": "以上数字全部由规则函数产出（03 §10 生产口径，ADR-0007 数字归规则），数字列已写入 advice_history；你文案中出现的每个数字必须原样取自本返回（conf 是样本内信号一致性、不是胜率，不得写成涨跌概率）。discipline_refs 是纪律参考附注（ADR-0023：越线事实，不构成拦截）——非空时文案要逐条转述（规则名/当前值/参考线，数字原样取自 refs）并点明「是否执行由你拍板」；为空不得编造纪律提醒。写完文案后调用 finalize_advice(advice_id, reason, risks) 归档，risks 至少一条。",
         })))
     }
 }
