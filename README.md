@@ -60,7 +60,7 @@ python -m http.server 8000 --directory design   # 原型：或直接双击 desig
 | `deploy/` + `compose.yaml` | Docker 发布基建（ADR-0018）：双镜像 Dockerfile + entrypoint（幂等播种人格/config）+ 配置模板；仓库根 compose 一键起、`.env.example` 凭据模板 |
 | `.github/workflows/` | CI 门禁（前端漂移守卫 + 后端全 workspace + datafetch 双架构）与 tag 驱动发布流水线（版本守卫 → 双架构矩阵 → GHCR manifest 合并 → 容器冒烟 → GitHub Release） |
 | `design/` | 界面原型（**P5-T3 已冻结 2026-10-30**：设计参照与像素/交互验收基准，生产实现在 `frontend/`，原型只保留不再新增功能）——7 个页面 + 共享样式/数据/图表层，说明见 `design/README.md` |
-| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（10 组 108 用例，含 advice 打分与 alerts 预警组；B11/B12 定稿随 2026-10-30 扩 5 例），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
+| `fixtures/golden/` | 黄金测试向量：数字口径的权威样例集（10 组 109 用例，含 advice 打分与 alerts 预警组；B11/B12 定稿随 2026-10-30 扩 5 例；ADR-0023 纪律参考随 2026-11-26 advice 组键换形 + 扩 1 例），Rust 与 TS 两边跑同一份；schema 见 `docs/03` 附录 |
 | `fixtures/api/` | API 响应样例（P4-T5）：每端点一份提交样例，契约测试对其过 OpenAPI schema 校验；前端移植可直接当 mock |
 | `docs/` | 产品规格与工程规范：范围、界面、业务口径、数据契约、设计系统、路线图、待办；`docs/api/openapi.json` 为机器可读 API 契约（由代码生成，见 `04` 附录 C） |
 | `docs/decisions/` | 决策记录（ADR）—— 每个「为什么这样做」都留档 |

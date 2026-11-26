@@ -151,7 +151,7 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `calc_discipline` | 只读 | 03 §6 四条体检；单票超限附 `reduce_hint`（sell_to 降仓股数） |
 | `simulate_trade` | 只读 | 试算（费用/摊薄/整手/涨跌停拦截，03 §1–§4），不落库 |
 | `refresh_quotes` | 写行情字段 + 补空串行业 | 与 `POST /api/market/refresh` **同一条链**（`service::refresh_portfolio`，P4-T6 抽取；行业补全 P7-T6/ADR-0016，契约 wire 零变化） |
-| `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice::score_advice`（03 §10 生产口径）出数 → 数字列直接留档（B9：`generated_at` + `data_version=adv-v1\|k=…\|q=…`）→ 返回 advice_id 与全部数字；日线拿不到**拒绝出建议** |
+| `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice::score_advice`（03 §10 生产口径）出数 → 数字列直接留档（B9：`generated_at` + `data_version=adv-v1\|k=…\|q=…`；v5 起含 `discipline_refs` 列，ADR-0023）→ 返回 advice_id 与全部数字；纪律不拦截 action，越线以 `discipline_refs` 参考附注返回（ADR-0023）；日线拿不到**拒绝出建议** |
 | `finalize_advice` | 写 advice_history 文案列 | 模型文案只回填 reason/risks（risks 至少一条，03 §10）——**数字不经模型转写**（ADR-0007 结构性保证） |
 | `echo` | 只读 | P2-T2 链路验证保留（网关排查不依赖数据） |
 | `send_file` | IM 出站 | 发本地文件/图片给用户（ADR-0017 D9，robit-chatbot SendFileTool）：平台扩展自守卫——QQ 真实 CDN 上传、微信 SDK send_media；Web/CLI 无平台扩展调用如实报错，无副作用 |
@@ -531,7 +531,8 @@ ADR-0014），差别只在 Frontend（CliFrontend vs WebFrontend）。
 手数/数量校验/快捷档位、费用、摊薄试算、recalc 汇总、纪律四条 + 降仓数量、
 净值指标、波动合成、涨跌停（比例推断 / 整数单元限价 / 委托价校验，P1-T2
 定稿）、**分析结论打分**（`advice`，P4-T6：03 §10 生产口径——信号票制、
-中性维 60、70/55/45 三带、纪律拦截优先、target/stop 锚现价 half-up；ADR-0007
+中性维 60、70/55/45 三带、得分定 action 纪律只附参考（`discipline_refs`，
+ADR-0023）、target/stop 锚现价 half-up；ADR-0007
 「数字归规则」的唯一实现，TS 共享层镜像 `frontend/src/domain/advice.ts`）、
 **预警判定**（`alert`，P4-T7：03 §12——8 类判定序、含边界压线语义、数据缺失
 不参与不伪造、text 展示层模板；镜像 `frontend/src/domain/alert.ts`，自然日差
@@ -540,7 +541,7 @@ ADR-0014），差别只在 Frontend（CliFrontend vs WebFrontend）。
 `fixtures/golden/*.json` 键一一对应。测试即验收：
 
 ```powershell
-cargo test -p zimu-domain   # 29 个单测 + 黄金向量 runner（10 组 108 用例；pending 组自动跳过，现全部 active）
+cargo test -p zimu-domain   # 31 个单测 + 黄金向量 runner（10 组 109 用例；pending 组自动跳过，现全部 active）
 ```
 
 改口径的顺序：**先改 `docs/03` 与 fixtures，再改实现**。TS 共享层
@@ -592,7 +593,7 @@ crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill
                             └─ tests/            tools.rs 28 项（黄金向量端到端/留档/降级/Skill 完整性 + 播种五例（ADR-0021：用户自增/永不覆盖/幂等/源缺失/附属文件）/写账本九例/注册面组成 + schedule 注册（ADR-0022））· scheduler.rs 9 项（模拟盘中触发/去重/空转/降级/盘后链幂等/自选无持仓形态/重叠不双判，全离线）
 crates/zimu-agent-cli/      Agent 调试 REPL（P2-T2 起；P4-T6 与 server 同工具面/Skill）
 crates/zimu-domain/         领域纯函数库（P3-T3）：lot/fees/dilution/recalc/discipline/perf/vol_synth/price_limit/advice（P4-T6 打分）/alert（P4-T7 预警判定）
-                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 108 用例）
+                            └─ tests/golden.rs     黄金向量 runner（读仓库根 fixtures/golden/，10 组 109 用例）
 crates/zimu-store/          存储层（P4-T1/T2/T7 + B13 + ADR-0009）：SQLite 八表（v2 增 watchlist，v3 增 holding_edits 维护留痕）+ user_version 迁移 + 录入事务 + 直接维护（upsert_holding/remove_holding/holding_edits——快照校正：不动现金、不写 trades、留痕同事务、幂等 no-op）+ 行情回写（apply_quotes）+ 建议留档（insert/finalize/list_advice，P4-T6）+ 预警/快照/推送日志（insert_alert/alert_exists_on 去重/mark_alert_done、upsert_equity_snapshot 幂等/from_agg、insert_push_log，P4-T7）+ 自选 CRUD（add/remove/watchlist，upsert 幂等）
                             └─ tests/store.rs      34 项集成测试（含重启不丢数据、COALESCE 回写、留档数字不可经文案回填改写、预警同日去重与归档、快照 upsert 幂等、watchlist upsert/校验、直接维护六项（奇零股/幂等/行情字段保留/三不动/删除留痕/坏输入）、v1→v3 迁移）
 crates/zimu-market/         行情适配器（P4-T4）：sidecar 唯一消费入口

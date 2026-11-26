@@ -60,6 +60,19 @@ function parseDims(raw: unknown): Dim[] {
   return raw.filter((d): d is Dim => !!d && typeof (d as Dim).s === "number" && typeof (d as Dim).k === "string");
 }
 
+/** 纪律参考项（ADR-0023；旧留档行 NULL → 后端已兜 []，此处再兜一层防御） */
+interface DisciplineRefRow { rule: string; label: string; value: number; threshold: number; text: string }
+function parseRefs(raw: unknown): DisciplineRefRow[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (r): r is DisciplineRefRow =>
+      !!r &&
+      typeof (r as DisciplineRefRow).rule === "string" &&
+      typeof (r as DisciplineRefRow).value === "number" &&
+      typeof (r as DisciplineRefRow).threshold === "number",
+  );
+}
+
 export default function AnalysisScreen() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -195,6 +208,7 @@ export default function AnalysisScreen() {
   const dec = item ? priceDecimals(item.kind) : 2;
   const price = item?.price ?? null;
   const dims = A ? parseDims(A.dims) : [];
+  const refs = A ? parseRefs(A.discipline_refs) : [];
   const confPct = A ? Math.round(A.conf * 100) : 0;
   const targetText = A && A.target_lo != null && A.target_hi != null ? `${fmt(A.target_lo, dec)} — ${fmt(A.target_hi, dec)}` : "未设";
   const stopText = A && A.stop != null ? fmt(A.stop, dec) : "未设";
@@ -231,10 +245,16 @@ export default function AnalysisScreen() {
       ];
     }
     return [
-      { t: "维持现有仓位，不动", d: `当前 ${fixed(item.weight, 1)}% 在纪律范围内，没有需要处理的风险点。` },
+      {
+        t: "维持现有仓位，不动",
+        d:
+          refs.length > 0
+            ? `当前 ${fixed(item.weight, 1)}%。越线项见「纪律参考」注记——仅供参考，是否调整由你拍板。`
+            : `当前 ${fixed(item.weight, 1)}%，未触及任何仓位参考线。`,
+      },
       { t: "下一次重算时间", d: "每日 15:05 盘后复盘 + 财报/公告事件触发时即时重算，结果会推到微信。" },
     ];
-  }, [item, A, price, dec, agg]);
+  }, [item, A, price, dec, agg, refs.length]);
 
   /* ---------- 动作 ---------- */
   const applyPlan = () => {
@@ -426,6 +446,21 @@ export default function AnalysisScreen() {
                         </div>
                       ))}
                     </div>
+                    {refs.length > 0 && (
+                      <div
+                        id="a-discipline-refs"
+                        data-od-id="discipline-refs"
+                        style={{ marginTop: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)", padding: "10px 14px", background: "var(--surface)" }}
+                      >
+                        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>纪律参考（仅供参考、不构成拦截——是否执行由你拍板）</div>
+                        {refs.map((r) => (
+                          <div key={r.rule} className="hint" style={{ marginTop: 5 }}>
+                            <b style={{ color: "var(--warn)" }}>{r.label}</b>
+                            <span style={{ color: "var(--muted)" }}> · {r.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <EmptyHero

@@ -21,7 +21,7 @@ tools_required:
 1. `market_status`：今天是否交易日、当前时段、`next_event`/`next_at`（距开盘/收盘）、`next_trade_day`。休市 → 直接给「今日休市，下一交易日 X」+ 持仓静态关注点，不再调行情。`calendar_degraded=true` → 注明「交易日历降级，未排除节假日」。`sidecar_online=false` → 如实说明行情不可用，只给库存数字。
 2. `get_holdings`：持仓清单与组合状态（库存值，注意 updated_at 时点）。
 3. `get_quote`：全部持仓代码一次查询（逗号分隔）——现价/昨收、`limit_up`/`limit_down`（03 §2：整数单元 half-up，显示与拦截同一对限价、含边界）、行级 status。停牌/退市行（status 非 ok）如实标注，不编价格。
-4. `calc_discipline`：纪律超限的标的进「今日关注」。
+4. `calc_discipline`：纪律超限的标的进「今日关注」（参考线提示、不拦截操作，ADR-0023）。
 
 ## 输出结构（三段 + 免责）
 

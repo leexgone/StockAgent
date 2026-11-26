@@ -542,7 +542,7 @@ export default function HoldingsScreen() {
           <div className="card-head">
             <div>
               <div className="card-title">仓位纪律</div>
-              <div className="card-sub">触发即预警，并在微信推送里给出建议动作</div>
+              <div className="card-sub">四条仓位参考线：越线时在分析建议中附注提示，不拦截任何操作</div>
             </div>
           </div>
           <div className="card-body" id="rules">

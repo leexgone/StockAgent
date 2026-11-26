@@ -82,6 +82,7 @@
 | `analysis-picker` | 标的选择（持仓 + 自选，自选走 `watchOnly` 分支） | `holdings`、`watchlist` |
 | `analysis-rank` | 按综合得分排序的建议列表，点行切换 | `advice[].score` |
 | `verdict-card` | 结论标签（加仓/买入/持有/减仓/卖出/定投）、得分弧、置信度、目标与止损、现价与当日涨跌 | `advice[code]` |
+| `discipline-refs` | 纪律参考注记块（ADR-0023：`discipline_refs` 非空才渲染，逐条 label + 参考文案，warn 色；固定注「仅供参考、不构成拦截——是否执行由你拍板」；旧留档行后端兜 `[]` 不渲染） | `advice[code].discipline_refs` |
 | `kline-card` | 30 日 OHLC 蜡烛 + MA5/MA20，日K/周K 切换，末根锚定现价 | `ZM` 派生 + 本页 `candle()` |
 | `dims-card` | 技术 / 基本面 / 资金 / 消息四维分数与观察 | `advice[].dims[4]` |
 | `plan-card` | 分笔执行计划（减仓三步、买入两笔 + 失效条件） | `buildPlan()`（`analysis.html:359`） |
