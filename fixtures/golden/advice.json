@@ -5,12 +5,12 @@
   "schema_version": 1,
   "status": "active",
   "tolerance": 1e-9,
-  "notes": "score/conf/dims[].s/action/horizon/target/stop/position 全部由 score_advice 产出；dims[].t 观察文字是展示层模板（比对规则 6：expect 未列不校验）。无数据源维度（基本面/消息面）与量能缺失/平量的资金面记中性值 60；技术面 t = 50 + 12.5×Σ票。score 带：≥70 偏多 / 55–70 中性 / 45–55 偏空减仓 / <45 偏空卖出；可用票 <3 → conf = 0.5。target/stop 舍入 round_dec(v,d) = floor(v×10^d + 0.5)/10^d（half-up，d 按 §1：stock 2、etf/cb 3）。",
+  "notes": "score/conf/dims[].s/action/horizon/target/stop/position 全部由 score_advice 产出；dims[].t 观察文字是展示层模板（比对规则 6：expect 未列不校验）。无数据源维度（基本面/消息面）与量能缺失/平量的资金面记中性值 60；技术面 t = 50 + 12.5×Σ票。score 带：≥70 偏多 / 55–70 中性 / 45–55 偏空减仓 / <45 偏空卖出；可用票 <3 → conf = 0.5。target/stop 舍入 round_dec(v,d) = floor(v×10^d + 0.5)/10^d（half-up，d 按 §1：stock 2、etf/cb 3）。ADR-0023（2026-11-26）：纪律不再拦截 action——偏多带 action 只由得分×持仓形态决定；越线项以 discipline_refs 附注（rule/value/threshold 参与比对、数组按 §6 表序对齐；label/text 展示层不校验，同 dims[].t 待遇）；输入键 cash_reserve_pass 退役，换可选 discipline_ctx{cash_pct,sector_pct,cb_total_pct}（工具层从 §6 现算注入）。refs 仅偏多带生成，其余带恒 []。",
   "cases": [
     {
       "id": "av-bull-add",
       "fn": "score_advice",
-      "desc": "偏多加仓：ma5 = 540/5 = 108，ma20 = (15×100+540)/20 = 2040/20 = 102 → v1 +1、v2 +1；mom20 = 112/100−1 = +12% > 5% → v3 +1；pos30 = (112−100)/(120−100) = 12/20 = 0.6 ∈ [0.2,0.9] → v4 0；t = 50+12.5×3 = 87.5。vol5 = 3000，vol30 = 39000/25 = 1560，vr = 25/13 ≈ 1.923 ≥ 1.2 且 mom5 = 112/100−1 = +12% > 0 → m = 70、vv +1。score = (2×87.5+70+60+60)/5 = 365/5 = 73 ≥ 70；held 且 weight 12 < 15、双纪律过 → 加仓（建议 15%）。conf = 0.5 + 4/(2×5) = 0.9。target = [round2(112×1.08), round2(112×1.15)] = [120.96, 128.8]；stop = round2(112×0.92) = 103.04。",
+      "desc": "偏多加仓（目标带锚）：ma5 = 540/5 = 108，ma20 = (15×100+540)/20 = 2040/20 = 102 → v1 +1、v2 +1；mom20 = 112/100−1 = +12% > 5% → v3 +1；pos30 = (112−100)/(120−100) = 12/20 = 0.6 ∈ [0.2,0.9] → v4 0；t = 50+12.5×3 = 87.5。vol5 = 3000，vol30 = 39000/25 = 1560，vr = 25/13 ≈ 1.923 ≥ 1.2 且 mom5 = 112/100−1 = +12% > 0 → m = 70、vv +1。score = (2×87.5+70+60+60)/5 = 365/5 = 73 ≥ 70；held 且 weight 12 < 15 → 加仓（建议 15%，目标带锚，非纪律）。conf = 0.5 + 4/(2×5) = 0.9。target = [round2(112×1.08), round2(112×1.15)] = [120.96, 128.8]；stop = round2(112×0.92) = 103.04。ctx 四项全过参考线 → refs 空（ADR-0023）。",
       "tags": ["normal"],
       "input": {
         "kind": "stock",
@@ -19,7 +19,7 @@
         "price": 112.0,
         "held": true,
         "weight": 12.0,
-        "cash_reserve_pass": true
+        "discipline_ctx": { "cash_pct": 12.0, "sector_pct": 30.0, "cb_total_pct": 5.0 }
       },
       "expect": {
         "action": "add",
@@ -36,13 +36,14 @@
         "target_hi": 128.8,
         "stop": 103.04,
         "position": { "current": 12.0, "suggested": 15.0, "mode": "target" },
+        "discipline_refs": [],
         "stats": { "n_bars": 25, "ma5": 108.0, "ma20": 102.0, "mom5": 12.0, "mom20": 12.0, "pos30": 0.6, "high30": 120.0, "low30": 100.0, "vote_sum": 4, "vote_count": 5 }
       }
     },
     {
       "id": "av-bear-sell",
       "fn": "score_advice",
-      "desc": "偏空卖出：ma5 = 440/5 = 88，ma20 = (1500+440)/20 = 1940/20 = 97 → v1 −1、v2 −1；mom20 = 80/100−1 = −20% < −5% → v3 −1；pos30 = (80−80)/(100−80) = 0 < 0.2 → v4 +1；t = 50+12.5×(−2) = 25。vol5 = 2500，vol30 = 32500/25 = 1300，vr = 25/13 ≥ 1.2 且 mom5 = 80/100−1 = −20% < 0 → m = 30、vv −1。score = (50+30+60+60)/5 = 200/5 = 40 < 45 → 卖出（清仓）。conf = 0.5 + 3/10 = 0.8。stop = round2(80×0.92) = 73.6；卖出无目标区间。",
+      "desc": "偏空卖出：ma5 = 440/5 = 88，ma20 = (1500+440)/20 = 1940/20 = 97 → v1 −1、v2 −1；mom20 = 80/100−1 = −20% < −5% → v3 −1；pos30 = (80−80)/(100−80) = 0 < 0.2 → v4 +1；t = 50+12.5×(−2) = 25。vol5 = 2500，vol30 = 32500/25 = 1300，vr = 25/13 ≥ 1.2 且 mom5 = 80/100−1 = −20% < 0 → m = 30、vv −1。score = (50+30+60+60)/5 = 200/5 = 40 < 45 → 卖出（清仓）。conf = 0.5 + 3/10 = 0.8。stop = round2(80×0.92) = 73.6；卖出无目标区间。非偏多带 → refs 恒空（ADR-0023 D3）。",
       "tags": ["normal"],
       "input": {
         "kind": "stock",
@@ -50,8 +51,7 @@
         "volumes": [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 2500, 2500, 2500, 2500, 2500],
         "price": 80.0,
         "held": true,
-        "weight": 18.0,
-        "cash_reserve_pass": true
+        "weight": 18.0
       },
       "expect": {
         "action": "sell",
@@ -68,13 +68,14 @@
         "target_hi": null,
         "stop": 73.6,
         "position": { "current": 18.0, "suggested": 0.0, "mode": "exit" },
+        "discipline_refs": [],
         "stats": { "n_bars": 25, "ma5": 88.0, "ma20": 97.0, "mom5": -20.0, "mom20": -20.0, "pos30": 0.0, "high30": 100.0, "low30": 80.0, "vote_sum": -3, "vote_count": 5 }
       }
     },
     {
       "id": "av-neutral-hold",
       "fn": "score_advice",
-      "desc": "中性持有：全平序列 → ma5 = ma20 = 100，v1 = v2 = 0；mom20 = 0 → v3 0；high30 = low30 = 100 → pos30 = 0.5（守卫）→ v4 0；t = 50。vr = 1000/1000 = 1 < 1.2 → m = 60、vv 0。score = (100+60+60+60)/5 = 280/5 = 56 ∈ [55,70)，stock 已持仓 → 持有（维持）。conf = 0.5 + 0/10 = 0.5。stop = round2(100×0.92) = 92（持有防线）。",
+      "desc": "中性持有：全平序列 → ma5 = ma20 = 100，v1 = v2 = 0；mom20 = 0 → v3 0；high30 = low30 = 100 → pos30 = 0.5（守卫）→ v4 0；t = 50。vr = 1000/1000 = 1 < 1.2 → m = 60、vv 0。score = (100+60+60+60)/5 = 280/5 = 56 ∈ [55,70)，stock 已持仓 → 持有（维持）。conf = 0.5 + 0/10 = 0.5。stop = round2(100×0.92) = 92（持有防线）。非偏多带 → refs 恒空。",
       "tags": ["normal"],
       "input": {
         "kind": "stock",
@@ -82,8 +83,7 @@
         "volumes": [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
         "price": 100.0,
         "held": true,
-        "weight": 10.0,
-        "cash_reserve_pass": true
+        "weight": 10.0
       },
       "expect": {
         "action": "hold",
@@ -100,13 +100,14 @@
         "target_hi": null,
         "stop": 92.0,
         "position": { "current": 10.0, "suggested": null, "mode": "maintain" },
+        "discipline_refs": [],
         "stats": { "n_bars": 25, "ma5": 100.0, "ma20": 100.0, "mom5": 0.0, "mom20": 0.0, "pos30": 0.5, "high30": 100.0, "low30": 100.0, "vol_ratio": 1.0, "vote_sum": 0, "vote_count": 5 }
       }
     },
     {
       "id": "av-neutral-etf-dca",
       "fn": "score_advice",
-      "desc": "中性带 ETF → 定投：输入同 av-neutral-hold（score = 56、conf = 0.5），kind = etf → action 定投；定投无单点目标与止损（target/stop 均 null，§10 生产口径表），horizon 长线。",
+      "desc": "中性带 ETF → 定投：输入同 av-neutral-hold（score = 56、conf = 0.5），kind = etf → action 定投；定投无单点目标与止损（target/stop 均 null，§10 生产口径表），horizon 长线。非偏多带 → refs 恒空。",
       "tags": ["normal"],
       "input": {
         "kind": "etf",
@@ -114,8 +115,7 @@
         "volumes": [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
         "price": 100.0,
         "held": true,
-        "weight": 8.0,
-        "cash_reserve_pass": true
+        "weight": 8.0
       },
       "expect": {
         "action": "dca",
@@ -125,13 +125,14 @@
         "target_lo": null,
         "target_hi": null,
         "stop": null,
-        "position": { "current": 8.0, "suggested": null, "mode": "dca" }
+        "position": { "current": 8.0, "suggested": null, "mode": "dca" },
+        "discipline_refs": []
       }
     },
     {
       "id": "av-bull-notheld-buy",
       "fn": "score_advice",
-      "desc": "偏多未持仓 → 买入：输入同 av-bull-add（score = 73 ≥ 70、conf = 0.9），held = false 且 cash_reserve_pass → 买入，建议仓位 15%（mode target，current 0）；target/stop 与 av-bull-add 同锚（price 112）。",
+      "desc": "偏多未持仓 → 买入：输入同 av-bull-add（score = 73 ≥ 70、conf = 0.9），held = false → 买入，建议仓位 15%（mode target，current 0）；target/stop 与 av-bull-add 同锚（price 112）。ctx 全过参考线 → refs 空。",
       "tags": ["empty"],
       "input": {
         "kind": "stock",
@@ -140,7 +141,7 @@
         "price": 112.0,
         "held": false,
         "weight": 0.0,
-        "cash_reserve_pass": true
+        "discipline_ctx": { "cash_pct": 12.0, "sector_pct": 20.0, "cb_total_pct": 0.0 }
       },
       "expect": {
         "action": "buy",
@@ -150,13 +151,14 @@
         "target_lo": 120.96,
         "target_hi": 128.8,
         "stop": 103.04,
-        "position": { "current": 0.0, "suggested": 15.0, "mode": "target" }
+        "position": { "current": 0.0, "suggested": 15.0, "mode": "target" },
+        "discipline_refs": []
       }
     },
     {
-      "id": "av-bull-notheld-cash-blocked",
+      "id": "av-bull-notheld-cash-ref",
       "fn": "score_advice",
-      "desc": "现金纪律拦截（未持仓）：输入同 av-bull-notheld-buy 但 cash_reserve_pass = false → score 73 照算，action 降为持有（观望，mode flat、suggested 0），不建仓；观望无 target/stop。",
+      "desc": "现金参考（未持仓，ADR-0023 语义反转 case）：输入同 av-bull-notheld-buy 但 ctx.cash_pct = 6 < 10−ε——旧口径此处现金纪律拦截降为持有观望；新口径**不拦截**：score 73 → 照常买入（建议 15%、target/stop 全量），越线事实以 refs 一条 cash_reserve（6.0/10.0）附注，是否执行由主人拍板。",
       "tags": ["empty", "boundary"],
       "input": {
         "kind": "stock",
@@ -165,23 +167,26 @@
         "price": 112.0,
         "held": false,
         "weight": 0.0,
-        "cash_reserve_pass": false
+        "discipline_ctx": { "cash_pct": 6.0, "sector_pct": 20.0, "cb_total_pct": 0.0 }
       },
       "expect": {
-        "action": "hold",
+        "action": "buy",
         "horizon": "mid",
         "score": 73.0,
         "conf": 0.9,
-        "target_lo": null,
-        "target_hi": null,
-        "stop": null,
-        "position": { "current": 0.0, "suggested": 0.0, "mode": "flat" }
+        "target_lo": 120.96,
+        "target_hi": 128.8,
+        "stop": 103.04,
+        "position": { "current": 0.0, "suggested": 15.0, "mode": "target" },
+        "discipline_refs": [
+          { "rule": "cash_reserve", "value": 6.0, "threshold": 10.0 }
+        ]
       }
     },
     {
-      "id": "av-bull-overweight-blocked",
+      "id": "av-bull-overweight-cap",
       "fn": "score_advice",
-      "desc": "单票纪律拦截：输入同 av-bull-add 但 weight = 26 > 25+ε → score 73 照算，action 降为持有，position 建议降至上限 25%（mode target、suggested 25；卖出数量由调用方以 sell_to 计算，§6）；持有防线 stop = round2(112×0.92) = 103.04，无目标区间。",
+      "desc": "单票超上限参考（ADR-0023 语义反转 case）：输入同 av-bull-add 但 weight = 26 > 25+ε——旧口径此处纪律拦截降为持有（建议降至 25%）；新口径**不拦截**：action = 加仓，position 取上限锚 suggested = 25（mode target；展示层读作「当前 26.0% → 建议 ≤25%」，非降仓指令，减仓股数归 calc_discipline.reduce_hint）。score 73、conf 0.9；加仓带派生继承：target = [120.96, 128.8]、stop = round2(112×0.92) = 103.04（旧拦截票拿不到目标区间，随降级消失）。refs 一条 single_stock（26.0/25.0）；ctx 现金/行业/转债全过不进。",
       "tags": ["boundary"],
       "input": {
         "kind": "stock",
@@ -190,23 +195,26 @@
         "price": 112.0,
         "held": true,
         "weight": 26.0,
-        "cash_reserve_pass": true
+        "discipline_ctx": { "cash_pct": 12.0, "sector_pct": 28.0, "cb_total_pct": 5.0 }
       },
       "expect": {
-        "action": "hold",
+        "action": "add",
         "horizon": "mid",
         "score": 73.0,
         "conf": 0.9,
-        "target_lo": null,
-        "target_hi": null,
+        "target_lo": 120.96,
+        "target_hi": 128.8,
         "stop": 103.04,
-        "position": { "current": 26.0, "suggested": 25.0, "mode": "target" }
+        "position": { "current": 26.0, "suggested": 25.0, "mode": "target" },
+        "discipline_refs": [
+          { "rule": "single_stock", "value": 26.0, "threshold": 25.0 }
+        ]
       }
     },
     {
       "id": "av-bull-at-target",
       "fn": "score_advice",
-      "desc": "仓位已达目标（压线）：输入同 av-bull-add 但 weight = 15，恰好等于目标仓位（15−ε 判定不成立）→ 不再加仓，action 持有（维持，suggested null）；score 73、conf 0.9 不变，stop = 103.04。",
+      "desc": "仓位已达目标（目标带锚压线，非纪律）：输入同 av-bull-add 但 weight = 15，恰好等于目标仓位（15−ε 判定不成立）→ 不再加仓，action 持有（维持，suggested null）；score 73、conf 0.9 不变，stop = 103.04。ctx 全过 → refs 空（w = 15 ≤ 25 无 single_stock）。",
       "tags": ["boundary"],
       "input": {
         "kind": "stock",
@@ -215,7 +223,7 @@
         "price": 112.0,
         "held": true,
         "weight": 15.0,
-        "cash_reserve_pass": true
+        "discipline_ctx": { "cash_pct": 12.0, "sector_pct": 30.0, "cb_total_pct": 4.0 }
       },
       "expect": {
         "action": "hold",
@@ -225,13 +233,44 @@
         "target_lo": null,
         "target_hi": null,
         "stop": 103.04,
-        "position": { "current": 15.0, "suggested": null, "mode": "maintain" }
+        "position": { "current": 15.0, "suggested": null, "mode": "maintain" },
+        "discipline_refs": []
+      }
+    },
+    {
+      "id": "av-bull-multi-ref",
+      "fn": "score_advice",
+      "desc": "偏多带多参考线并现（ADR-0023 新增 boundary）：输入同 av-bull-add 但 weight = 27（>25+ε）且 ctx cash_pct = 8（<10−ε）、sector_pct = 38（>35+ε）、cb_total_pct 缺省（stock 不参与转债参考）——action 仍为加仓（上限锚 suggested = 25，target/stop 加仓带全量），refs 三条按 §6 表序 single_stock(27/25) → sector(38/35) → cash_reserve(8/10)，压线=过守卫不受触发项影响。",
+      "tags": ["boundary"],
+      "input": {
+        "kind": "stock",
+        "closes": [120, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 104, 106, 108, 110, 112],
+        "volumes": [5000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 3000, 3000, 3000, 3000, 3000],
+        "price": 112.0,
+        "held": true,
+        "weight": 27.0,
+        "discipline_ctx": { "cash_pct": 8.0, "sector_pct": 38.0 }
+      },
+      "expect": {
+        "action": "add",
+        "horizon": "mid",
+        "score": 73.0,
+        "conf": 0.9,
+        "target_lo": 120.96,
+        "target_hi": 128.8,
+        "stop": 103.04,
+        "position": { "current": 27.0, "suggested": 25.0, "mode": "target" },
+        "discipline_refs": [
+          { "rule": "single_stock", "value": 27.0, "threshold": 25.0 },
+          { "rule": "sector", "value": 38.0, "threshold": 35.0 },
+          { "rule": "cash_reserve", "value": 8.0, "threshold": 10.0 }
+        ]
       }
     },
     {
       "id": "av-cb-trim",
       "fn": "score_advice",
-      "desc": "转债偏空减仓：ma5 = 485.5/5 = 97.1，ma20 = (1500+485.5)/20 = 1985.5/20 = 99.275 → v1 −1、v2 −1；mom20 = 95.5/100−1 = −4.5% ∈ [−5%,+5%] → v3 0；pos30 = (95.5−95.5)/(100−95.5) = 0 < 0.2 → v4 +1；t = 50+12.5×(−1) = 37.5。vr = 1000/1000 = 1 < 1.2 → m = 60、vv 0。score = (75+60+60+60)/5 = 255/5 = 51 ∈ [45,55) → 减仓，suggested = round1(8/2) = 4；conf = 0.5 + 1/10 = 0.6。转债：target null，stop = round3(95.5×0.95) = round3(90.725) = 90.725。",
+      "desc": "转债偏空减仓：ma5 = 485.5/5 = 97.1，ma20 = (1500+485.5)/20 = 1985.5/20 = 99.275 → v1 −1、v2 −1；mom20 = 95.5/100−1 = −4.5% ∈ [−5%,+5%] → v3 0；pos30 = (95.5−95.5)/(100−95.5) = 0 < 0.2 → v4 +1；t = 50+12.5×(−1) = 37.5。vr = 1000/1000 = 1 < 1.2 → m = 60、vv 0。score = (75+60+60+60)/5 = 255/5 = 51 ∈ [45,55) → 减仓，suggested = round1(8/2) = 4；conf = 0.5 + 1/10 = 0.6。转债：target null，stop = round3(95.5×0.95) = round3(90.725) = 90.725。非偏多带 → refs 恒空。",
       "tags": ["normal"],
       "input": {
         "kind": "cb",
@@ -239,8 +278,7 @@
         "volumes": [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000],
         "price": 95.5,
         "held": true,
-        "weight": 8.0,
-        "cash_reserve_pass": true
+        "weight": 8.0
       },
       "expect": {
         "action": "trim",
@@ -257,13 +295,14 @@
         "target_hi": null,
         "stop": 90.725,
         "position": { "current": 8.0, "suggested": 4.0, "mode": "target" },
+        "discipline_refs": [],
         "stats": { "n_bars": 25, "ma5": 97.1, "ma20": 99.275, "mom5": -4.5, "mom20": -4.5, "pos30": 0.0, "high30": 100.0, "low30": 95.5, "vote_sum": -1, "vote_count": 5 }
       }
     },
     {
       "id": "av-insufficient-data",
       "fn": "score_advice",
-      "desc": "数据不足降级：仅 2 根日线 → ma5/ma20/mom5/mom20/pos30 全部不可算（最少样本 5/20/6/21/5 根），技术票 0 张 → t = 50；volumes 全 null → 量能票不参与、m = 60。score = (100+60+60+60)/5 = 280/5 = 56 → 持有（维持）；可用票 0 < 3 → conf = 0.5（信号样本不足）。high30/low30 仍按 2 根窗口如实报。stop = round2(101×0.92) = 92.92。",
+      "desc": "数据不足降级：仅 2 根日线 → ma5/ma20/mom5/mom20/pos30 全部不可算（最少样本 5/20/6/21/5 根），技术票 0 张 → t = 50；volumes 全 null → 量能票不参与、m = 60。score = (100+60+60+60)/5 = 280/5 = 56 → 持有（维持）；可用票 0 < 3 → conf = 0.5（信号样本不足）。high30/low30 仍按 2 根窗口如实报。stop = round2(101×0.92) = 92.92。非偏多带 → refs 恒空。",
       "tags": ["boundary"],
       "input": {
         "kind": "stock",
@@ -271,8 +310,7 @@
         "volumes": [null, null],
         "price": 101.0,
         "held": true,
-        "weight": 10.0,
-        "cash_reserve_pass": true
+        "weight": 10.0
       },
       "expect": {
         "action": "hold",
@@ -289,6 +327,7 @@
         "target_hi": null,
         "stop": 92.92,
         "position": { "current": 10.0, "suggested": null, "mode": "maintain" },
+        "discipline_refs": [],
         "stats": { "n_bars": 2, "ma5": null, "ma20": null, "mom5": null, "mom20": null, "pos30": null, "high30": 101.0, "low30": 100.0, "vol_ratio": null, "vote_sum": 0, "vote_count": 0 }
       }
     }

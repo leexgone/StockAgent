@@ -133,6 +133,10 @@ exposure     = totalMv / totalAssets × 100             # 仓位（不含现金�
 
 ## 6. 仓位纪律（四条上限，分母不统一，务必照抄）
 
+> **定位补注（ADR-0023，2026-11-26）**：本节四条公式、阈值常量与 `sell_to` **原样不动**；
+> 它们仍是红绿灯卡、再平衡清单与 `calc_discipline` 的触发源。唯在 §10 建议生成链，
+> 自 ADR-0023 起为**参考线**（越线以 `discipline_refs` 附注呈现，不拦截、不改写 action）。
+
 | 规则 | 阈值 | 分子 | 分母 |
 |---|---|---|---|
 | 单票占组合 | ≤ 25% | `mv` | **totalAssets（含现金）** |
@@ -249,12 +253,18 @@ Beta       beta = cov / var_rb'                 # var_rb' = Σ(rb[i]−mean_rb')
 生成（展示层职责，不进 fixture，两边单测只断言关键事实存在）。
 
 **输入**（全部可回溯：`closes/volumes` 来自 sidecar 日线（含当日合成 bar，`04` 附录 B）、
-`price` 来自实时行情、`weight/held` 与现金纪律来自 `recalc`+纪律四条）：
+`price` 来自实时行情、`weight/held` 来自 `recalc`、`discipline_ctx` 由工具层从 §6
+纪律四条现算注入——只作参考判定，不再参与 action 决策，ADR-0023）：
 
 ```
 kind, closes[]（升序日收盘）, volumes[]（同长，可 null）,
-price（现价）, held, weight（占总资产 %）, cash_reserve_pass（现金 ≥10% 纪律）
+price（现价）, held, weight（占总资产 %）,
+discipline_ctx?（可选：cash_pct / sector_pct / cb_total_pct，百分数值，缺项不参与参考）
 ```
+
+旧输入键 `cash_reserve_pass: bool` 退役（ADR-0023）：现金不再是闸门，其占比经
+`discipline_ctx.cash_pct` 进参考判定。`sector_pct` = **该标的自身行业**占市值比
+（与 §6 sector 同分子分母，非组合最大行业）；`cb_total_pct` 仅转债标的用于参考。
 
 **信号票**（每票 +1/0/−1；数据不足则该票**不参与**并如实记降级，不伪造）：
 
@@ -278,14 +288,19 @@ conf = 0.5 + |Σ全部可用票| / (2 × 可用票数)；可用票 < 3 → conf 
 
 全中性（票数全 0）→ score = 56，落在「持有」带；§10 的 70/55 阈值与 gauge 配色**不动**。
 
-**action 决策表**（纪律拦截优先于得分；`held=false` 时 weight = 0）：
+**action 决策表**（**得分定 action；纪律只附参考**，ADR-0023——四条纪律不拦截、
+不改写任何分支；`held=false` 时 weight = 0）：
 
 | score 带 | 已持仓 | 未持仓 |
 |---|---|---|
-| ≥ 70 偏多 | weight > 25+ε → `持有`（建议降至 25%，单票纪律）；现金纪律未过 → `持有`（维持）；weight < 15−ε → `加仓`（建议 15%）；否则 → `持有`（仓位已达目标） | 现金纪律过 → `买入`（建议 15%）；否则 → `持有`（观望） |
+| ≥ 70 偏多 | weight > 25+ε → `加仓`（建议 ≤25%，上限锚，见下 position 段）；weight < 15−ε → `加仓`（建议 15%）；否则 → `持有`（仓位已达目标） | `买入`（建议 15%）——现金不足不再观望 |
 | 55–70 中性 | ETF → `定投`；其余 → `持有`（维持） | ETF → `定投`；其余 → `持有`（观望） |
 | 45–55 偏空 | `减仓`（建议 = weight/2，四舍五入 1 位） | `持有`（观望，不建仓） |
 | < 45 偏空 | `卖出`（建议清仓） | `持有`（观望，不建仓） |
+
+15% 目标带与 25% 上限锚仍是 `suggested` 的数字来源（仓位目标锚属 sizing，不属纪律
+拦截，不随 ADR-0023 降级）。越线事实以 `discipline_refs` 附注随建议产出（见下节），
+「是否执行由主人拍板」，规则不替用户改判。
 
 **horizon**：加仓/买入 → `中线 1–3 月`；定投 → `长线 6 月+`；持有 → `中线 1–3 月`（ETF `长线 6 月+`）；减仓 → `短中线 2–6 周`；卖出 → `短线`。
 
@@ -299,13 +314,34 @@ conf = 0.5 + |Σ全部可用票| / (2 × 可用票数)；可用票 < 3 → conf 
 | 持有 / 减仓 / 卖出（已持仓） | null | 股票/ETF `price×0.92`，转债 `price×0.95`（未执行时的防线） |
 | 未持仓观望 / price 缺失 | null | null |
 
+偏多越 25% 上限参考线的标的按 `加仓` 取加仓带的 target/stop（ADR-0023——旧拦截口径下
+这类票拿不到目标区间，随降级消失）。
+
 **position 输出**：`{current, suggested, mode}`——mode ∈ `target`（建议到目标仓位）/
 `maintain`（维持）/ `dca`（定投）/ `exit`（清仓）/ `flat`（未持仓观望）；文案拼装是展示层
-（工具侧格式化为「当前 x% → 建议 y%」写入 `advice_history.position`）。降到 25% 的
-**卖出数量**用 §6 `sell_to`（调用方拿 `suggested` 当 target 调，逐位可回溯）。
+（工具侧格式化为「当前 x% → 建议 y%」写入 `advice_history.position`）。**加仓/买入向且
+`suggested < current` 时**（超上限高分票的上限锚形态）文案读作「当前 x% → 建议 ≤y%」
+（上限锚，非降仓指令），且该情形**不产出 `sell_qty_hint`**——减仓数量提示只在非加仓向
+的 Target/Exit 场景给出，单票超限的降仓股数归 `calc_discipline` 的 `reduce_hint`
+（§6 本家链路）；调用方拿 `suggested` 当 target 调 §6 `sell_to` 的逐位可回溯语义照旧。
+
+**discipline_refs（纪律参考，ADR-0023）**：`AdviceOutput.discipline_refs[]`，元素
+`{rule, label, value, threshold, text}`——
+
+- `rule` 键名封闭词汇：`single_stock` / `sector` / `cb_total` / `cash_reserve`；
+- **仅未过项入列**：single_stock = `held && weight > 25+ε`；cash = `ctx.cash_pct < 10−ε`；
+  sector = `ctx.sector_pct > 35+ε`；cb_total = `kind=cb && ctx.cb_total_pct > 12+ε`。
+  压线 = 过（附录约定 4 同源）；ctx 缺项的规则不参与；
+- **仅偏多带（score ≥ 70−ε）生成**，其余得分带恒 `[]`（纪律历史上只介入这一带，
+  口径最小变更，ADR-0023 D3）；
+- 数组序固定 = §6 表序：single_stock → sector → cb_total → cash_reserve；
+- `value/threshold/rule` 进 fixture 比对（数字现算可回溯，ADR-0007）；`label/text`
+  是展示层事实模板，**不校验**（`dims[].t` 同等待遇）。文案基调「参考线 / 不拦截 /
+  拍板在你」，禁「拦截 / 必须降至」字样。
 
 **留档**：`calc_advice` 工具算完即写 `advice_history` 数字列（score/conf/target/stop/
-position/dims + `generated_at` + `data_version`），返回 `advice_id`；模型文案经
+position/dims/discipline_refs（ADR-0023，v5 加列，旧行 NULL 读回 `[]`）+
+`generated_at` + `data_version`），返回 `advice_id`；模型文案经
 `finalize_advice` 回填 reason/risks——**数字永不经过模型转写**（ADR-0007 的结构性保证）。
 `data_version` 约定：`adv-v1|k={日线末bar日期|none}|q={行情as_of|none}`。
 
@@ -473,7 +509,7 @@ recalc（§5）从 holdings 现值全部现算——维护后仪表盘 / 诊断 
 | `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate,bench_vol,beta,corr`（B11 定稿后十字段） |
 | `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
 | `price_limit.json` | `limit_pct` / `limit_prices` / `validate_price` | §2 | `kind,code,st` → 涨跌幅比例（ETF/北交所 null）/ `kind,prev,pct` → 涨停与跌停价（整数单元 half-up）/ `price,limit_up,limit_down` → `{valid,reason}` |
-| `advice.json` | `score_advice` | §10 生产口径 | `kind,closes[],volumes[],price,held,weight,cash_reserve_pass` → `action,horizon,score,conf,dims[4]{k,s},target_lo/hi,stop,position{current,suggested,mode},stats`（观察文字 `dims[].t` 是展示层，fixture 不校验） |
+| `advice.json` | `score_advice` | §10 生产口径 | `kind,closes[],volumes[],price,held,weight,discipline_ctx?{cash_pct,sector_pct,cb_total_pct}` → `action,horizon,score,conf,dims[4]{k,s},target_lo/hi,stop,position{current,suggested,mode},stats,discipline_refs[]{rule,label,value,threshold,text}`（观察文字 `dims[].t` 与 `refs[].label/text` 是展示层，fixture 不校验；refs 的 `rule/value/threshold` 校验、数组按 §6 表序对齐，ADR-0023） |
 | `alerts.json` | `eval_alerts` | §12 | `today,item{kind,price,prev,limit_up/down,cost,stop,target_hi,volume_today,vol_hist[],redeem_status,last_trade_date,maturity_date}` → `alerts[]{type,level}`（按判定序；`text` 是展示层模板，fixture 不校验） |
 
 ### 本附录固定的口径（新增约定，与正文同级）

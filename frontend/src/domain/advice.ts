@@ -11,12 +11,19 @@
  * - 无数据源维度（基本面/消息面）与量能缺失/平量的资金面记中性值 NEUTRAL_DIM = 60；
  * - score = (2t + m + f + n) / 5，阈值 70/55/45 三带；
  * - conf = 0.5 + |Σ票| / (2n票)，可用票 < 3 → 0.5（样本内信号一致性，不是胜率）；
- * - 纪律拦截优先于得分：单票 > 25% → 不加仓、建议降回上限；现金纪律未过 → 不开新仓；
+ * - 得分定 action；纪律只附参考（ADR-0023）：四条仓位纪律不拦截、不改写 action——
+ *   越线事实以 DisciplineRef 附注随建议产出（仅偏多带、仅未过项、§6 表序），
+ *   15% 目标带与 25% 上限锚仍是 suggested 数字来源（sizing 属仓位目标，不属纪律）；
  * - target/stop 锚 = 现价，half-up：floor(v × 10^d + 0.5) / 10^d（与 Rust 同表达式）。
  */
 
 import { THRESHOLD_EPS, type Kind } from "./common";
-import { LIMIT_SINGLE_STOCK } from "./discipline";
+import {
+  LIMIT_CASH_RESERVE,
+  LIMIT_CB_TOTAL,
+  LIMIT_SECTOR,
+  LIMIT_SINGLE_STOCK,
+} from "./discipline";
 import { priceDecimals } from "./lot";
 
 /** 无数据源/无信号维度的中性分（中性带 55–69 的中值，03 §10 生产口径） */
@@ -59,8 +66,33 @@ export type AdviceInput = {
   held: boolean;
   /** 占总资产 %（recalc weight；未持仓 = 0） */
   weight: number;
-  /** 现金 ≥10% 纪律（discipline.check 的 cash_reserve.pass） */
-  cash_reserve_pass: boolean;
+  /** 纪律参考上下文（ADR-0023：只作参考判定，不参与 action 决策；缺省 = 只出 single_stock ref） */
+  discipline_ctx?: DisciplineCtx;
+};
+
+/** 纪律参考上下文（百分数值，与 §6 同口径；缺项的规则不参与参考） */
+export type DisciplineCtx = {
+  /** 现金占总资产 %（cash_reserve.value） */
+  cash_pct?: number | null;
+  /** 该标的所在行业占市值 %（分母 total_mv，与 §6 sector 同口径，非组合最大行业） */
+  sector_pct?: number | null;
+  /** 转债合计占总资产 %（cb_total.value，仅 kind=cb 参与） */
+  cb_total_pct?: number | null;
+};
+
+/** 纪律参考项（ADR-0023）：仅未过项入列、仅偏多带生成、固定序 = §6 表序。
+ * rule/value/threshold 进 fixture 比对；label/text 展示层事实模板不校验（dims[].t 同待遇）。 */
+export type DisciplineRef = {
+  /** 规则键（封闭词汇）："single_stock" | "sector" | "cb_total" | "cash_reserve" */
+  rule: string;
+  /** 中文规则名（展示层） */
+  label: string;
+  /** 当前值 % */
+  value: number;
+  /** 参考线 %（LIMIT_* 常量） */
+  threshold: number;
+  /** 一句话提示（展示层模板，数字内嵌） */
+  text: string;
 };
 
 export type AdviceDim = { k: string; s: number; t: string };
@@ -97,6 +129,8 @@ export type AdviceOutput = {
   target_hi: number | null;
   stop: number | null;
   position: PositionAdvice;
+  /** 纪律参考（仅偏多带非空；序 = §6 表序，ADR-0023） */
+  discipline_refs: DisciplineRef[];
   stats: AdviceStats;
 };
 
@@ -207,8 +241,9 @@ export function scoreAdvice(inp: AdviceInput): AdviceOutput {
   // 基本面/消息面：无数据源 → 中性（接入后先改 03 §10 与两边实现）
   const score = (2 * t + money + NEUTRAL_DIM + NEUTRAL_DIM) / 5;
 
-  // ---- action 决策表（纪律拦截优先于得分，03 §10 生产口径）----
+  // ---- action 决策表（得分定 action；纪律只附参考，ADR-0023，03 §10 生产口径）----
   const w = inp.weight;
+  // overCap 只决定 suggested 锚取 25 还是 15，不再改写 action（ADR-0023）
   const overCap = inp.held && w > LIMIT_SINGLE_STOCK + THRESHOLD_EPS;
   const maintain: PositionAdvice = { current: w, suggested: null, mode: "maintain" };
   const flat: PositionAdvice = { current: w, suggested: 0, mode: "flat" };
@@ -222,26 +257,19 @@ export function scoreAdvice(inp: AdviceInput): AdviceOutput {
   let position: PositionAdvice;
   if (score >= SCORE_BULL - THRESHOLD_EPS) {
     if (!inp.held) {
-      if (inp.cash_reserve_pass) {
-        action = "buy";
-        position = toTarget(TARGET_WEIGHT);
-      } else {
-        action = "hold";
-        position = flat; // 现金纪律拦截：不开新仓
-      }
+      action = "buy";
+      position = toTarget(TARGET_WEIGHT);
     } else if (overCap) {
-      // 单票纪律拦截：不加仓，建议降回 25% 上限（卖出数量由调用方走 §6 sellTo）
-      action = "hold";
+      // 超上限偏多票：action 仍为加仓，suggested 锚上限 25%（上限锚读法「建议 ≤25%」，
+      // 非降仓指令——减仓股数归 calc_discipline.reduce_hint 本家，ADR-0023 D2）
+      action = "add";
       position = toTarget(LIMIT_SINGLE_STOCK);
-    } else if (!inp.cash_reserve_pass) {
-      action = "hold";
-      position = maintain;
     } else if (w < TARGET_WEIGHT - THRESHOLD_EPS) {
       action = "add";
       position = toTarget(TARGET_WEIGHT);
     } else {
       action = "hold";
-      position = maintain; // 仓位已达目标，不再加
+      position = maintain; // 仓位已达目标带（sizing 锚，非纪律），不再加
     }
   } else if (score >= SCORE_NEUTRAL - THRESHOLD_EPS) {
     if (inp.kind === "etf") {
@@ -312,6 +340,10 @@ export function scoreAdvice(inp: AdviceInput): AdviceOutput {
     { k: "消息面", s: NEUTRAL_DIM, t: "未接入消息面数据源，按中性处理" },
   ];
 
+  // ---- 纪律参考（ADR-0023：仅偏多带生成、仅未过项入列、序 = §6 表序）----
+  const disciplineRefs: DisciplineRef[] =
+    score >= SCORE_BULL - THRESHOLD_EPS ? buildDisciplineRefs(inp, w) : [];
+
   return {
     action,
     horizon,
@@ -322,6 +354,7 @@ export function scoreAdvice(inp: AdviceInput): AdviceOutput {
     target_hi: targetHi,
     stop,
     position,
+    discipline_refs: disciplineRefs,
     stats: {
       n_bars: n,
       ma5,
@@ -336,6 +369,56 @@ export function scoreAdvice(inp: AdviceInput): AdviceOutput {
       vote_count: voteCount,
     },
   };
+}
+
+/** 纪律参考构建（ADR-0023）：仅未过项入列（压线 = 过，THRESHOLD_EPS 复用），
+ * 固定序 = §6 表序 single_stock → sector → cb_total → cash_reserve；
+ * text 展示层事实模板（不进 fixture，dims[].t 同待遇），基调「参考线 / 拍板在你」。 */
+function buildDisciplineRefs(inp: AdviceInput, w: number): DisciplineRef[] {
+  const refs: DisciplineRef[] = [];
+  if (inp.held && w > LIMIT_SINGLE_STOCK + THRESHOLD_EPS) {
+    refs.push({
+      rule: "single_stock",
+      label: "单票仓位参考线",
+      value: w,
+      threshold: LIMIT_SINGLE_STOCK,
+      text: `当前 ${w.toFixed(1)}% 已越 25% 单票参考线：建议锚为上限，是否执行由你拍板`,
+    });
+  }
+  const ctx = inp.discipline_ctx;
+  if (ctx) {
+    const sector = ctx.sector_pct;
+    if (sector !== null && sector !== undefined && sector > LIMIT_SECTOR + THRESHOLD_EPS) {
+      refs.push({
+        rule: "sector",
+        label: "行业仓位参考线",
+        value: sector,
+        threshold: LIMIT_SECTOR,
+        text: `所在行业占市值 ${sector.toFixed(1)}% 已越 35% 行业参考线：注意集中度风险，是否执行由你拍板`,
+      });
+    }
+    const cb = ctx.cb_total_pct;
+    if (inp.kind === "cb" && cb !== null && cb !== undefined && cb > LIMIT_CB_TOTAL + THRESHOLD_EPS) {
+      refs.push({
+        rule: "cb_total",
+        label: "转债合计参考线",
+        value: cb,
+        threshold: LIMIT_CB_TOTAL,
+        text: `组合转债合计 ${cb.toFixed(1)}% 已越 12% 转债参考线：仅供参考，是否执行由你拍板`,
+      });
+    }
+    const cash = ctx.cash_pct;
+    if (cash !== null && cash !== undefined && cash < LIMIT_CASH_RESERVE - THRESHOLD_EPS) {
+      refs.push({
+        rule: "cash_reserve",
+        label: "现金保留参考线",
+        value: cash,
+        threshold: LIMIT_CASH_RESERVE,
+        text: `现金仅占 ${cash.toFixed(1)}%，低于 10% 现金参考线：仅供参考，是否执行由你拍板`,
+      });
+    }
+  }
+  return refs;
 }
 
 /** 技术面观察：有什么数据说什么话，缺失如实标注（降级不伪装） */

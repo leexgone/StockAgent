@@ -56,8 +56,9 @@ pub enum Side {
     Sell,
 }
 
-/// 分母为 0 → 比率取 0（03 §5 除零防护）
-pub(crate) fn ratio(num: f64, den: f64) -> f64 {
+/// 分母为 0 → 比率取 0（03 §5 除零防护）。
+/// pub：宿主工具层同款守卫复用（ADR-0023 该票行业占比现算），口径不在 domain 外重写。
+pub fn ratio(num: f64, den: f64) -> f64 {
     if den == 0.0 {
         0.0
     } else {
