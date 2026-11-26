@@ -23,8 +23,9 @@ import { useUi } from "../store/ui";
  * sessions（最近会话 = push_log 全通道留痕，ADR-0017）。原 limit 卡
  * 「它不会做的事」已移除（2026-11-03 拍板）——边界承诺由页头描述与免责脚注兜底
  * （docs/02 chat 展示口径）。建议问题 chips / ?q= 深链只预填输入不自动发送（真实
- * LLM，交用户确认）；例外 = `?q=…&send=1`（analysis 空态「去问答触发 /建议」
- * 出口——斜杠指令意图明确，跳转即自动发送一次，agent 离线时停留预填态待上线补发）。
+ * LLM，交用户确认）；例外 = `?q=…&send=1`（意图明确的斜杠指令深链——analysis
+ * 空态「去问答触发 /建议」与 diagnosis「生成诊断报告」（q=/诊断，P7-T10）两处
+ * 出口，跳转即自动发送一次，agent 离线时停留预填态待上线补发）。
  * 会话真值在服务端档案（T4/ADR-0011）：进入即 GET /api/chat/history 水合，
  * 「清空会话」走 POST /api/chat/reset（档案 + agent 内存历史一并清，服务端失败
  * 不清本地）；localStorage 降级为服务端不可达时的只读展示缓存（上限 30 条，

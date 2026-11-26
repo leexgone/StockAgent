@@ -30,7 +30,10 @@ import { useUi } from "../store/ui";
  * （hhi/sectors），不在前端重算。再平衡清单的「调整前后波动」走 volSynth（03 §8
  * 黄金向量：ρ 同标的 1 / 同行业 0.62 / 跨行业 0.35，σᵢ = 各标的近 30 日真实日线收益
  * 标准差），降仓数量走 sellTo（03 §6）；数字全部取后端 recalc 原值，清单是客户端
- * 模板骨架。基准 = sh000300 价格指数归一（未含分红，非 §7「全收益」，B11 如实标注）。
+ * 模板骨架。基准 = sh000300 价格指数归一（未含分红，非 §7「全收益」，B11 如实标注；
+ * 对齐口径 P7-T10 起上收 domain bench——lib/bench.ts 薄委托，与 agent 侧
+ * calc_diagnosis 工具同源）。「生成诊断报告」= 深链 /chat?q=/诊断&send=1，报告由
+ * diagnosis-report 技能生成，与本屏同一套 domain 公式（perf/bench/discipline）。
  */
 
 type HRow = PortfolioView["holdings"][number];
@@ -281,13 +284,17 @@ export default function DiagnosisScreen() {
           </div>
           <button
             className="btn" id="report-btn"
-            onClick={() =>
-              toast(
-                perfWin
-                  ? `诊断摘要：${win} 日超额 ${pct(perfWin.cum - perfWin.bench_cum)}、回撤 ${fixed(perfWin.mdd, 1)}%。诊断报告推送另案；预警与盘后摘要已推送绑定的微信/QQ 会话。`
-                  : "暂无净值样本可诊断 · 录入第一笔后报告才有内容",
-              )
-            }
+            onClick={() => {
+              // P7-T10：报告由 /诊断 技能生成（calc_diagnosis 与本屏共用 domain
+              // bench/perf 口径）——深链跳 chat 自动发送一次，与 analysis 空态
+              // 「去问答触发 /建议」同契约（docs/02 chat 段）。样本 <2 时工具会
+              // 诚实拒绝，屏已知无样本就不空跑一轮 LLM，保留 toast 说明态。
+              if (equityRows.length >= 2) {
+                navigate(`/chat?q=${encodeURIComponent("/诊断")}&send=1`);
+              } else {
+                toast("暂无净值样本可诊断 · 录入第一笔并等 15:05 盘后归档后，这里可一键生成 /诊断 报告");
+              }
+            }}
           >
             生成诊断报告
           </button>

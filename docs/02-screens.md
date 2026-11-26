@@ -123,8 +123,9 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 生产侧深链契约（frontend ChatView/ChatPanel）：`/chat?q=<问题>` 只**预填输入不自动发送**
 （真实 LLM，交用户确认——全局搜索回车、analysis「就这只问我」走此形态）；
 `/chat?q=<问题>&send=1` 在 agent 上线且空闲时**自动发送一次**（仅限意图明确的斜杠指令
-深链——analysis 空态「去问答触发 /建议」，`q=/建议 <code>`，代码写法按 generate-advice
-技能约定：持仓内裸代码、非持仓带 sh/sz 前缀）；agent 离线时停留预填态，上线后补发，
+深链——两处出口：analysis 空态「去问答触发 /建议」，`q=/建议 <code>`，代码写法按
+generate-advice 技能约定：持仓内裸代码、非持仓带 sh/sz 前缀；diagnosis 页头「生成
+诊断报告」，`q=/诊断`，P7-T10）；agent 离线时停留预填态，上线后补发，
 每个 nonce 只发一次不重放。
 
 生产侧文件上传口径（ADR-0015，2026-11-14）：输入区 📎 按钮（多选）+ 拖拽文件到对话区 +
@@ -186,6 +187,7 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 | `diag-drawdown-card` | 回撤在水下多久（距前高百分比） | `ZM.perf` 结果 |
 | `diag-window-table` | 分区间对比（近一周/一月/一季，样本内测算） | `equity` 切片 |
 | `diag-fix-card` | 再平衡清单，按「影响大小 × 操作成本」排序，逐条试算调整前后波动 | 03 的波动合成公式 |
+| `report-btn`（生产侧，P7-T10） | 页头「生成诊断报告」= 深链 `/chat?q=/诊断&send=1`（agent 上线后自动发送一次，与 analysis 空态 /建议 同契约）；净值样本 <2 不跳、toast 说明态。IM 绑定会话直接说 /诊断 同样触发（能力面渠道无关，ADR-0011）；报告由 diagnosis-report 技能生成，数字取 `calc_diagnosis`（与本屏共用 domain bench/perf 口径），不推送、不另立留档——对话即档案 | `useEquity` 样本数 + chat 段深链契约 |
 
 ## wechat.html — 助理接入
 
@@ -204,6 +206,6 @@ Agent 内存历史一并清，服务端失败不清本地）。`localStorage['zi
 
 页头「发送测试推送」**禁用 + hint**（测试推送端点另案——新增 = 新契约面 + 无鉴权服务上的真实发送滥用面，超出本轮范围）。屏挂载即 load bindings/health/pushLog + 屏内 60s 轮询（卸载清理）。状态色 B5：已绑定/在线一律绿 `--ok`、离线/未绑定 warn，绝不用红；`--accent` ≤2（仅绑定提交 btn-primary）；空账户六卡不报错。
 
-IM 会话命令面（robit 自持，非本子木界面；ADR-0022，2026-11-24）：绑定会话里自然语言创建计划任务（提醒/周期，`schedule_*` 工具，**仅 IM 生效**）+ `/schedule [list|pause|resume|delete <id前缀>]` 直管（robit 0.7.0 M1）；口径见 03 §12 计划任务小节。Web 侧 `schedule_*` 如实报不可用（robit 0.8.0 已发布 M2 Web 接线件，子木不消费，ADR-0022 补记）。
+IM 会话命令面（robit 自持，非本子木界面；ADR-0022，2026-11-24）：绑定会话里自然语言创建计划任务（提醒/周期，`schedule_*` 工具，**仅 IM 生效**）+ `/schedule [list|pause|resume|delete <id前缀>]` 直管（robit 0.7.0 M1）；口径见 03 §12 计划任务小节。Web 侧 `schedule_*` 如实报不可用（robit 0.8.0 已发布 M2 Web 接线件，子木不消费，ADR-0022 补记）。技能触发词（/复盘 /盘前 /建议 /诊断）在绑定会话同样生效——能力面渠道无关（ADR-0011「嘴不同手相同」），Web 诊断屏「生成诊断报告」深链与 IM 直接说 `/诊断` 走同一技能（P7-T10）。
 
 **原型语义作废清单**（`design/wechat.html` 冻结参照，生产不实现）：主通道失败自动改备用重试一次（生产推送失败不自动重试，ADR-0011）、服务号参数输入与校验、演示二维码 + TTL 换码（登录 = 部署侧 CLI 扫码）、浏览器桌面通知备用通道、推送卡片按钮（微信纯文本）、「推送内容包含具体价格」开关与 6 类订阅开关（C15 另案）。原型 `localStorage['zimu:wechat:v2']` 状态键不入生产（绑定落 zimu.db、订阅待 C15、屏无本地状态）。密钥类字段永远不进仓库（`.gitignore` 已覆盖 `.env`/`secrets.*`；`wechat-state.json` 含凭据已被 `**/.robit/*` 覆盖，不加豁免）。
