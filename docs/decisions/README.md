@@ -62,3 +62,4 @@ B …
 | [0020](./0020-push-length-fully-robit.md) | 推送长度守卫全量归 robit：移除宿主自截层，三类推送统一透传 | 接受 |
 | [0021](./0021-skill-dir-seed-and-user-extension.md) | 技能目录改回 .robit/skills：系统技能初始化播种 + 用户自增 | 接受 |
 | [0022](./0022-enable-robit-scheduled-tasks-im.md) | 启用 robit 计划任务（仅 IM 通道）：config-only 消费 M1 官方接线，自主回合信任边界明示 | 接受 |
+| [0023](./0023-discipline-advisory-in-advice-chain.md) | 仓位纪律在建议生成链降级为纯参考：不拦截不改写 action，目标锚保留，建议内嵌 discipline_refs | 接受 |
