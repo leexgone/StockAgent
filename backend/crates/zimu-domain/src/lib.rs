@@ -15,6 +15,7 @@
 
 pub mod advice;
 pub mod alert;
+pub mod bench;
 pub mod dilution;
 pub mod discipline;
 pub mod fees;

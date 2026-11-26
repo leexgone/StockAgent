@@ -1,0 +1,148 @@
+{
+  "group": "bench",
+  "title": "基准对齐（沪深300 日线 carry-forward 归一，P7-T10）",
+  "spec": "docs/03-domain-rules.md §7 基准对齐段",
+  "schema_version": 1,
+  "status": "active",
+  "tolerance": 1e-9,
+  "notes": "align_bench(dates, bars, nav0) → {aligned: number[]|null}。前置条件：dates 与 bars 均升序（调用方保证，函数不排序）；日期比较 = YYYY-MM-DD 字符串字典序。语义：①bars 空或 dates<2 → null；②无效收盘（缺失/≤0/NaN）先过滤；③每个快照日取「当日或此前最近」有效收盘——只向后 carry 不向前找，首快照日无值 → null 整段不可对齐；同日多根有效 bar 取输入序靠后者；④归一 aligned[i]=raw[i]/raw[0]×nav0，raw[0]≤0 或 nav0≤0（含 NaN）→ null。null ≠ 数值 0（附录固定口径 6：对齐失败时调用方以空 bench 喂 perf 走 bench_* 全 0 降级）。",
+  "cases": [
+    {
+      "id": "bn-normal",
+      "fn": "align_bench",
+      "desc": "三快照日对三根日线逐日对齐：raw=[4000,4040,4020]，base=4000，nav0=100000 → [100000, 4040/4000×100000=101000, 4020/4000×100000=100500]。",
+      "tags": ["normal"],
+      "input": {
+        "dates": ["2026-01-05", "2026-01-06", "2026-01-07"],
+        "bars": [
+          { "date": "2026-01-05", "close": 4000.0 },
+          { "date": "2026-01-06", "close": 4040.0 },
+          { "date": "2026-01-07", "close": 4020.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": [100000.0, 101000.0, 100500.0] }
+    },
+    {
+      "id": "bn-carry-forward",
+      "fn": "align_bench",
+      "desc": "周末与缺日 carry-forward：快照日 01-09/01-12/01-13，bars 01-08:3980、01-09:4000、01-12:4060——01-08 bar 早于首快照日只喂指针不当 base（base=4000）；01-13 无 bar 向后 carry 01-12 的 4060 → raw=[4000,4060,4060] → [100000, 101500, 101500]。",
+      "tags": ["normal"],
+      "input": {
+        "dates": ["2026-01-09", "2026-01-12", "2026-01-13"],
+        "bars": [
+          { "date": "2026-01-08", "close": 3980.0 },
+          { "date": "2026-01-09", "close": 4000.0 },
+          { "date": "2026-01-12", "close": 4060.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": [100000.0, 101500.0, 101500.0] }
+    },
+    {
+      "id": "bn-start-before-window",
+      "fn": "align_bench",
+      "desc": "首快照日（2025-12-31）早于日线窗口（首根 2026-01-05）→ 只向后 carry 不向前找，整段不可对齐 → null（不画不伪装，不以首日之后的值回填）。",
+      "tags": ["boundary"],
+      "input": {
+        "dates": ["2025-12-31", "2026-01-06"],
+        "bars": [
+          { "date": "2026-01-05", "close": 4000.0 },
+          { "date": "2026-01-06", "close": 4020.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": null }
+    },
+    {
+      "id": "bn-invalid-filtered",
+      "fn": "align_bench",
+      "desc": "无效收盘过滤：null / 0 / 负数 bar 先剔除（不占指针位）——bars [01-04:4000, 01-05:null, 01-06:0, 01-06:4040, 01-07:-5] 过滤后剩 [01-04:4000, 01-06:4040]；同日无效+有效并存取有效那根；01-07 carry 4040 → raw=[4000,4040,4040] → [100000, 101000, 101000]。",
+      "tags": ["boundary"],
+      "input": {
+        "dates": ["2026-01-04", "2026-01-06", "2026-01-07"],
+        "bars": [
+          { "date": "2026-01-04", "close": 4000.0 },
+          { "date": "2026-01-05", "close": null },
+          { "date": "2026-01-06", "close": 0.0 },
+          { "date": "2026-01-06", "close": 4040.0 },
+          { "date": "2026-01-07", "close": -5.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": [100000.0, 101000.0, 101000.0] }
+    },
+    {
+      "id": "bn-all-invalid",
+      "fn": "align_bench",
+      "desc": "全部 bar 无效（null 与 0）→ 过滤后为空 → null。",
+      "tags": ["empty"],
+      "input": {
+        "dates": ["2026-01-05", "2026-01-06"],
+        "bars": [
+          { "date": "2026-01-05", "close": null },
+          { "date": "2026-01-06", "close": 0.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": null }
+    },
+    {
+      "id": "bn-empty-bars",
+      "fn": "align_bench",
+      "desc": "bars 为空数组 → null（退化分支①）。",
+      "tags": ["empty"],
+      "input": {
+        "dates": ["2026-01-05", "2026-01-06"],
+        "bars": [],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": null }
+    },
+    {
+      "id": "bn-single-date",
+      "fn": "align_bench",
+      "desc": "dates 仅 1 个 → null（区间至少两点，与 perf 短序列约定同源）。",
+      "tags": ["boundary"],
+      "input": {
+        "dates": ["2026-01-05"],
+        "bars": [
+          { "date": "2026-01-05", "close": 4000.0 },
+          { "date": "2026-01-06", "close": 4020.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": null }
+    },
+    {
+      "id": "bn-nav0-nonpositive",
+      "fn": "align_bench",
+      "desc": "归一锚 nav0 = 0 → null（负数走同一分支；NaN 同——!(nav0>0) 判定）。",
+      "tags": ["boundary"],
+      "input": {
+        "dates": ["2026-01-05", "2026-01-06", "2026-01-07"],
+        "bars": [
+          { "date": "2026-01-05", "close": 4000.0 },
+          { "date": "2026-01-06", "close": 4040.0 },
+          { "date": "2026-01-07", "close": 4020.0 }
+        ],
+        "nav0": 0.0
+      },
+      "expect": { "aligned": null }
+    },
+    {
+      "id": "bn-single-bar-plateau",
+      "fn": "align_bench",
+      "desc": "仅一根有效 bar → 全快照日 carry 同值，归一后恒定平台 [100000,100000,100000]——perf 侧 ε 守卫把 beta/corr 归 0 的输入形态锚点（呼应 pf-flat）。",
+      "tags": ["normal"],
+      "input": {
+        "dates": ["2026-01-05", "2026-01-06", "2026-01-07"],
+        "bars": [
+          { "date": "2026-01-05", "close": 4000.0 }
+        ],
+        "nav0": 100000.0
+      },
+      "expect": { "aligned": [100000.0, 100000.0, 100000.0] }
+    }
+  ]
+}

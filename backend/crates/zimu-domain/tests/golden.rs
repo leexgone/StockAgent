@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use zimu_domain::{
-    advice, alert, dilution, discipline, fees, lot, perf, price_limit, recalc, vol_synth,
+    advice, alert, bench, dilution, discipline, fees, lot, perf, price_limit, recalc, vol_synth,
 };
 
 fn fixtures_dir() -> PathBuf {
@@ -58,6 +58,9 @@ fn compute(group: &str, case: &Value) -> Value {
             discipline::sell_to(&i)
         }),
         ("perf", "perf") => call(input, |i: perf::PerfInput| perf::perf(&i)),
+        ("bench", "align_bench") => call(input, |i: bench::AlignBenchInput| {
+            bench::AlignBenchOutput { aligned: bench::align_bench(&i) }
+        }),
         ("vol_synth", "vol_synth") => call(input, |i: vol_synth::VolSynthInput| {
             vol_synth::vol_synth(&i)
         }),

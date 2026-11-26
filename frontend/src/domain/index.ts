@@ -26,6 +26,7 @@ export * from "./dilution";
 export * from "./recalc";
 export * from "./discipline";
 export * from "./perf";
+export * from "./bench";
 export * from "./vol_synth";
 export * from "./price_limit";
 export * from "./advice";

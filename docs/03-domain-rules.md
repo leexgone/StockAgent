@@ -194,6 +194,16 @@ Beta       beta = cov / var_rb'                 # var_rb' = Σ(rb[i]−mean_rb')
 
 实现：`data.js:161`（原型，冻结参照）。生产基准数据 = **sh000300 价格指数**日线点位归一到区间起点（P5-T2 dashboard/diagnosis）；§7 理想口径为沪深 300 **全收益**，价格指数未含分红的差异在前端图下与免责区如实标注，全收益数据源列后续增强。
 
+**基准对齐（生产口径，P7-T10 成文 2026-11-26）**——`perf` 的 `bench` 输入必须是「已归一到同一起点」的序列，生产唯一来源是 sh000300 日线按快照日对齐（`align_bench`）：
+
+1. **输入**：`dates`（快照日升序序列，与 nav 同序）、`bars`（基准日线 `(date, close?)` 升序序列）、`nav0`（归一锚 = 区间首个净值点）。
+2. **无效收盘过滤**：`close` 缺失 / ≤0 / NaN 的 bar 先剔除（不占对齐指针位）。
+3. **carry-forward 对齐**：每个快照日取「当日或此前最近一根」有效收盘——**只向后 carry、不向前找**；首个快照日就无值（区间起点早于日线窗口）→ 整段不可对齐，返回 null，**不画不伪装**、不以首日之后的值回填；同日多根有效 bar 取输入序靠后者。
+4. **归一**：`aligned[i] = raw[i] / raw[0] × nav0`；`raw[0] ≤ 0` 或 `nav0 ≤ 0`（含 NaN）→ null。
+5. **退化分支**：`bars` 空或 `dates < 2` → null。日期比较为 `YYYY-MM-DD` 字符串字典序（= 时间序）。
+
+实现：`zimu-domain::bench::align_bench`（唯一 Rust 实现，`calc_diagnosis` 工具消费）+ TS 镜像 `frontend/src/domain/bench.ts`（`lib/bench.ts` 薄委托适配 KlineBar，dashboard/diagnosis 两屏消费）；黄金向量组 `bench.json`。原 P5-T2 前端单侧实现（lib/bench.ts）自本段成文起废止独立口径地位。**align 的 null 与 perf 的全 0 是两层语义**：对齐失败 → 调用方以空 bench 喂 perf → `bench_*` 全 0 降级形态（「基准不可用」），不是对齐结果本身为 0。
+
 ## 8. 波动合成假设（再平衡清单的调整前后对比）
 
 ```
@@ -507,6 +517,7 @@ recalc（§5）从 holdings 现值全部现算——维护后仪表盘 / 诊断 
 | `recalc.json` | `recalc` | §5 | `cash,holdings[]` → `per[]` 逐笔派生 + `agg` 组合汇总 |
 | `discipline.json` | `check` / `sell_to` | §6 | 纪律四条 `{value,threshold,pass}` / 降仓卖出数量 |
 | `perf.json` | `perf` | §7 | `nav[],bench[]` → `cum,bench_cum,ann_vol,mdd,bench_mdd,sharpe,win_rate,bench_vol,beta,corr`（B11 定稿后十字段） |
+| `bench.json` | `align_bench` | §7 基准对齐段 | `dates[],bars[{date,close}],nav0` → `{aligned: number[]｜null}`（null = 整段不可对齐，五个分支见正文；升序前置条件由调用方保证） |
 | `vol_synth.json` | `vol_synth` | §8 | `items[{code,sector,w,sigma}]` → `ann_vol`（百分数） |
 | `price_limit.json` | `limit_pct` / `limit_prices` / `validate_price` | §2 | `kind,code,st` → 涨跌幅比例（ETF/北交所 null）/ `kind,prev,pct` → 涨停与跌停价（整数单元 half-up）/ `price,limit_up,limit_down` → `{valid,reason}` |
 | `advice.json` | `score_advice` | §10 生产口径 | `kind,closes[],volumes[],price,held,weight,discipline_ctx?{cash_pct,sector_pct,cb_total_pct}` → `action,horizon,score,conf,dims[4]{k,s},target_lo/hi,stop,position{current,suggested,mode},stats,discipline_refs[]{rule,label,value,threshold,text}`（观察文字 `dims[].t` 与 `refs[].label/text` 是展示层，fixture 不校验；refs 的 `rule/value/threshold` 校验、数组按 §6 表序对齐，ADR-0023） |
@@ -519,6 +530,7 @@ recalc（§5）从 holdings 现值全部现算——维护后仪表盘 / 诊断 
 3. **清仓**：`after_shares = 0` 时持仓行移除，`after_cost` 记 `null`。
 4. **纪律压线**：恰好等于阈值算安全（见比对规则第 5 条）。
 5. **费用输出不舍入**：§3 公式结果保留原始精度（估算口径）；分位舍入是展示层与券商结算的事，领域库不做。
+6. **align_bench 的 null ≠ perf 的全 0**：对齐失败（§7 基准对齐段五分支）返回 null 表达「整段不可对齐、不画不伪装」；调用方随后以**空 bench** 喂 perf，得到 `bench_*` 全 0 的既有降级形态（「基准不可用」）——两层语义不得混同，null 不是数值结果。
 
 ### 已知缝隙（历史存档；两条均已定稿并入正文与 fixtures）
 

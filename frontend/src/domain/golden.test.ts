@@ -66,6 +66,8 @@ function compute(group: string, fn: string, input: any): Json {
       return domain.sellTo(input);
     case "perf/perf":
       return domain.perf(input);
+    case "bench/align_bench":
+      return { aligned: domain.alignBench(input) };
     case "vol_synth/vol_synth":
       return domain.volSynth(input);
     case "price_limit/limit_pct":
