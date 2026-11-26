@@ -1,8 +1,8 @@
 //! 领域工具集（P4-T6）：agent 的账本/行情取数与出数入口。
 //!
-//! 工具面组成（ADR-0014 起 = 领域 14 件 + robit 标准面，注册 25–27 随配置）：
-//! 本模块只管**领域 14 件**（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新
-//! 两件 + 写账本五件（ADR-0012/0013）+ echo 链路验证 = 13 领域工具 + echo）；
+//! 工具面组成（ADR-0014 起 = 领域 15 件 + robit 标准面，注册 26–32 随配置）：
+//! 本模块只管**领域 15 件**（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新
+//! 两件 + 写账本五件（ADR-0012/0013）+ 诊断一件（P7-T10）+ echo 链路验证）；
 //! robit 标准面（read/write/edit/ls/find/grep/bash/load_skill/search_history/
 //! query_task 恒在，generate_image 随 image provider key、read_image 随 vision
 //! 配置按需）由装配线经 `create_tools_from_config_with` 内核取得后叠加本模块
@@ -25,6 +25,7 @@
 //! | `refresh_quotes` | 写行情字段 + 补空串行业 | `service::refresh_portfolio`（与 HTTP API 同一条链；行业补全 P7-T6/ADR-0016） |
 //! | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice`（03 §10 生产口径，ADR-0007） |
 //! | `finalize_advice` | 写 advice_history 文案列 | risks 非空校验（03 §10） |
+//! | `calc_diagnosis` | 只读 | `store.equity_snapshots/list_advice` → `zimu-domain::bench+perf`（03 §7，P7-T10） |
 //! | `echo` | 只读 | 链路验证（P2-T2） |
 //!
 //! **写账本三纪律（ADR-0012，自动落账 + 读回）**：① 记账数字必须来自用户明示，
@@ -44,6 +45,7 @@
 //! 错误文案面向对话，与 HTTP 契约（`ApiError`）各自表达同一事实。
 
 mod advice;
+mod diagnosis;
 mod market;
 mod portfolio;
 
@@ -57,6 +59,7 @@ use crate::echo::EchoTool;
 use crate::AgentDeps;
 
 pub use advice::{CalcAdviceTool, FinalizeAdviceTool};
+pub use diagnosis::CalcDiagnosisTool;
 pub use market::{GetQuoteTool, MarketStatusTool, RefreshQuotesTool};
 pub use portfolio::{
     AdjustCashTool, CalcDisciplineTool, GetHoldingsTool, GetTradesTool, RecordTradeTool,
@@ -80,13 +83,13 @@ macro_rules! store_try {
 pub(crate) use store_try;
 
 /// 领域工具名清单（tools_required 校验名单用，与下表逐件对应）。
-pub const DOMAIN_TOOL_NAMES: [&str; 14] = [
+pub const DOMAIN_TOOL_NAMES: [&str; 15] = [
     "market_status", "get_quote", "get_holdings", "calc_discipline", "simulate_trade",
     "record_trade", "adjust_cash", "get_trades", "upsert_holding", "remove_holding",
-    "refresh_quotes", "calc_advice", "finalize_advice", "echo",
+    "refresh_quotes", "calc_advice", "finalize_advice", "calc_diagnosis", "echo",
 ];
 
-/// 把全部领域工具（14 件）注册进给定 registry——装配线先经
+/// 把全部领域工具（15 件）注册进给定 registry——装配线先经
 /// `create_tools_from_config_with` 取 robit 标准面，再调本函数叠加
 /// （ADR-0014；zimu-server 与 zimu-agent-cli 共用同一装配线）。
 /// 领域名与标准名零冲突（已逐件核对）；同名注册语义为覆盖（robit registry）。
@@ -103,7 +106,8 @@ pub fn register_domain_tools(reg: &mut ToolRegistry, deps: Arc<AgentDeps>) {
     reg.register(RemoveHoldingTool { deps: deps.clone() });
     reg.register(RefreshQuotesTool { deps: deps.clone() });
     reg.register(CalcAdviceTool { deps: deps.clone() });
-    reg.register(FinalizeAdviceTool { deps });
+    reg.register(FinalizeAdviceTool { deps: deps.clone() });
+    reg.register(CalcDiagnosisTool { deps });
     reg.register(EchoTool);
 }
 

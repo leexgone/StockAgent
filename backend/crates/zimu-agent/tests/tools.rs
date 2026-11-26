@@ -10,6 +10,8 @@
 //! - `refresh_quotes` 与 HTTP refresh 同一条链（service::refresh_portfolio）；
 //! - sidecar 降级：日线拿不到 → calc_advice 拒绝出建议；health 挂 → market_status
 //!   如实报 offline，不瘫；
+//! - `calc_diagnosis`（P7-T10）：四窗口指标与 domain perf 直算容差一致、基准降级
+//!   三形态不拒绝、样本不足诚实报错、最近建议摘要新在前；
 //! - Skill 模板可加载、触发词唯一、tools_required 全部已注册。
 
 use std::any::Any;
@@ -29,7 +31,7 @@ use robit_ai::RobitConfig;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use zimu_agent::skills::{load_zimu_skills, runtime_skills_dir, seed_system_skills_from};
-use zimu_agent::tools::{register_domain_tools, AdjustCashTool, CalcAdviceTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
+use zimu_agent::tools::{register_domain_tools, AdjustCashTool, CalcAdviceTool, CalcDiagnosisTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::{MarketError, MarketResult};
@@ -39,7 +41,7 @@ use zimu_market::models::{
 };
 use zimu_market::MarketApi;
 use zimu_domain::Side;
-use zimu_store::{AccountRow, NewHoldingMeta, Store, TradeRequest};
+use zimu_store::{AccountRow, EquitySnapshotRow, NewAdvice, NewHoldingMeta, Store, TradeRequest};
 
 // ============================================================================
 // FakeApi —— MarketApi 注入点（sidecar 替身）
@@ -994,13 +996,13 @@ async fn skills_load_with_unique_triggers_and_registered_tools() {
     let (skills, errors) = load_zimu_skills(&wd);
     assert!(errors.is_empty(), "Skill 加载错误：{errors:?}");
     let names: Vec<&str> = skills.iter().map(|s| s.frontmatter.name.as_str()).collect();
-    for expect in ["post-market-review", "pre-market-watch", "generate-advice"] {
+    for expect in ["post-market-review", "pre-market-watch", "generate-advice", "diagnosis-report"] {
         assert!(names.contains(&expect), "缺 Skill {expect}，实有 {names:?}");
     }
 
-    // 播种落盘：三系统技能目录在 <wd>/.robit/skills（ADR-0021 D2/D3）
+    // 播种落盘：四系统技能目录在 <wd>/.robit/skills（ADR-0021 D2/D3）
     let runtime = runtime_skills_dir(&wd);
-    for expect in ["post-market-review", "pre-market-watch", "generate-advice"] {
+    for expect in ["post-market-review", "pre-market-watch", "generate-advice", "diagnosis-report"] {
         assert!(
             runtime.join(expect).join("SKILL.md").is_file(),
             "系统技能 {expect} 未播种到磁盘"
@@ -1012,7 +1014,7 @@ async fn skills_load_with_unique_triggers_and_registered_tools() {
     for s in &skills {
         triggers.extend(s.frontmatter.triggers.iter().map(|t| t.as_str()));
     }
-    for t in ["/review", "/复盘", "/watch", "/盘前", "/advice", "/建议"] {
+    for t in ["/review", "/复盘", "/watch", "/盘前", "/advice", "/建议", "/diagnosis", "/诊断"] {
         assert_eq!(triggers.iter().filter(|x| **x == t).count(), 1, "触发词 {t} 应恰好注册一次");
     }
 
@@ -1048,8 +1050,10 @@ async fn user_added_skill_loaded_and_system_skills_seeded_into_existing_root() {
     let (skills, errors) = load_zimu_skills(&wd);
     assert!(errors.is_empty(), "Skill 加载错误：{errors:?}");
     let names: Vec<&str> = skills.iter().map(|s| s.frontmatter.name.as_str()).collect();
-    assert_eq!(skills.len(), 4, "三系统技能逐个补缺 + 用户技能，实有 {names:?}");
-    for expect in ["post-market-review", "pre-market-watch", "generate-advice", "my-skill"] {
+    assert_eq!(skills.len(), 5, "四系统技能逐个补缺 + 用户技能，实有 {names:?}");
+    for expect in
+        ["post-market-review", "pre-market-watch", "generate-advice", "diagnosis-report", "my-skill"]
+    {
         assert!(names.contains(&expect), "缺 Skill {expect}，实有 {names:?}");
     }
     assert_eq!(
@@ -1155,7 +1159,7 @@ fn seed_from_synthetic_source_copies_aux_files_and_skips_existing() {
 }
 
 // ============================================================================
-// 注册面组成（ADR-0014：robit 标准面 + 领域 14 件）
+// 注册面组成（ADR-0014：robit 标准面 + 领域 15 件）
 // ============================================================================
 
 /// 空配置装置：无 provider/image/vision → 条件件（generate_image/read_image）
@@ -1200,7 +1204,7 @@ fn standard_surface_plus_domain_composition_per_adr_0014() {
         assert!(names.contains(&t), "领域面缺 {t}，实有 {names:?}");
     }
     assert!(names.contains(&"send_file"), "IM 发文件工具缺位，实有 {names:?}");
-    assert_eq!(names.len(), 25, "空配置下应恰 10 标准 + 14 领域 + send_file，实有 {names:?}");
+    assert_eq!(names.len(), 26, "空配置下应恰 10 标准 + 15 领域 + send_file，实有 {names:?}");
 }
 
 /// ADR-0022：`[app.schedule] enabled=true` 注册计划任务四件，且不受 standard_tools
@@ -1245,4 +1249,242 @@ fn schedule_tools_register_when_enabled_per_adr_0022() {
     for t in ["schedule_create", "schedule_edit", "schedule_list", "schedule_view"] {
         assert!(!registry.contains(t), "schedule 停用 {t} 应缺席");
     }
+}
+
+// ============================================================================
+// calc_diagnosis —— 诊断报告取数（P7-T10：净值 KPI 四窗 + 基准对齐降级三形态）
+// ============================================================================
+
+/// 固定快照日序列（升序，与 store.equity_snapshots 返回形态一致）
+const SNAP_DATES: [&str; 5] =
+    ["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20"];
+
+fn seed_snapshots(store: &SharedStore, assets: &[f64; 5]) {
+    let s = zimu_agent::lock(store);
+    for (d, a) in SNAP_DATES.iter().zip(assets) {
+        s.upsert_equity_snapshot(&EquitySnapshotRow {
+            date: d.to_string(),
+            ts: format!("{d} 15:05"),
+            total_assets: *a,
+            total_mv: a * 0.85,
+            cash: a * 0.15,
+            day_pnl: 0.0,
+            day_pnl_pct: 0.0,
+            total_pnl: 0.0,
+            total_pnl_pct: 0.0,
+            exposure: 85.0,
+            hhi: 0.3,
+            top3_sector: 60.0,
+        })
+        .unwrap();
+    }
+}
+
+/// sh000300 基准日线（dates 与快照日一一对应；调用方可换 dates/closes 造降级形态）
+fn bench_kline(dates: &[&str], closes: &[f64]) -> KlinePayload {
+    let bars: Vec<KlineBar> = dates
+        .iter()
+        .zip(closes)
+        .map(|(d, c)| KlineBar {
+            date: d.to_string(),
+            open: Some(*c),
+            high: Some(*c),
+            low: Some(*c),
+            close: Some(*c),
+            volume: Some(1e8),
+            amount: None,
+        })
+        .collect();
+    KlinePayload {
+        symbol: "sh000300".into(),
+        kind: "index".into(),
+        kind_routed: "inferred".into(),
+        adjusted: "none".into(),
+        start: dates.first().map(|s| s.to_string()).unwrap_or_default(),
+        end: dates.last().map(|s| s.to_string()).unwrap_or_default(),
+        count: bars.len(),
+        source: Some("fake_index".into()),
+        degraded: false,
+        attempts: vec![],
+        kline: bars,
+    }
+}
+
+#[tokio::test]
+async fn calc_diagnosis_windows_match_domain_perf() {
+    let store = seeded_store();
+    let nav = [100000.0, 101000.0, 100500.0, 102000.0, 103000.0];
+    seed_snapshots(&store, &nav);
+    let fake = FakeApi::arc();
+    // 基准收盘 [4000,4040,4020,4060,4100] → 归一到 nav0=100000：
+    // [100000, 101000, 100500, 101500, 102500]
+    fake.set_kline(bench_kline(&SNAP_DATES, &[4000.0, 4040.0, 4020.0, 4060.0, 4100.0]));
+    let tool = CalcDiagnosisTool { deps: deps_with(store, fake) };
+
+    let out = exec(&tool, json!({})).await;
+
+    assert_eq!(out["samples"]["count"], 5);
+    assert_eq!(out["samples"]["start"], "2026-11-16");
+    assert_eq!(out["samples"]["end"], "2026-11-20");
+    assert_eq!(out["latest_snapshot"]["total_assets"].as_f64().unwrap(), 103000.0);
+    assert_eq!(out["bench"]["available"], true);
+    assert_eq!(out["bench"]["symbol"], "sh000300");
+    assert_eq!(out["kpi_window"], "90");
+    assert!(out["recent_advice"].as_array().unwrap().is_empty());
+
+    // 四窗口（样本 5 < 20 → 各窗尾部截断后同为全量，与诊断屏 slice(-n) 语义一致）
+    let windows = out["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 4);
+    assert_eq!(
+        windows.iter().map(|w| w["key"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["all", "20", "45", "90"]
+    );
+
+    // 数字与 domain 直算按容差一致——期望值走同一条 domain 函数链
+    // （align_bench → perf，同位输入），不手写十进制常数：归一除法带 1-ulp
+    // 噪声，会翻转 win_rate 的逐日胜负判定（03 附录 1-ulp 房规同款教训）。
+    let aligned = zimu_domain::bench::align_bench(&zimu_domain::bench::AlignBenchInput {
+        dates: SNAP_DATES.iter().map(|s| s.to_string()).collect(),
+        bars: [4000.0, 4040.0, 4020.0, 4060.0, 4100.0]
+            .iter()
+            .enumerate()
+            .map(|(i, c)| zimu_domain::bench::BenchBar {
+                date: SNAP_DATES[i].to_string(),
+                close: Some(*c),
+            })
+            .collect(),
+        nav0: nav[0],
+    })
+    .expect("fixture 数据必须可对齐");
+    let expect = zimu_domain::perf::perf(&zimu_domain::perf::PerfInput {
+        nav: nav.to_vec(),
+        bench: aligned,
+    });
+    let m = &windows[0]["metrics"];
+    assert_eq!(windows[0]["has_bench"], true);
+    assert_eq!(windows[0]["samples"], 5);
+    for (key, ev) in [
+        ("cum", expect.cum),
+        ("bench_cum", expect.bench_cum),
+        ("ann_vol", expect.ann_vol),
+        ("mdd", expect.mdd),
+        ("bench_mdd", expect.bench_mdd),
+        ("sharpe", expect.sharpe),
+        ("win_rate", expect.win_rate),
+        ("bench_vol", expect.bench_vol),
+        ("beta", expect.beta),
+        ("corr", expect.corr),
+    ] {
+        let av = m[key].as_f64().unwrap();
+        assert!((av - ev).abs() < 1e-9, "{key}: 工具 {av} vs domain {ev}");
+    }
+}
+
+#[tokio::test]
+async fn calc_diagnosis_bench_degrades_not_refuses() {
+    let nav = [100000.0, 101000.0, 100500.0, 102000.0, 103000.0];
+
+    // 形态一：sidecar 整机挂 → available=false + reason，指标照出（bench_* 全 0）
+    let store = seeded_store();
+    seed_snapshots(&store, &nav);
+    let fake = FakeApi::arc();
+    fake.set_down(true);
+    let out = exec(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
+    assert_eq!(out["bench"]["available"], false);
+    assert!(out["bench"]["reason"].as_str().unwrap().contains("sidecar"), "{out}");
+    let m = &out["windows"][0]["metrics"];
+    assert_eq!(m["bench_cum"].as_f64().unwrap(), 0.0);
+    assert_eq!(m["beta"].as_f64().unwrap(), 0.0);
+    assert!(m["cum"].as_f64().unwrap() != 0.0, "组合侧指标照常产出");
+    assert_eq!(out["windows"][0]["has_bench"], false);
+
+    // 形态二：kline 空窗口（count=0 非错）→ available=false
+    let store = seeded_store();
+    seed_snapshots(&store, &nav);
+    let fake = FakeApi::arc();
+    fake.set_kline(bench_kline(&[], &[]));
+    let out = exec(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
+    assert_eq!(out["bench"]["available"], false);
+    assert!(out["bench"]["reason"].as_str().unwrap().contains("窗口为空"), "{out}");
+
+    // 形态三：首快照日早于日线窗口 → 对齐失败（03 §7 carry-forward null 语义）
+    let store = seeded_store();
+    seed_snapshots(&store, &nav);
+    let fake = FakeApi::arc();
+    fake.set_kline(bench_kline(&["2026-12-01", "2026-12-02"], &[4000.0, 4010.0]));
+    let out = exec(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
+    assert_eq!(out["bench"]["available"], false);
+    assert!(out["bench"]["reason"].as_str().unwrap().contains("对齐失败"), "{out}");
+}
+
+#[tokio::test]
+async fn calc_diagnosis_insufficient_samples_refuses_honestly() {
+    // 空库 → 诚实报错（不以 0 冒充安全）
+    let store = seeded_store();
+    let fake = FakeApi::arc();
+    fake.set_kline(bench_kline(&SNAP_DATES, &[4000.0, 4040.0, 4020.0, 4060.0, 4100.0]));
+    let err = exec_err(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
+    assert!(err.contains("还没有净值快照"), "{err}");
+
+    // 仅 1 条快照 → 拒绝出数
+    let store = seeded_store();
+    {
+        let s = zimu_agent::lock(&store);
+        s.upsert_equity_snapshot(&EquitySnapshotRow {
+            date: "2026-11-20".into(),
+            ts: "2026-11-20 15:05".into(),
+            total_assets: 100000.0,
+            total_mv: 85000.0,
+            cash: 15000.0,
+            day_pnl: 0.0,
+            day_pnl_pct: 0.0,
+            total_pnl: 0.0,
+            total_pnl_pct: 0.0,
+            exposure: 85.0,
+            hhi: 0.3,
+            top3_sector: 60.0,
+        })
+        .unwrap();
+    }
+    let fake = FakeApi::arc();
+    fake.set_kline(bench_kline(&SNAP_DATES, &[4000.0, 4040.0, 4020.0, 4060.0, 4100.0]));
+    let err = exec_err(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
+    assert!(err.contains("只有 1 条") && err.contains("样本不足"), "{err}");
+}
+
+#[tokio::test]
+async fn calc_diagnosis_recent_advice_new_first_and_trimmed() {
+    let store = seeded_store();
+    seed_snapshots(&store, &[100000.0, 101000.0, 100500.0, 102000.0, 103000.0]);
+    {
+        let s = zimu_agent::lock(&store);
+        for (code, ts) in [("600519", "2026-11-19 15:10"), ("000001", "2026-11-20 15:10")] {
+            s.insert_advice(&NewAdvice {
+                code: code.into(),
+                action: "持有".into(),
+                score: 60.0,
+                conf: 0.5,
+                target_lo: None,
+                target_hi: None,
+                stop: Some(9.2),
+                position: "当前 10.0% → 维持".into(),
+                dims: json!([]),
+                discipline_refs: json!([]),
+                data_version: "adv-v1|k=none|q=none".into(),
+                generated_at: ts.into(),
+            })
+            .unwrap();
+        }
+    }
+    let fake = FakeApi::arc();
+    fake.set_kline(bench_kline(&SNAP_DATES, &[4000.0, 4040.0, 4020.0, 4060.0, 4100.0]));
+    let out = exec(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
+
+    let recent = out["recent_advice"].as_array().unwrap();
+    assert_eq!(recent.len(), 2);
+    assert_eq!(recent[0]["code"], "000001", "新在前（list_advice 排序透传）");
+    assert_eq!(recent[1]["code"], "600519");
+    // 摘要裁剪：不含 dims/discipline_refs/risks 大件
+    assert!(recent[0].get("dims").is_none() && recent[0].get("risks").is_none());
+    assert_eq!(recent[0]["stop"].as_f64().unwrap(), 9.2);
 }
