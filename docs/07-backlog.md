@@ -44,6 +44,31 @@ P5-T2 index 屏冒烟发现：sina spot 不 carry 中证转债指数（回空名
 
 **现象**：agent 侧历史纯内存（重启即忘），前端 `zimu:chat:me` 展示档从不回传模型——刷新后「用户看到的对话」与「模型记得的对话」两份历史各自漂移；IM 通道接入后此分叉无解（微信消息到达时浏览器可能根本没开）。**修复**：Web 会话真值上服务端 `chat_messages`（v4，先落库再注入 + `with_history` 复活回灌 + history/reset 端点），localStorage 降级为服务端不可达时的只读展示缓存；thinking 段两处都不入（框架语义对齐）。**验证**：chat_record 状态机 8 单测 + chat_api 3 集成 + 契约样例 2 份；真实网关单轮冒烟实锤「注入 1 秒后档案先有 user 行」「重启后日志『会话复活：从档案回灌 2 条』」。
 
+### B17 · 诊断屏 kline fan-out 无并发上限（侧车排队 → 503 雪崩） ⏳ 待办（2026-11-28 用户拍板延后）
+
+**现象**（2026-11-28 调试服务卡顿事故定位）：诊断屏一次 fan-out 13 个
+`/api/market/kline/{symbol}?with_today=true`（12 持仓 + 1 基准），`Promise.all`
+齐发；恰逢 `refresh_quotes` 全量 akshare 爬取（实测 37s）占住侧车，请求排队齐刷
+刷打满服务端 10s 行情探针超时 → 全部 503（日志 `latency=10008ms` 实锤）。
+dashboard 自选 sparkline 同族。降级行为本身正确（错误记入 kline store，
+σᵢ/迷你走势如实空缺），但一次进屏把侧车打瘫、满屏红叉体验差。
+
+**方案**（已拍板，约 0.3d）：`store/kline.ts` 增 `loadMany(symbols, q, concurrency=4)`
+分批池（基准优先发起，保证 bench 系数字段先可用），诊断屏与 dashboard 改走它。
+**不做**服务端信号量：只会把超时变排队；**不做**侧车多 worker：限频器/熔断器是
+进程内状态（P4-T3 设计前提），多 worker = 上游 QPS 成倍放大，个人工具吃封禁风险。
+
+### B18 · 聊天历史全量水合（194KB，随会话时长线性增长） ⏳ 待办（2026-11-28 用户拍板延后）
+
+**现象**：`GET /api/chat/history` 无 limit 拉全档，实测 194KB——大头是工具行
+`tool_json`（refresh_quotes 单次输出即 8KB+）。当前不卡（渲染瓶颈已由 memo 三连修
+解决，a7ec448；工具卡默认折叠；拉取 9ms），属**慢性病**：会话不重置则档案单调增长，
+数月后首屏水合成本回升。
+
+**方案**（已拍板，约 0.3d）：前端 `useChatHistory.load()` 传 `limit`（最近 100 行）
++ 顶部「查看更早消息」按钮走服务端既有 `before_id` 分页（chat_api 原生支持，
+零后端改动）。**不动存储**：工具结果截断落库会破坏 ADR-0011 档案完整性语义。
+
 ## 待决策
 
 | # | 问题 | 备注 |
