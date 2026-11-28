@@ -11,9 +11,11 @@
 //! - `score = (2t + m + f + n) / 5`，阈值 70/55/45 三带；
 //! - `conf = 0.5 + |Σ票| / (2n票)`，可用票 < 3 → 0.5（样本内信号一致性，**不是胜率**，
 //!   CLAUDE.md 安全边界：文案不得写成收益承诺）；
-//! - 得分定 action；纪律只附参考（ADR-0023）：四条仓位纪律不拦截、不改写 action——
-//!   越线事实以 [`DisciplineRef`] 附注随建议产出（仅偏多带、仅未过项、§6 表序），
-//!   15% 目标带与 25% 上限锚仍是 `suggested` 数字来源（sizing 属仓位目标，不属纪律）；
+//! - 得分定 action，**纪律零参与**（ADR-0024，取代 ADR-0023 的参考线口径）：
+//!   打分链不吃任何纪律输入、不产出纪律附注——偏多带三分支纯得分×持仓形态
+//!   （未持有→买入 15；`w<15−ε`→加仓 15；其余含 w>25 重仓→持有维持），
+//!   15% 目标带是 `suggested` 的唯一仓位数字来源（sizing 属仓位目标，不属纪律）；
+//!   仓位风险的表达退居 Web 端测算展示（03 §6 定位补注）；
 //! - target/stop 锚 = 现价，half-up 舍入到 §1 小数位：`floor(v × 10^d + 0.5) / 10^d`
 //!   （与 TS 镜像同一表达式，逐位一致）；
 //! - `dims[].t` 观察文字是展示层模板（不进 fixture），事实数字全部取自本模块计算值。
@@ -21,7 +23,6 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::discipline::{LIMIT_CASH_RESERVE, LIMIT_CB_TOTAL, LIMIT_SECTOR, LIMIT_SINGLE_STOCK};
 use crate::lot::price_decimals;
 use crate::{Kind, THRESHOLD_EPS};
 
@@ -93,41 +94,10 @@ pub struct AdviceInput {
     pub held: bool,
     /// 占总资产 %（recalc weight；未持仓 = 0）
     pub weight: f64,
-    /// 纪律参考上下文（ADR-0023：只作参考判定，不参与 action 决策）。
-    /// 可选——缺省 = 只出 single_stock ref；旧键 `cash_reserve_pass` 已退役。
-    /// 工具层从 `discipline::check` 现算注入（sector_pct 为**该标的自身行业**占市值比，
-    /// 与 §6 sector 同分子分母；cb_total_pct 仅转债标的用于参考）。
-    #[serde(default)]
-    pub discipline_ctx: Option<DisciplineCtx>,
-}
-
-/// 纪律参考上下文（百分数值，与 §6 同口径；缺项的规则不参与参考）
-#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
-pub struct DisciplineCtx {
-    /// 现金占总资产 %（cash_reserve.value）
-    pub cash_pct: Option<f64>,
-    /// 该标的所在行业占市值 %（分母 total_mv，与 §6 sector 同口径，非组合最大行业）
-    pub sector_pct: Option<f64>,
-    /// 转债合计占总资产 %（cb_total.value，仅 kind=cb 参与）
-    pub cb_total_pct: Option<f64>,
-}
-
-/// 纪律参考项（ADR-0023）：仅未过项入列、仅偏多带生成、固定序 = §6 表序。
-/// `rule/value/threshold` 进 fixture 比对（数字规则侧产出，ADR-0007 不变）；
-/// `label/text` 展示层事实模板，不校验（`dims[].t` 同等待遇）。
-/// 文案基调「参考线/不拦截/拍板在你」，禁「拦截/必须降至」字样。
-#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
-pub struct DisciplineRef {
-    /// 规则键（封闭词汇）："single_stock" | "sector" | "cb_total" | "cash_reserve"
-    pub rule: String,
-    /// 中文规则名（展示层）
-    pub label: String,
-    /// 当前值 %
-    pub value: f64,
-    /// 参考线 %（LIMIT_* 常量）
-    pub threshold: f64,
-    /// 一句话提示（展示层模板，数字内嵌）
-    pub text: String,
+    // ADR-0024：纪律输入整体退役——`cash_reserve_pass`（P4-T6 初版）与
+    // `discipline_ctx`（ADR-0023）两度退役，打分链与 §6 纪律零接触。
+    // serde 默认忽略未知字段：旧 fixture/调用残留 discipline_ctx 键不会报错，
+    // 只是不再生效（对照黄金向量 notes 的代际说明）。
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -183,8 +153,8 @@ pub struct AdviceOutput {
     pub target_hi: Option<f64>,
     pub stop: Option<f64>,
     pub position: PositionAdvice,
-    /// 纪律参考（仅偏多带非空；序 = §6 表序，ADR-0023）
-    pub discipline_refs: Vec<DisciplineRef>,
+    // ADR-0024：`discipline_refs` 字段退役——打分输出不再携带纪律参考
+    //（ADR-0023 的 AdviceOutput 内嵌附注整体废除；留档列见 zimu-store v5 注记）
     pub stats: AdviceStats,
 }
 
@@ -338,10 +308,8 @@ pub fn score_advice(inp: &AdviceInput) -> AdviceOutput {
     // 基本面/消息面：无数据源 → 中性（接入后先改 03 §10 与本函数）
     let score = (2.0 * t + money + NEUTRAL_DIM + NEUTRAL_DIM) / 5.0;
 
-    // ---- action 决策表（得分定 action；纪律只附参考，ADR-0023，03 §10 生产口径）----
+    // ---- action 决策表（纯得分表，纪律零参与，ADR-0024，03 §10 生产口径）----
     let w = inp.weight;
-    // over_cap 只决定 suggested 锚取 25 还是 15，不再改写 action（ADR-0023）
-    let over_cap = inp.held && w > LIMIT_SINGLE_STOCK + THRESHOLD_EPS;
     let maintain = PositionAdvice {
         current: w,
         suggested: None,
@@ -361,14 +329,12 @@ pub fn score_advice(inp: &AdviceInput) -> AdviceOutput {
     let (action, position) = if score >= SCORE_BULL - THRESHOLD_EPS {
         if !inp.held {
             (Action::Buy, to_target(TARGET_WEIGHT))
-        } else if over_cap {
-            // 超上限偏多票：action 仍为加仓，suggested 锚上限 25%（上限锚读法「建议 ≤25%」，
-            // 非降仓指令——减仓股数归 calc_discipline.reduce_hint 本家，ADR-0023 D2）
-            (Action::Add, to_target(LIMIT_SINGLE_STOCK))
         } else if w < TARGET_WEIGHT - THRESHOLD_EPS {
             (Action::Add, to_target(TARGET_WEIGHT))
         } else {
-            (Action::Hold, maintain) // 仓位已达目标带（sizing 锚，非纪律），不再加
+            // 仓位已达目标带（含 w > 25 的重仓票——纪律不以任何形式介入，ADR-0024；
+            // 超限的表达归 Web 端红绿灯卡与再平衡清单，03 §6 定位补注）
+            (Action::Hold, maintain)
         }
     } else if score >= SCORE_NEUTRAL - THRESHOLD_EPS {
         if inp.kind == Kind::Etf {
@@ -464,13 +430,6 @@ pub fn score_advice(inp: &AdviceInput) -> AdviceOutput {
         },
     ];
 
-    // ---- 纪律参考（ADR-0023：仅偏多带生成、仅未过项入列、序 = §6 表序）----
-    let discipline_refs = if score >= SCORE_BULL - THRESHOLD_EPS {
-        build_discipline_refs(inp, w)
-    } else {
-        Vec::new()
-    };
-
     AdviceOutput {
         action,
         horizon,
@@ -481,7 +440,6 @@ pub fn score_advice(inp: &AdviceInput) -> AdviceOutput {
         target_hi,
         stop,
         position,
-        discipline_refs,
         stats: AdviceStats {
             n_bars: n,
             ma5,
@@ -498,65 +456,9 @@ pub fn score_advice(inp: &AdviceInput) -> AdviceOutput {
     }
 }
 
-/// 纪律参考构建（ADR-0023）：仅未过项入列（压线 = 过，THRESHOLD_EPS 复用），
-/// 固定序 = §6 表序 single_stock → sector → cb_total → cash_reserve；
-/// `text` 展示层事实模板（不进 fixture，`dims[].t` 同待遇），基调「参考线 / 拍板在你」。
-fn build_discipline_refs(inp: &AdviceInput, w: f64) -> Vec<DisciplineRef> {
-    let mut refs = Vec::new();
-    if inp.held && w > LIMIT_SINGLE_STOCK + THRESHOLD_EPS {
-        refs.push(DisciplineRef {
-            rule: "single_stock".into(),
-            label: "单票仓位参考线".into(),
-            value: w,
-            threshold: LIMIT_SINGLE_STOCK,
-            text: format!("当前 {w:.1}% 已越 25% 单票参考线：建议锚为上限，是否执行由你拍板"),
-        });
-    }
-    if let Some(ctx) = inp.discipline_ctx.as_ref() {
-        if let Some(pct) = ctx.sector_pct {
-            if pct > LIMIT_SECTOR + THRESHOLD_EPS {
-                refs.push(DisciplineRef {
-                    rule: "sector".into(),
-                    label: "行业仓位参考线".into(),
-                    value: pct,
-                    threshold: LIMIT_SECTOR,
-                    text: format!(
-                        "所在行业占市值 {pct:.1}% 已越 35% 行业参考线：注意集中度风险，是否执行由你拍板"
-                    ),
-                });
-            }
-        }
-        if inp.kind == Kind::Cb {
-            if let Some(pct) = ctx.cb_total_pct {
-                if pct > LIMIT_CB_TOTAL + THRESHOLD_EPS {
-                    refs.push(DisciplineRef {
-                        rule: "cb_total".into(),
-                        label: "转债合计参考线".into(),
-                        value: pct,
-                        threshold: LIMIT_CB_TOTAL,
-                        text: format!(
-                            "组合转债合计 {pct:.1}% 已越 12% 转债参考线：仅供参考，是否执行由你拍板"
-                        ),
-                    });
-                }
-            }
-        }
-        if let Some(pct) = ctx.cash_pct {
-            if pct < LIMIT_CASH_RESERVE - THRESHOLD_EPS {
-                refs.push(DisciplineRef {
-                    rule: "cash_reserve".into(),
-                    label: "现金保留参考线".into(),
-                    value: pct,
-                    threshold: LIMIT_CASH_RESERVE,
-                    text: format!(
-                        "现金仅占 {pct:.1}%，低于 10% 现金参考线：仅供参考，是否执行由你拍板"
-                    ),
-                });
-            }
-        }
-    }
-    refs
-}
+// ADR-0024：build_discipline_refs（纪律参考构建）整体删除——打分链与 §6 纪律零接触，
+// 越线事实不再随建议产出。降仓测算的唯一产地移回 Web 端（红绿灯卡、再平衡清单，
+// 前端对 /api/holdings 原值现算，03 §6 定位补注）。
 
 /// 技术面观察：有什么数据说什么话，缺失如实标注（降级不伪装）
 fn tech_observation(
@@ -615,7 +517,6 @@ mod tests {
             price: 100.0,
             held: true,
             weight: 10.0,
-            discipline_ctx: None,
         }
     }
 
@@ -634,7 +535,6 @@ mod tests {
             price: 112.0,
             held: true,
             weight: 12.0,
-            discipline_ctx: None,
         }
     }
 
@@ -660,92 +560,45 @@ mod tests {
     }
 
     #[test]
-    fn discipline_refs_are_advisory_not_blocking() {
-        // ADR-0023（fixture av-bull-overweight-cap 同款输入的浓缩版）：偏多 + 单票 26%
-        // 越 25% 参考线 → action 仍为加仓、suggested 锚上限 25（mode target）；
-        // 加仓带派生继承：target 区间 + stop 全量（旧拦截口径拿不到目标区间）；
-        // refs 恰一条 single_stock。
+    fn bull_band_ignores_position_discipline() {
+        // ADR-0024（fixture av-bull-overweight-hold / av-bull-heavy-etf-hold 浓缩版）：
+        // 偏多带三分支纯得分——w = 26 的重仓高分票不再有任何纪律形态表达：
+        // 既非 0007 时代的拦截（持有+降至 25）、也非 0023 时代的上限锚加仓，
+        // 而是与 w=15 压线票同一个「持有（维持）」出口；target null、防线 stop 保留。
         let mut inp = bull_input();
         inp.weight = 26.0;
         let out = score_advice(&inp);
         assert!(out.score >= SCORE_BULL);
-        assert_eq!(out.action, Action::Add);
-        assert_eq!(out.position.suggested, Some(LIMIT_SINGLE_STOCK));
-        assert_eq!(out.position.mode, PositionMode::Target);
-        assert!(out.target_lo.is_some() && out.target_hi.is_some());
+        assert_eq!(out.action, Action::Hold);
+        assert_eq!(out.position.suggested, None);
+        assert_eq!(out.position.mode, PositionMode::Maintain);
+        assert!(out.target_lo.is_none() && out.target_hi.is_none());
         assert_eq!(out.stop, Some(round_dec(112.0 * 0.92, 2)));
-        assert_eq!(out.discipline_refs.len(), 1);
-        assert_eq!(out.discipline_refs[0].rule, "single_stock");
-        assert_eq!(out.discipline_refs[0].value, 26.0);
-        assert_eq!(out.discipline_refs[0].threshold, LIMIT_SINGLE_STOCK);
     }
 
     #[test]
-    fn cash_below_ref_line_no_longer_blocks_buy() {
-        // ADR-0023（fixture av-bull-notheld-cash-ref 浓缩版）：偏多未持仓 + 现金 6%
-        // 低于 10% 参考线 → 照常买入（建议 15%、target/stop 全量），越线只进 refs
-        let mut inp = bull_input();
-        inp.held = false;
-        inp.weight = 0.0;
-        inp.discipline_ctx = Some(DisciplineCtx {
-            cash_pct: Some(6.0),
-            sector_pct: Some(20.0),
-            cb_total_pct: Some(0.0),
-        });
+    fn output_carries_no_discipline_fields() {
+        // ADR-0024 结构锚：AdviceOutput 序列化后不得出现任何纪律键——
+        // 黄金向量比对是 expect 子集制，「输出无此字段」须由本测钉死
+        // （fixture 若误回写 discipline_refs 期望，runner 也会因缺键而红，双保险）。
+        let inp = bull_input();
         let out = score_advice(&inp);
-        assert!(out.score >= SCORE_BULL);
-        assert_eq!(out.action, Action::Buy);
-        assert_eq!(out.position.suggested, Some(TARGET_WEIGHT));
-        assert!(out.target_lo.is_some() && out.stop.is_some());
-        assert_eq!(out.discipline_refs.len(), 1);
-        assert_eq!(out.discipline_refs[0].rule, "cash_reserve");
-        assert_eq!(out.discipline_refs[0].value, 6.0);
-    }
-
-    #[test]
-    fn refs_order_threshold_gates_and_band_gate() {
-        // §6 表序 + 压线 = 过 + cb 仅转债 + 非偏多带恒空（fixture av-bull-multi-ref 扩展网）
-        let mut inp = bull_input();
-        inp.weight = 27.0;
-        inp.discipline_ctx = Some(DisciplineCtx {
-            cash_pct: Some(8.0),
-            sector_pct: Some(38.0),
-            cb_total_pct: Some(13.0), // stock 不参与转债参考
-        });
-        let out = score_advice(&inp);
-        let rules: Vec<&str> = out.discipline_refs.iter().map(|r| r.rule.as_str()).collect();
-        assert_eq!(rules, ["single_stock", "sector", "cash_reserve"]);
-
-        // 压线 = 过（四条全部恰等于阈值 → refs 空）
+        let val = serde_json::to_value(&out).unwrap();
+        let obj = val.as_object().unwrap();
+        for banned in ["discipline_refs", "discipline", "cash_reserve_pass"] {
+            assert!(
+                !obj.contains_key(banned),
+                "AdviceOutput 不得携带纪律键 {banned}（ADR-0024）"
+            );
+        }
+        // 偏多未持仓同样只剩买入一个出口（原 av-bull-notheld-cash-ref 场景：
+        // 现金状态在输入侧已无处表达）
         let mut inp2 = bull_input();
-        inp2.weight = 25.0;
-        inp2.discipline_ctx = Some(DisciplineCtx {
-            cash_pct: Some(10.0),
-            sector_pct: Some(35.0),
-            cb_total_pct: Some(12.0),
-        });
-        assert!(score_advice(&inp2).discipline_refs.is_empty());
-
-        // 转债标的：cb_total 参与参考
-        let mut inp3 = bull_input();
-        inp3.kind = Kind::Cb;
-        inp3.discipline_ctx = Some(DisciplineCtx {
-            cash_pct: Some(12.0),
-            sector_pct: None,
-            cb_total_pct: Some(13.0),
-        });
-        let out3 = score_advice(&inp3);
-        let rules3: Vec<&str> = out3.discipline_refs.iter().map(|r| r.rule.as_str()).collect();
-        assert_eq!(rules3, ["cb_total"]);
-
-        // 非偏多带恒空：中性带 + ctx 越线 → refs 仍为 []（口径最小变更，ADR-0023 D3）
-        let mut inp4 = flat(25);
-        inp4.discipline_ctx = Some(DisciplineCtx {
-            cash_pct: Some(5.0),
-            sector_pct: Some(40.0),
-            cb_total_pct: None,
-        });
-        assert!(score_advice(&inp4).discipline_refs.is_empty());
+        inp2.held = false;
+        inp2.weight = 0.0;
+        let out2 = score_advice(&inp2);
+        assert_eq!(out2.action, Action::Buy);
+        assert_eq!(out2.position.suggested, Some(TARGET_WEIGHT));
     }
 
     #[test]

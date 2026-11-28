@@ -24,3 +24,4 @@ C8：analysis 屏与盘后复盘的分析结论（`score` / `conf` / `dims` / �
 - P4-T6 的领域工具（get_quote / get_holdings / calc_discipline / simulate_trade）+ 打分规则函数是模型唯一数字来源；Skill 模板须内嵌「文案中数字必须来自工具返回、不得自行编造」的约束与免责边界。
 - 若未来想让模型参与打分本身（如学习式评分），属于推翻本决策，须重开 ADR 并先回答 `conf` 如何定义。
 - 2026-11-26 补记：仓位纪律对建议 action 的**拦截强度**已由 [ADR-0023](./0023-discipline-advisory-in-advice-chain.md) 降级为参考（纪律参考数字仍由规则侧产出进留档）——本决策「数字归规则、文字归模型」的原则不变。
+- 2026-11-28 补记：[ADR-0024](./0024-discipline-out-of-agent.md) 起纪律输入整体退役（`cash_reserve_pass` → `discipline_ctx` → 无），打分规则函数不再消费纪律模块——规则侧收窄为纯得分链，纪律展示退居 Web 测算层。「数字归规则、文字归模型」原则依旧不变。
