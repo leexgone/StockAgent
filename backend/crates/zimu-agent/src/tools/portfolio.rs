@@ -1,16 +1,17 @@
-//! 持仓与账本工具：get_holdings（组合全景）、calc_discipline（纪律四条）、
-//! simulate_trade（试算不落库）+ 写账本三件（ADR-0012）：record_trade
-//! （成交录入，与界面 `POST /api/holdings/trade` 同一 store 事务）、
-//! adjust_cash（现金绝对值校正）、get_trades（流水只读）。数字全部出自
-//! `store.*` → `zimu-domain`（recalc/discipline/fees/dilution/lot），本层零口径。
+//! 持仓与账本工具：get_holdings（组合全景）、simulate_trade（试算不落库）+
+//! 写账本三件（ADR-0012）：record_trade（成交录入，与界面
+//! `POST /api/holdings/trade` 同一 store 事务）、adjust_cash（现金绝对值校正）、
+//! get_trades（流水只读）。数字全部出自 `store.*` → `zimu-domain`
+//! （recalc/fees/dilution/lot），本层零口径。
+//! ADR-0024：calc_discipline（纪律四条体检 + reduce_hint）整体退役——仓位纪律
+//! 只保留 Web 端测算展示（红绿灯卡/再平衡清单，前端对 /api/holdings 原值现算）；
+//! 组合中性事实（weight/行业分布/HHI/现金占比）仍在 get_holdings 里照常可得。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use robit_agent::{Tool, ToolContext, ToolResult};
 use serde_json::{json, Value};
-use zimu_domain::discipline::{check, sell_to, SellToInput};
-use zimu_domain::lot::lot_size;
 use zimu_store::{HoldingEditError, HoldingUpsert, RecordError, TradeRequest};
 
 use super::{ok_json, store_err, store_try};
@@ -31,7 +32,7 @@ impl Tool for GetHoldingsTool {
     }
 
     fn description(&self) -> &str {
-        "查组合全景（03 §5 口径，数字与界面 /api/holdings 同源）：账户现金、持仓明细（代码/名称/类型/行业/股数/摊薄成本/现价/昨收）、逐笔派生 per[]（当日涨跌 day_chg、当日盈亏 day_val、市值 mv、累计盈亏 pnl/pnl_pct、占总资产 weight）、组合汇总 agg（总资产、当日/累计盈亏与百分比、仓位 exposure、行业分布、HHI 集中度）以及纪律四条 discipline。注意价格是最近一次行情回写的值——需要最新数字先调 refresh_quotes。回答持仓/盈亏必须引用本工具返回的数字。"
+        "查组合全景（03 §5 口径，数字与界面 /api/holdings 同源）：账户现金、持仓明细（代码/名称/类型/行业/股数/摊薄成本/现价/昨收）、逐笔派生 per[]（当日涨跌 day_chg、当日盈亏 day_val、市值 mv、累计盈亏 pnl/pnl_pct、占总资产 weight）、组合汇总 agg（总资产、当日/累计盈亏与百分比、仓位 exposure、行业分布、HHI 集中度）。注意价格是最近一次行情回写的值——需要最新数字先调 refresh_quotes。回答持仓/盈亏必须引用本工具返回的数字。"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -49,88 +50,12 @@ impl Tool for GetHoldingsTool {
     ) -> robit_agent::error::Result<ToolResult> {
         let s = crate::lock(&self.deps.store);
         let view = store_try!(s.portfolio());
-        let inp = store_try!(s.portfolio_input());
         drop(s);
-        let report = check(&inp);
+        // ADR-0024：返回不再携带 discipline 块——组合中性事实照常（per/agg 原值），
+        // 仓位纪律的阈值判定与降仓测算退居 Web 端（红绿灯卡/再平衡清单现算）。
         Ok(ok_json(&json!({
             "portfolio": view,
-            "discipline": report,
-            "note": "weight 分母是总资产（含现金），行业占比分母是持仓市值（不含现金）——文案里数字旁必须写清分母（03 §6）",
-        })))
-    }
-}
-
-// ============================================================================
-// calc_discipline
-// ============================================================================
-
-pub struct CalcDisciplineTool {
-    pub deps: Arc<AgentDeps>,
-}
-
-#[async_trait]
-impl Tool for CalcDisciplineTool {
-    fn name(&self) -> &str {
-        "calc_discipline"
-    }
-
-    fn description(&self) -> &str {
-        "仓位纪律四条体检（03 §6，分母不统一务必照抄）：单票占总资产 ≤25%、单一行业占市值 ≤35%、可转债合计占总资产 ≤12%、现金保留 ≥10%。返回每条的 value/threshold/pass（压线算安全）；单票超限附 reduce_hint——按 §6 sell_to 泛化公式算出的「降到 25% 需卖出的股数（按手向上取整）」。文案里数字旁必须写清分母。"
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    fn requires_confirmation(&self) -> bool {
-        false
-    }
-
-    async fn execute(
-        &self,
-        _args: Value,
-        _ctx: &ToolContext,
-    ) -> robit_agent::error::Result<ToolResult> {
-        let inp = store_try!(crate::lock(&self.deps.store).portfolio_input());
-        let report = check(&inp);
-
-        // 单票超限时的降仓提示：对占比最大的持仓按 §6 sell_to 出数（可回溯黄金向量）
-        let total_assets = inp.cash + inp.holdings.iter().map(|h| h.price * h.shares).sum::<f64>();
-        let reduce_hint = if !report.single_stock.pass {
-            inp.holdings
-                .iter()
-                .map(|h| (h, h.price * h.shares))
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(h, mv)| {
-                    let lot = lot_size(h.kind);
-                    let qty = sell_to(&SellToInput {
-                        mv,
-                        price: h.price,
-                        total_assets,
-                        target: zimu_domain::discipline::LIMIT_SINGLE_STOCK,
-                        lot,
-                    })
-                    .qty;
-                    json!({
-                        "code": h.code,
-                        "qty": qty,
-                        "lot": lot,
-                        "note": "降到 25% 上限需卖出的股数（03 §6 sell_to，按手向上取整）",
-                    })
-                })
-        } else {
-            None
-        };
-
-        Ok(ok_json(&json!({
-            "report": report,
-            "reduce_hint": reduce_hint,
-            "thresholds": [
-                "单票占组合 ≤ 25%（分子 mv，分母 total_assets 含现金）",
-                "单一行业占市值 ≤ 35%（分子 Σmv(sector)，分母 total_mv 不含现金）",
-                "可转债合计占组合 ≤ 12%（分子 Σmv(cb)，分母 total_assets 含现金）",
-                "现金最低保留 ≥ 10%（分子 cash，分母 total_assets 含现金）",
-            ],
+            "note": "weight 分母是总资产（含现金），行业占比分母是持仓市值（不含现金）——文案里数字旁必须写清分母（03 §5）",
         })))
     }
 }

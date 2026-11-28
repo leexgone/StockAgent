@@ -46,8 +46,8 @@ fn persona_prompt_present_and_opens_with_zimu_identity() {
         // ADR-0022 计划任务纪律（仅 IM 生效 + 自主回合授权不扩张）
         "计划任务",
         "自主回合",
-        // ADR-0023 仓位纪律 = 参考线不是禁令（不拦截信号结论）
-        "参考线",
+        // ADR-0024 仓位纪律不进智能体（取代 0023 的「参考线」锚——判断与表述链中立）
+        "不进你的判断与表述链",
     ] {
         assert!(text.contains(must), "人格提示词缺关键边界句：{must}");
     }

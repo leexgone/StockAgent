@@ -1,6 +1,6 @@
 [package]
 name = "zimu-agent"
-description = "子木 · agent 应用层（P4-T6）：robit 领域工具（行情/持仓/纪律/试算/打分/留档）+ Skill 模板加载 + 与 HTTP API 共用的应用服务（行情刷新链）。数字口径只在 zimu-domain，本 crate 只做接线"
+description = "子木 · agent 应用层（P4-T6）：robit 领域工具（行情/持仓/试算/打分/留档/诊断，纪律 ADR-0024 起不进智能体）+ Skill 模板加载 + 与 HTTP API 共用的应用服务（行情刷新链）。数字口径只在 zimu-domain，本 crate 只做接线"
 version.workspace = true
 edition.workspace = true
 

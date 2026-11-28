@@ -7,7 +7,7 @@
 //! 边界（与 lib.rs 头部纪律一致）：
 //! - core **不建 Frontend/桥**：一桥一会话、宿主用 key 管理是 robit-web 成文契约
 //!   （bridge.rs "One bridge per session…key them in the host"），Frontend 属通道私有物；
-//! - **工具面 = robit 标准面 + 领域 15 件（ADR-0014，推翻 R2）**：标准面走公开内核
+//! - **工具面 = robit 标准面 + 领域 14 件（ADR-0014 推翻 R2；ADR-0024 纪律出链）**：标准面走公开内核
 //!   `create_tools_from_config_with`（与 bootstrap 同实现：截断缺省/provider 解析/
 //!   memory 模式判定内置），**不用 bootstrap_with**——它强引全局 skill 目录，违背
 //!   子木 skill 单源政策（仓库 skills/ 为准）；内核路径 skill 加载主权留子木。
@@ -67,7 +67,7 @@ pub struct AgentCore {
 
 impl AgentCore {
     /// 装配（ADR-0014 重排：skills 先行 → robit 标准面内核 → read_image 按需 →
-    /// init_db → 领域 15 件叠加）。store/market 与 HTTP API 同一份句柄——
+    /// init_db → 领域 14 件叠加）。store/market 与 HTTP API 同一份句柄——
     /// 工具数字与端点数字同源（P4-T6 纪律）。
     pub fn assemble(
         working_dir: PathBuf,
@@ -102,7 +102,7 @@ impl AgentCore {
         }
         let skill_names: Vec<String> =
             loaded.iter().map(|s| s.frontmatter.name.clone()).collect();
-        // tools_required 校验名单 = 领域 15 + 标准面可能名 + send_file（warn-only，容条件注册缺席）
+        // tools_required 校验名单 = 领域 14 + 标准面可能名 + send_file（warn-only，容条件注册缺席）
         let mut available: Vec<&str> = DOMAIN_TOOL_NAMES.to_vec();
         available.extend(STANDARD_TOOL_NAMES);
         available.push("send_file");
@@ -156,7 +156,7 @@ impl AgentCore {
             Err(e) => tracing::warn!("robit 会话库路径解析失败：{e}"),
         }
 
-        // 领域 15 件叠加（写账本五件自动落账纪律见 tools/mod.rs 头与 ADR-0012/0013）
+        // 领域 14 件叠加（写账本五件自动落账纪律见 tools/mod.rs 头与 ADR-0012/0013）
         let deps = AgentDeps::new(store, market);
         register_domain_tools(&mut registry, deps);
 

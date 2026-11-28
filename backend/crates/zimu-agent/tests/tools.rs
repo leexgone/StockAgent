@@ -6,7 +6,8 @@
 //!   且数字列已写入 advice_history；
 //! - `finalize_advice` 只回填文案列，数字列不可改写；risks 空数组被拒（03 §10）；
 //! - `get_quote` 的涨跌停与 `zimu-domain::price_limit` 同源（03 §2）；
-//! - `calc_discipline` / `get_holdings` 数字与 domain 直接调用逐位等价（03 §5/§6）；
+//! - `get_holdings` 数字与 domain 直接调用逐位等价（03 §5）；且返回**不携带纪律键**
+//!   ——ADR-0024 纪律出智能体链的回归锚（calc_advice 同款断言）；
 //! - `refresh_quotes` 与 HTTP refresh 同一条链（service::refresh_portfolio）；
 //! - sidecar 降级：日线拿不到 → calc_advice 拒绝出建议；health 挂 → market_status
 //!   如实报 offline，不瘫；
@@ -31,7 +32,7 @@ use robit_ai::RobitConfig;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 use zimu_agent::skills::{load_zimu_skills, runtime_skills_dir, seed_system_skills_from};
-use zimu_agent::tools::{register_domain_tools, AdjustCashTool, CalcAdviceTool, CalcDiagnosisTool, CalcDisciplineTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
+use zimu_agent::tools::{register_domain_tools, AdjustCashTool, CalcAdviceTool, CalcDiagnosisTool, FinalizeAdviceTool, GetHoldingsTool, GetQuoteTool, GetTradesTool, MarketStatusTool, RecordTradeTool, RefreshQuotesTool, RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool};
 use zimu_agent::{AgentDeps, SharedStore};
 use zimu_market::clock::now_shanghai;
 use zimu_market::error::{MarketError, MarketResult};
@@ -406,14 +407,14 @@ async fn calc_advice_bare_unknown_code_rejected_b7() {
     assert!(err.contains("前缀") && err.contains("B7"), "{err}");
 }
 
-/// ADR-0023 端到端：超 25% 参考线的偏多票不再被拦截——action = 加仓、
-/// suggested 锚上限 25（文案「建议 ≤25%」）、不给反向 sell_qty_hint、
-/// discipline_refs 随返回并落档读回（single_stock + sector 两条，§6 表序）。
+/// ADR-0024 端到端：超 25% 的重仓偏多票——纪律彻底不进链：
+/// action = 持有（维持，得分表 w≥15−ε 分支）、返回**无 discipline_refs /
+/// discipline 键**、留档 discipline_refs 恒空 `[]`、position 文案无上限锚读法。
 #[tokio::test]
-async fn calc_advice_over_cap_add_with_refs_and_archives() {
+async fn calc_advice_over_cap_holds_with_zero_discipline() {
     let store = seeded_store();
-    // 现金压到 2 万：600519 市值 1.1 万 / 总资产 3.1 万 ≈ 35.5% > 25% 参考线；
-    // 现金占比 ≈ 64.5% 过线；单一持仓 → 自身行业（白酒）占市值 100% > 35% 也进参考
+    // 现金压到 2 万：600519 市值 1.1 万 / 总资产 3.1 万 ≈ 35.5%——旧口径先拦截
+    // （持有+降至25）、再上限锚加仓（建议 ≤25% + refs 两条）；新口径只走纯得分表
     zimu_agent::lock(&store)
         .set_account(&AccountRow { cash: 20_000.0, ..AccountRow::default() })
         .unwrap();
@@ -424,39 +425,28 @@ async fn calc_advice_over_cap_add_with_refs_and_archives() {
 
     let out = exec(&tool, json!({ "code": "600519" })).await;
 
-    // 信号带完整形态：加仓 + 加仓带 target/stop（旧拦截口径下拿不到目标区间）
-    assert_eq!(out["action"], "加仓");
-    assert_eq!(out["action_code"], "add");
-    assert_eq!(out["target"], json!([120.96, 128.8]));
+    // 持有维持形态：无目标区间（持有行 target null）、防线 stop 保留
+    assert_eq!(out["action"], "持有");
+    assert_eq!(out["action_code"], "hold");
+    assert!(out["target"].is_null(), "重仓持有行无目标区间：{}", out["target"]);
     assert_eq!(out["stop"].as_f64().unwrap(), 103.04);
-    // 上限锚：suggested = 25，文案读作「建议 ≤25%」，不给反向减仓数量
-    assert_eq!(out["position"]["suggested"].as_f64().unwrap(), 25.0);
-    assert_eq!(out["position"]["mode"], "target");
-    assert!(
-        out["position"]["text"].as_str().unwrap().contains("建议 ≤25%"),
-        "text={}",
-        out["position"]["text"]
-    );
-    assert!(out["position"]["sell_qty_hint"].is_null(), "加仓向不给减仓 hint（ADR-0023 D2）");
-    // 纪律参考：§6 表序 single_stock → sector（现金过线不进；cb 仅转债）
-    let refs = out["discipline_refs"].as_array().unwrap();
-    assert_eq!(refs.len(), 2, "refs={refs:?}");
-    assert_eq!(refs[0]["rule"], "single_stock");
-    assert_eq!(refs[0]["threshold"].as_f64().unwrap(), 25.0);
-    let w = refs[0]["value"].as_f64().unwrap();
-    assert!((w - 11_000.0 / 31_000.0 * 100.0).abs() < 1e-6, "single_stock value={w}");
-    assert_eq!(refs[1]["rule"], "sector");
-    assert_eq!(refs[1]["value"].as_f64().unwrap(), 100.0);
-    // 既有 discipline 四 pass 布尔块（wire 兼容）不受影响
-    assert_eq!(out["discipline"]["single_stock_pass"], false);
-    assert_eq!(out["discipline"]["cash_reserve_pass"], true);
+    assert!(out["position"]["suggested"].is_null(), "维持无 suggested");
+    assert_eq!(out["position"]["mode"], "maintain");
+    let text = out["position"]["text"].as_str().unwrap();
+    assert!(text.contains("维持") && !text.contains('≤'), "text={text}");
 
-    // 留档读回：refs 列与返回同值（数字不经模型，ADR-0007/0023）
+    // 纪律键必须缺席（模型可见面零纪律——ADR-0024 D1）
+    assert!(out.get("discipline_refs").is_none(), "返回不得带 discipline_refs");
+    assert!(out.get("discipline").is_none(), "返回不得带 discipline 块");
+    let note = out["note"].as_str().unwrap();
+    assert!(note.contains("ADR-0024"), "note 应申明纪律出链：{note}");
+
+    // 留档读回：动作与文案照存，refs 列恒空（v5 化石列，历史行不受影响）
     let id = out["advice_id"].as_i64().unwrap();
     let row = zimu_agent::lock(&store).advice(id).unwrap().unwrap();
-    assert_eq!(row.action, "加仓");
-    assert!(row.position.contains("建议 ≤25%"));
-    assert_eq!(row.discipline_refs, out["discipline_refs"]);
+    assert_eq!(row.action, "持有");
+    assert!(row.position.contains("维持"));
+    assert_eq!(row.discipline_refs, json!([]), "新行纪律列恒空（ADR-0024）");
 }
 
 // ============================================================================
@@ -500,7 +490,7 @@ async fn finalize_fills_text_only_and_requires_risks() {
 }
 
 // ============================================================================
-// get_quote / calc_discipline / get_holdings —— 数字与 domain 同源
+// get_quote / get_holdings —— 数字与 domain 同源（纪律键缺席断言见 ADR-0024）
 // ============================================================================
 
 #[tokio::test]
@@ -539,26 +529,23 @@ async fn get_quote_attaches_domain_limit_prices() {
 }
 
 #[tokio::test]
-async fn discipline_and_holdings_match_domain_bitwise() {
+async fn holdings_match_domain_bitwise_and_carry_no_discipline() {
     let store = seeded_store();
     let fake = FakeApi::arc();
     let deps = deps_with(store.clone(), fake);
 
-    // domain 直接算（黄金向量同款函数）
-    let inp = zimu_agent::lock(&store).portfolio_input().unwrap();
-    let expected = zimu_domain::discipline::check(&inp);
-    let expected_json = serde_json::to_value(&expected).unwrap();
-
-    let d = exec(&CalcDisciplineTool { deps: deps.clone() }, json!({})).await;
-    assert_json_close(&d["report"], &expected_json, "纪律四条");
-    assert_eq!(d["reduce_hint"], Value::Null); // 单票 3.5% 未超限
-
     let h = exec(&GetHoldingsTool { deps }, json!({})).await;
     let view = zimu_agent::lock(&store).portfolio().unwrap();
     assert_json_close(&h["portfolio"], &serde_json::to_value(&view).unwrap(), "组合全景");
-    assert_json_close(&h["discipline"], &expected_json, "get_holdings 纪律");
-    // weight 分母口径提示必须在（03 §6：两个分母并存）
+    // ADR-0024：get_holdings 不再携带纪律块——组合中性事实（per/agg）照常同源
+    assert!(h.get("discipline").is_none(), "get_holdings 返回不得带 discipline 键");
+    // weight 分母口径提示必须在（03 §5：两个分母并存）
     assert!(h["note"].as_str().unwrap().contains("分母"));
+    // 纪律工具已退役（注册面兜底：DOMAIN_TOOL_NAMES 无 calc_discipline）
+    assert!(
+        !zimu_agent::tools::DOMAIN_TOOL_NAMES.contains(&"calc_discipline"),
+        "calc_discipline 必须已从领域工具清单退役"
+    );
 }
 
 // ============================================================================
@@ -1159,7 +1146,7 @@ fn seed_from_synthetic_source_copies_aux_files_and_skips_existing() {
 }
 
 // ============================================================================
-// 注册面组成（ADR-0014：robit 标准面 + 领域 15 件）
+// 注册面组成（ADR-0014：robit 标准面 + 领域 14 件，ADR-0024 纪律出链）
 // ============================================================================
 
 /// 空配置装置：无 provider/image/vision → 条件件（generate_image/read_image）
@@ -1204,7 +1191,7 @@ fn standard_surface_plus_domain_composition_per_adr_0014() {
         assert!(names.contains(&t), "领域面缺 {t}，实有 {names:?}");
     }
     assert!(names.contains(&"send_file"), "IM 发文件工具缺位，实有 {names:?}");
-    assert_eq!(names.len(), 26, "空配置下应恰 10 标准 + 15 领域 + send_file，实有 {names:?}");
+    assert_eq!(names.len(), 25, "空配置下应恰 10 标准 + 14 领域 + send_file，实有 {names:?}");
 }
 
 /// ADR-0022：`[app.schedule] enabled=true` 注册计划任务四件，且不受 standard_tools

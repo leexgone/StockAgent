@@ -1,7 +1,8 @@
 //! 领域工具集（P4-T6）：agent 的账本/行情取数与出数入口。
 //!
-//! 工具面组成（ADR-0014 起 = 领域 15 件 + robit 标准面，注册 26–32 随配置）：
-//! 本模块只管**领域 15 件**（roadmap P4-T6 四件 + 打分/留档两件 + 状态/刷新
+//! 工具面组成（ADR-0014 起 = 领域 14 件 + robit 标准面，注册 25–31 随配置；
+//! ADR-0024 起纪律不进智能体，calc_discipline 退役）：
+//! 本模块只管**领域 14 件**（roadmap P4-T6 三件 + 打分/留档两件 + 状态/刷新
 //! 两件 + 写账本五件（ADR-0012/0013）+ 诊断一件（P7-T10）+ echo 链路验证）；
 //! robit 标准面（read/write/edit/ls/find/grep/bash/load_skill/search_history/
 //! query_task 恒在，generate_image 随 image provider key、read_image 随 vision
@@ -15,7 +16,6 @@
 //! | `market_status` | 只读 | `zimu-market::clock`（03 §9 生产口径） |
 //! | `get_quote` | 只读 | sidecar 实时行 + `zimu-domain::price_limit`（03 §2） |
 //! | `get_holdings` | 只读 | `store.portfolio()` → `zimu-domain::recalc`（03 §5） |
-//! | `calc_discipline` | 只读 | `zimu-domain::discipline`（03 §6） |
 //! | `simulate_trade` | 只读（试算不落库） | `store.simulate_trade` → fees/dilution/lot（03 §1/§3/§4） |
 //! | `record_trade` | **写账本**（trades+持仓+现金，与界面录入同一事务） | `store.record_trade`（03 §1–§4，ADR-0012） |
 //! | `adjust_cash` | **写账本**（现金绝对值覆盖，不写流水） | `store.update_account`（ADR-0009/0012） |
@@ -62,8 +62,8 @@ pub use advice::{CalcAdviceTool, FinalizeAdviceTool};
 pub use diagnosis::CalcDiagnosisTool;
 pub use market::{GetQuoteTool, MarketStatusTool, RefreshQuotesTool};
 pub use portfolio::{
-    AdjustCashTool, CalcDisciplineTool, GetHoldingsTool, GetTradesTool, RecordTradeTool,
-    RemoveHoldingTool, SimulateTradeTool, UpsertHoldingTool,
+    AdjustCashTool, GetHoldingsTool, GetTradesTool, RecordTradeTool, RemoveHoldingTool,
+    SimulateTradeTool, UpsertHoldingTool,
 };
 
 /// 存储调用早退助手：anyhow 错误 → 脱敏 `ToolResult::error`。
@@ -83,13 +83,14 @@ macro_rules! store_try {
 pub(crate) use store_try;
 
 /// 领域工具名清单（tools_required 校验名单用，与下表逐件对应）。
-pub const DOMAIN_TOOL_NAMES: [&str; 15] = [
-    "market_status", "get_quote", "get_holdings", "calc_discipline", "simulate_trade",
+/// ADR-0024：calc_discipline 退役——纪律不进智能体可见面（Web 端测算展示独有）。
+pub const DOMAIN_TOOL_NAMES: [&str; 14] = [
+    "market_status", "get_quote", "get_holdings", "simulate_trade",
     "record_trade", "adjust_cash", "get_trades", "upsert_holding", "remove_holding",
     "refresh_quotes", "calc_advice", "finalize_advice", "calc_diagnosis", "echo",
 ];
 
-/// 把全部领域工具（15 件）注册进给定 registry——装配线先经
+/// 把全部领域工具（14 件）注册进给定 registry——装配线先经
 /// `create_tools_from_config_with` 取 robit 标准面，再调本函数叠加
 /// （ADR-0014；zimu-server 与 zimu-agent-cli 共用同一装配线）。
 /// 领域名与标准名零冲突（已逐件核对）；同名注册语义为覆盖（robit registry）。
@@ -97,7 +98,6 @@ pub fn register_domain_tools(reg: &mut ToolRegistry, deps: Arc<AgentDeps>) {
     reg.register(MarketStatusTool { deps: deps.clone() });
     reg.register(GetQuoteTool { deps: deps.clone() });
     reg.register(GetHoldingsTool { deps: deps.clone() });
-    reg.register(CalcDisciplineTool { deps: deps.clone() });
     reg.register(SimulateTradeTool { deps: deps.clone() });
     reg.register(RecordTradeTool { deps: deps.clone() });
     reg.register(AdjustCashTool { deps: deps.clone() });
@@ -124,7 +124,7 @@ pub(crate) fn ok_json(v: &impl Serialize) -> ToolResult {
 pub(crate) fn market_err(e: MarketError) -> ToolResult {
     match e {
         MarketError::Unavailable(m) => ToolResult::error(format!(
-            "行情 sidecar 不可达，行情类数字暂不可用：{m}。持仓/纪律/留档查询不受影响；请稍后重试或让用户检查 datafetch 服务。"
+            "行情 sidecar 不可达，行情类数字暂不可用：{m}。持仓/留档查询不受影响；请稍后重试或让用户检查 datafetch 服务。"
         )),
         MarketError::Upstream {
             status,

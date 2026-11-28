@@ -202,6 +202,8 @@ CREATE TABLE channel_bindings (
 -- 附纪律参考列（JSON [{rule,label,value,threshold,text}]，domain AdviceOutput.
 -- discipline_refs 序列化原值；仅偏多带非空）。本表首个 ALTER ADD COLUMN 先例：
 -- 可空列，旧行 NULL 读回 []（map_advice_row 兜底，前端恒拿到数组）。
+-- ADR-0024（2026-11-28 取代 0023）：纪律退出智能体——本列保留不回滚，
+-- 新行恒写 []，仅供 v0.1.8 历史留档渲染（迁移只增不减的房规锚点）。
 ALTER TABLE advice_history ADD COLUMN discipline_refs TEXT;
 "#,
     ),
@@ -1058,9 +1060,9 @@ pub struct AdviceRow {
     pub reason: String,
     /// 四维拆解 `[{k,s,t}]`（03 §10 固定四维；domain `AdviceDim` 序列化，坏 JSON 读回 `[]`）
     pub dims: serde_json::Value,
-    /// 纪律参考项 `[{rule,label,value,threshold,text}]`（ADR-0023；domain
-    /// `AdviceOutput.discipline_refs` 序列化，仅偏多带非空；旧行 NULL 读回 `[]`，
-    /// 坏 JSON 同 dims 兜底——前端恒拿到数组）
+    /// 纪律参考项 `[{rule,label,value,threshold,text}]`——**ADR-0024 起为只读化石列**：
+    /// 仅 v0.1.8（ADR-0023 期间）历史行有值、照常透传给前端渲染历史注记；
+    /// 新行恒 `[]`（NULL 读回 `[]`、坏 JSON 同 dims 兜底——前端恒拿到数组）
     pub discipline_refs: serde_json::Value,
     /// 风险自陈（03 §10：至少一条——非空校验在工具层，存储层如实存）
     pub risks: Vec<String>,
@@ -1081,7 +1083,7 @@ pub struct NewAdvice {
     pub stop: Option<f64>,
     pub position: String,
     pub dims: serde_json::Value,
-    /// 纪律参考项（ADR-0023；domain 序列化原值，无参考时 `json!([])`）
+    /// 纪律参考项（ADR-0024 起调用方恒传 `json!([])`，列保留读历史行）
     pub discipline_refs: serde_json::Value,
     pub data_version: String,
     pub generated_at: String,
