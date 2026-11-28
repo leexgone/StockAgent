@@ -1,7 +1,7 @@
 {
   "ok": true,
   "service": "zimu-server",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "static_dir": "frontend/dist",
   "static_ready": true,
   "agent_online": false,
