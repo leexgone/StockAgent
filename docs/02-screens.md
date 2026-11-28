@@ -30,7 +30,7 @@
 - **analysis**：持仓范围为空时隐藏结果、显示引导卡；可切「自选」看观察类结论形态。
 - **chat**：空态专属欢迎消息与「第一笔怎么录入 / 今天该做什么」问答；会话历史按模式分键。
 - **diagnosis**：指标不以 0 冒充「安全」，KPI/曲线/清单/分区间表全部为说明态。
-- **wechat**：六卡不报错——通道状态如实显示未启用/离线、绑定卡空态引导、push 卡待启动态（订阅体系 C15 另案）、预览占位文案、推送日志空态（原型语义：卡片模板保留结构、文案占位、按钮禁用）。
+- **wechat**：五卡不报错——通道状态如实显示未启用/离线、绑定卡空态引导、push 卡待启动态（订阅体系 C15 另案）、推送日志空态（原「推送长这样」预览卡与页头测试推送按钮 2026-11-28 移除，推送真实形态以 push_log detail 原样为准）。
 
 ## index.html — 工作台
 
@@ -202,7 +202,7 @@ generate-advice 技能约定：持仓内裸代码、非持仓带 sh/sz 前缀；
 | `wx-push-card` | **待启动态**：上段「当前生效（绑定即推）」如实列两条真实推送（预警推送 / 15:05 盘后数字摘要，无开关）；下段订阅管理禁用占位 + 另案 banner。6 类订阅 + 时段 + 静音落库 = **C15 另案**（先对齐 vision/原型词汇，再 schema v5 + 03 口径）；**不枚举六类标签**（词汇冲突未决，渲染任一即提前站队） | 静态 + push kind 词汇 |
 | `wx-config-card` | **iLink Bot 脱敏只读**（服务号 AppID/Token/Webhook 文案全废，ADR-0011 拍板⑤兑现）：渠道形态 / 凭据位置（bot_token 存服务器 `backend/.robit/wechat-state.json`，CLI 扫码换取，**界面不显示任何 token 值**）/ 登录命令 + 停服约定 / 出站长轮询无需公网回调 / 在线状态行。**零输入框、零 localStorage** | health + 静态文案 |
 | `wx-bind-card` | **通道无关白名单管理（QQ 同样受益）**：**待绑定会话自动列出**（D3 补记：未绑定来消息被 BoundOnly 丢弃时入观察队列——channel 徽章 + chat_id + 来消息次数/最近时刻/消息摘录 ≤40 字 + 一键「绑定」按钮，kind 由 chat_id 前缀推断；绑定成功即移出队列；内存态重启清零，「刷新」按钮 + 60s 轮询）；活跃绑定列表（channel 徽章 + chat_id mono + kind + label + bound_at）+ 行内解绑**两步确认弹窗**（Esc/scrim 可关，danger）；手工新增表单兜底（channel 选 qq/wechat、**选 wechat 时 kind 锁死 private**——微信仅 1:1、label 可选；服务端日志仍留 chat_id 案底）。**观察自动化、授权仍人工**：入列 ≠ 放行，绑定点击是主人明示动作（fail-closed 不变）。**扫码不上 Web**（robit 无非交互式登录 API；登录 = 部署侧 `robit-wechat login`，停服约定见 backend/README）。**chat_id 展示脱敏**（2026-11-17 增补）：活跃绑定与待绑定两列表默认掩码（`lib/maskChatId`——保留 private:/group: 前缀与 @domain，纯数字留前 2 后 2、ilink id 留前 4，中段 ****，≤4 字符全掩），逐行「查看/收起」切换（组件态，离屏复位回掩码）；动作 toast 同掩码；掩码只是展示层投影，API/store 与绑定请求仍用完整 chat_id | bindings store（`/api/channel_bindings` GET/POST/DELETE + `/api/channel_bindings/pending` GET，`channel_bindings` 表 + 内存观察队列） |
-| `wx-preview-card` | **纯文本消息样例预览（无按钮**——服务号模板消息语义生产不存在）：摘要 = 最近 `equity_snapshots` 真实行按后端 `summary_message` 同款行格式渲染（数字真值不伪造，无快照→占位文案）；预警 = **两种静态样例均明确标「样例」**——单条形态（`子木预警 · {name} {text}`）+ 爆发轮合并形态（`子木预警 · 本轮 N 条` 逐行列表，同轮 ≥2 条时，ADR-0019；静态字符串，不承担摘要那种后端镜像同步义务）；sub 注「纯文本 · 超长自动分段（≤3 段）」（ADR-0020：宿主自截移除，长度归 robit 守卫） | useEquity + 静态 |
+| ~~`wx-preview-card`~~ | **已移除（2026-11-28）**「推送长这样」样例卡——纯展示无操作、不承担真值留档；推送真实形态以 `wx-log-card` 的 push_log detail 原样为准（分段/长度守卫语义注记仍在 log 卡与 03 §12） | — |
 | `wx-log-card` | 最近 6 条**全通道** push_log（channel 徽章 + ok/warn 圆点 + kind 标签 + **detail 原样**不另造文案 + ts）；空态生产文案 | usePushLog（只读 store 复用） |
 
 页头不设动作按钮（原「发送测试推送」禁用占位已移除，2026-11-28——测试推送端点另案，理由本就是「新增契约面 + 无鉴权服务上的真实发送滥用面」，占位无价值）。屏挂载即 load bindings/health/pushLog + 屏内 60s 轮询（卸载清理）。状态色 B5：已绑定/在线一律绿 `--ok`、离线/未绑定 warn，绝不用红；`--accent` ≤2（仅绑定提交 btn-primary）；空账户六卡不报错。

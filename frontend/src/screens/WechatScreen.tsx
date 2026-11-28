@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { IconChat, IconGrid, IconWechat } from "../components/Icons";
-import { fixed } from "../lib/format";
 import { maskChatId } from "../lib/mask";
 import { channelLabel, pushKindLabel } from "../lib/pushKind";
 import { kindForChatId, useBindings, type ChannelBindingRow, type PendingAttempt } from "../store/bindings";
-import { useEquity } from "../store/equity";
 import { useHealth } from "../store/health";
 import { usePushLog } from "../store/push_log";
 import { useUi } from "../store/ui";
@@ -13,7 +11,8 @@ import { useUi } from "../store/ui";
  * 助理接入（wechat 屏，P5-T2 收尾 / ADR-0017，C4 关闭）—— 对照基准
  * design/wechat.html（冻结原型，服务号语义作废，生产形态见 docs/02 wechat 段）。
  *
- * 六卡生产形态：
+ * 五卡生产形态（原 preview「推送长这样」样例卡 2026-11-28 移除——纯展示、
+ * 无操作、不承担真值留档，推送真实形态以 log 卡 push_log 原样 detail 为准）：
  * - channel：QQ / 微信 / Web 三行状态**只读**（启用开关在服务器配置文件，拍板⑤⑥；
  *   online 与 enabled 区分「离线」与「未启用」，ADR-0017 D6）；无 switch、无「测一下」。
  * - push：**待启动态**——「当前生效（绑定即推）」如实列两条真实推送；订阅管理
@@ -23,16 +22,11 @@ import { useUi } from "../store/ui";
  *   未绑定来消息入观察队列，一键绑定，不用抄日志）+ 绑定/解绑（两步确认弹窗）/
  *   手工表单兜底；chat_id 默认掩码脱敏、逐行「查看/收起」切换（lib/mask，
  *   展示层投影不动 API 真值）；扫码不上 Web（登录 = 部署侧 CLI，停服约定见 backend/README）。
- * - preview：纯文本消息样例（无按钮——服务号模板消息语义生产不存在）；摘要 =
- *   最近 equity_snapshots 真实行按后端 summary_message 同款行格式（改后端须同步这里）。
  * - log：最近 6 条全通道 push_log（detail 原样，ok=1 只表示已受理，03 §12）。
  *
  * 纪律：B5 状态色（在线/已绑定 = --ok 绿，绝不用红）；--accent ≤2（仅绑定提交）；
- * 空账户六卡不报错；屏内 60s 轮询（卸载清理，不加全局负载）。
+ * 空账户五卡不报错；屏内 60s 轮询（卸载清理，不加全局负载）。
  */
-
-/* 后端 summary_message 的 {:+.2} 镜像（fixed 剥负零，显式正号） */
-const signed = (v: number, d: number): string => (v >= 0 ? "+" : "") + fixed(v, d);
 
 export default function WechatScreen() {
   const health = useHealth((s) => s.health);
@@ -41,7 +35,6 @@ export default function WechatScreen() {
   const bindingsLoaded = useBindings((s) => s.loaded);
   const bindingsError = useBindings((s) => s.error);
   const pushRows = usePushLog((s) => s.rows);
-  const equityRows = useEquity((s) => s.rows);
 
   const toast = (m: string) => useUi.getState().pushToast(m);
 
@@ -64,7 +57,6 @@ export default function WechatScreen() {
       void useBindings.getState().loadPending();
       void useHealth.getState().load();
       void usePushLog.getState().load();
-      void useEquity.getState().load();
     };
     loadAll();
     const t = setInterval(loadAll, 60_000);
@@ -150,18 +142,6 @@ export default function WechatScreen() {
     },
   ];
   const onlineCount = channels.filter((c) => c.online).length;
-
-  /* ---------- 摘要预览（数字 = 最近快照原值，行格式镜像后端 summary_message） ---------- */
-  const lastSnap = equityRows.length > 0 ? equityRows[equityRows.length - 1] : null;
-  const summaryPreview = lastSnap
-    ? [
-        `子木盘后摘要 ${lastSnap.date}`,
-        `总资产 ${fixed(lastSnap.total_assets, 2)}`,
-        `当日盈亏 ${signed(lastSnap.day_pnl, 2)}（${signed(lastSnap.day_pnl_pct, 2)}%）`,
-        `累计盈亏 ${signed(lastSnap.total_pnl, 2)}（${signed(lastSnap.total_pnl_pct, 2)}%）`,
-        `现金 ${fixed(lastSnap.cash, 2)} · 仓位 ${fixed(lastSnap.exposure, 1)}% · 集中度 ${fixed(lastSnap.hhi, 2)}`,
-      ].join("\n")
-    : null;
 
   return (
     <main className="page" data-od-id="wechat-page">
@@ -433,31 +413,6 @@ export default function WechatScreen() {
               <div className="hint" style={{ marginTop: 10 }}>
                 常规路径：给 bot 发一条消息 → 上方「待绑定会话」自动列出 → 点「绑定」。
                 此处手工表单为兜底（服务端日志仍留 chat_id 案底）。微信登录（扫码）在部署侧 CLI 完成，见「接入配置」卡。
-              </div>
-            </div>
-          </section>
-
-          {/* ---------- 推送预览（纯文本样例，无按钮） ---------- */}
-          <section className="card" data-od-id="wx-preview-card">
-            <div className="card-head">
-              <div>
-                <div className="card-title">推送长这样</div>
-                <div className="card-sub">纯文本 · 超长自动分段（≤3 段）</div>
-              </div>
-            </div>
-            <div className="card-body">
-              <div className="hint" style={{ margin: "0 0 6px" }}>盘后数字摘要{lastSnap ? `（最近快照 ${lastSnap.date} 原值）` : ""}：</div>
-              <div className="wxmsg">
-                {summaryPreview ?? "还没有快照 · 交易日 15:05 盘后链写入后，这里按真实数字渲染"}
-              </div>
-              <div className="hint" style={{ margin: "12px 0 6px" }}>预警推送 · 单条（样例，文案 = 判定产出原值）：</div>
-              <div className="wxmsg">{"子木预警 · 样例标的 跌破止损线 0000.00（样例）"}</div>
-              {/* ADR-0019 轮内合并：静态样例（同轮 ≥2 条时合并一条）——明确标样例，
-                  不承担 summary 那种后端行格式镜像同步义务（格式真值在
-                  channel_push.rs alert_batch_message 与 docs/03 §12 推送打包） */}
-              <div className="hint" style={{ margin: "12px 0 6px" }}>预警推送 · 爆发轮合并（样例，同轮 ≥2 条时一条发出，ADR-0019）：</div>
-              <div className="wxmsg">
-                {"子木预警 · 本轮 3 条（样例）\n1. 样例标的A（600000）跌破止损线 0000.00（样例）\n2. 样例标的B（127000）当日累计量为近20日均量的 2.8 倍，涨跌幅 -6.20%（样例）\n3. 样例标的C（510300）现价 1.230 已触及涨停价 1.234（样例）"}
               </div>
             </div>
           </section>
