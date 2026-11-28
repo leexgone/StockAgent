@@ -14,7 +14,8 @@ import {
   type Side,
 } from "../domain";
 import { dirClass, fixed, fmt, money, pct, wan } from "../lib/format";
-import { KIND_LABEL, symbolOf } from "../lib/kind";
+import { KIND_LABEL } from "../lib/kind";
+import { buildTradeCandidates } from "../lib/tradeCandidates";
 import { useHoldingEdits, type HoldingEditRow, type HoldingSnapshot } from "../store/holdingEdits";
 import { usePortfolio, type PortfolioView } from "../store/portfolio";
 import { useTrades } from "../store/trades";
@@ -116,34 +117,11 @@ export default function HoldingsScreen() {
   };
 
   /* ---------- 候选池：持仓（held）+ 自选（未持有，买入即新建持仓） ---------- */
-  const candidates = useMemo<Candidate[]>(() => {
-    if (!view) return [];
-    const held: Candidate[] = view.holdings.map((h, i) => {
-      const p = view.per[i];
-      return {
-        code: h.code, name: h.name, kind: h.kind, mkt: h.mkt, sector: h.sector,
-        shares: h.shares, cost: h.cost, mv: p?.mv ?? 0, weight: p?.weight ?? 0,
-        limit_pct: h.limit_pct ?? null, price: h.price ?? null, prev: h.prev ?? null, held: true,
-      };
-    });
-    const heldCodes = new Set(view.holdings.map((h) => h.code));
-    const watch: Candidate[] = watchRows
-      .filter((w) => !heldCodes.has(w.code))
-      .map((w) => {
-        const sym = symbolOf(w.mkt, w.code);
-        const q = sym ? watchQuotes[sym] : undefined;
-        const usable = q && q.status === "ok" && (q.price ?? 0) > 0;
-        return {
-          code: w.code, name: w.name, kind: w.kind, mkt: w.mkt, sector: w.sector,
-          shares: 0, cost: 0, mv: 0, weight: 0,
-          limit_pct: w.limit_pct ?? null,
-          price: usable ? (q.price ?? null) : null,
-          prev: usable ? (q.prev ?? null) : null,
-          held: false,
-        };
-      });
-    return [...held, ...watch];
-  }, [view, watchRows, watchQuotes]);
+  // 候选池组装上收 lib/tradeCandidates（2026-11-28，与 analysis 屏直开抽屉共享同一口径）
+  const candidates = useMemo<Candidate[]>(
+    () => buildTradeCandidates(view, watchRows, watchQuotes),
+    [view, watchRows, watchQuotes],
+  );
 
   /* ---------- 深链开抽屉（?add=1 / ?code=&side=&qty=），组合快照就绪后消费一次 ---------- */
   const deepLinked = useRef(false);

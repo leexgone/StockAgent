@@ -4,8 +4,10 @@ import Candles, { type Ohlc } from "../components/charts/Candles";
 import Gauge from "../components/charts/Gauge";
 import EmptyHero from "../components/EmptyHero";
 import { IconSpark } from "../components/Icons";
-import { lotSize, priceDecimals, type Kind } from "../domain";
+import TradeDrawer, { receiptToast } from "../components/TradeDrawer";
+import { lotSize, priceDecimals, type Kind, type Side } from "../domain";
 import { dirClass, fixed, fmt, money, pct } from "../lib/format";
+import { buildTradeCandidates } from "../lib/tradeCandidates";
 import { KIND_LABEL, symbolOf } from "../lib/kind";
 import { latestByCode, useAdvice, type AdviceRow } from "../store/advice";
 import { klineKey, useKline } from "../store/kline";
@@ -22,7 +24,8 @@ import { useWatchlist } from "../store/watchlist";
  * 带 data_version 可回溯 B9，无「当时价格」列——留档不存该值，不臆造）。
  * 无留档 → 诚实空态 + 生成路径（盘后复盘 / 问答 /建议），不画假得分。
  * 执行计划 = 客户端模板骨架（分笔 + 失效条件引真实 stop/target），数字取后端原值 +
- * domain lotSize；「写入持仓试算」深链 /holdings 抽屉，「就这只问我」深链 /chat。
+ * domain lotSize；「写入持仓试算」本屏直开 TradeDrawer（2026-11-28，不再跳持仓屏），
+ * 「就这只问我」深链 /chat。
  */
 
 type HRow = PortfolioView["holdings"][number];
@@ -87,8 +90,16 @@ export default function AnalysisScreen() {
   const [code, setCode] = useState<string>("");
   const [period, setPeriod] = useState(1);
   const [bootstrapped, setBootstrapped] = useState(false);
+  // 写入持仓试算：本屏直开 TradeDrawer（2026-11-28 改，不再跳持仓屏）
+  const [trade, setTrade] = useState<{ open: boolean; code: string | null; side: Side; qty: number | null }>({
+    open: false, code: null, side: "buy", qty: null,
+  });
 
   const toast = (m: string) => useUi.getState().pushToast(m);
+  const tradeCandidates = useMemo(
+    () => buildTradeCandidates(view, watchRows, watchQuotes),
+    [view, watchRows, watchQuotes],
+  );
   const agg = view?.agg;
 
   /* ---------- 进屏拉自选 + 全量建议（rank 用） ---------- */
@@ -257,18 +268,18 @@ export default function AnalysisScreen() {
   }, [item, A, price, dec, agg, refs.length]);
 
   /* ---------- 动作 ---------- */
+  // 「写入持仓试算」本屏直开抽屉（2026-11-28）：候选池同款口径（共享 lib），
+  // 未建仓自选 = 买入新建；持仓按建议动作预填方向与第一笔数量（40%/25% 首笔）
   const applyPlan = () => {
     if (!item || !A) return;
     if (!item.held) {
-      toast("自选标的需先建仓，已在持仓页准备好新增表单");
-      navigate(`/holdings?code=${item.code}&side=buy`);
+      setTrade({ open: true, code: item.code, side: "buy", qty: null });
       return;
     }
     const sell = A.action === "减仓" || A.action === "卖出";
     const lot = lotSize(item.kind);
     const qty = Math.max(lot, Math.floor((item.shares * (sell ? 0.4 : 0.25)) / lot) * lot);
-    toast(`已把「${A.action} ${item.name}」第一笔 ${qty} 送到持仓页试算`);
-    navigate(`/holdings?code=${item.code}&side=${sell ? "sell" : "buy"}&qty=${qty}`);
+    setTrade({ open: true, code: item.code, side: sell ? "sell" : "buy", qty });
   };
   const askMore = () => {
     if (!item || !A) return;
@@ -625,6 +636,23 @@ export default function AnalysisScreen() {
           本页面<b>不构成投资建议</b>，程序不连接券商、不代为执行任何真实委托，每笔委托仍需你本人确认。
         </span>
       </div>
+
+      {/* 写入持仓试算：本屏直开抽屉（与持仓屏同一 TradeDrawer 与候选池口径），
+          提交成功后 recordTrade 内部回写 portfolio → 本屏 weight/试算即时刷新 */}
+      <TradeDrawer
+        open={trade.open}
+        candidates={tradeCandidates}
+        cash={agg?.cash ?? 0}
+        totalMv={agg?.total_mv ?? 0}
+        initialCode={trade.code}
+        initialSide={trade.side}
+        initialQty={trade.qty}
+        onClose={() => setTrade((t) => ({ ...t, open: false }))}
+        onSubmitted={(receipt) => {
+          toast(receiptToast(receipt));
+          void useAdvice.getState().load();
+        }}
+      />
     </main>
   );
 }
