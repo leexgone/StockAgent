@@ -24,7 +24,7 @@ docker compose up -d
 
 - 端口缺省 **127.0.0.1:8080**（内网监听面，ADR-0005）；局域网/反代自行改 compose `ports`（公网暴露前请自加鉴权——服务本身无鉴权，IM 信任边界 = 绑定白名单）。
 - 数据落**命名卷 `zimu-data`**（/data）：zimu.db、.robit/（config/人格/技能/记忆/日志/微信 state）、media/、images/ 全在卷内。
-- 首跑 entrypoint 自动播种 `.robit/config.toml`（示例模板）与 `.robit/prompts/agent.md`（子木人格），**永不覆盖已有文件**；系统技能（四模板，P7-T10 起含 diagnosis-report）由**应用初始化**（AgentCore 装配，非 entrypoint）播种进 `.robit/skills/`——同样缺则播种永不覆盖（**新增技能目录对既有卷自动补播**，无需手工动作；改过的既有模板不刷新），用户可在该目录自增技能（ADR-0021）。人格文件同理永不覆盖——新版人格条目（如「四个指令模板」「纪律参考线」）需对照 `/app/defaults/agent.md` 手工合并（可选，功能不依赖）。
+- 首跑 entrypoint 自动播种 `.robit/config.toml`（示例模板）与 `.robit/prompts/agent.md`（子木人格），**永不覆盖已有文件**；系统技能（四模板，P7-T10 起含 diagnosis-report）由**应用初始化**（AgentCore 装配，非 entrypoint）播种进 `.robit/skills/`——同样缺则播种永不覆盖（**新增技能目录对既有卷自动补播**，无需手工动作；改过的既有模板不刷新），用户可在该目录自增技能（ADR-0021）。人格文件同理永不覆盖——新版人格条目（如「四个指令模板」；ADR-0024 起「纪律参考线」段替换为「不进判断与表述链」锚）需对照 `/app/defaults/agent.md` 手工合并，或**点删卷内 `prompts/agent.md` 触发重播种**（可选，功能不依赖）。同批升级若改了系统技能模板正文（ADR-0024 四模板纪律段删除即属此类），既有卷需**点删对应技能子目录**（`/data/.robit/skills/<name>/`）才会重播种新版——只删这四类目标路径，**勿碰** `wechat-state.json` / `robit.db` / `config.toml`。
 - 健康：`curl http://127.0.0.1:8080/api/health`——恒 200 只做存活探针；`agent_online`/`static_ready`/`qq_online`/`wechat_online` 读响应体判断降级面。
 
 **Docker Desktop（Windows/macOS）**：命名卷缺省即可，勿改 bind 挂载（gRPC-FUSE/9p 上 SQLite WAL 锁语义有风险）。

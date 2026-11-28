@@ -542,7 +542,7 @@ export default function HoldingsScreen() {
           <div className="card-head">
             <div>
               <div className="card-title">仓位纪律</div>
-              <div className="card-sub">四条仓位参考线：越线时在分析建议中附注提示，不拦截任何操作</div>
+              <div className="card-sub">四条仓位纪律：本屏测算展示（ADR-0024）——智能体建议与复盘不再做纪律判定</div>
             </div>
           </div>
           <div className="card-body" id="rules">

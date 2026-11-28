@@ -143,7 +143,7 @@ export default function ChatView({ now }: { now: Date }) {
           <div className="eyebrow">智能问答</div>
           <h1 className="page-title">用大白话问，它拿你的持仓回答</h1>
           <p className="page-desc">
-            回答只引用你这个账户里的数据：持仓明细、行情快照与仓位纪律。Agent 调用行情/持仓工具的过程如实展示，即为依据来源。
+            回答只引用你这个账户里的数据：持仓明细、行情快照与组合统计。Agent 调用行情/持仓工具的过程如实展示，即为依据来源。
           </p>
         </div>
         <div className="page-actions">

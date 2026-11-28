@@ -249,8 +249,8 @@ export default function AnalysisScreen() {
         t: "维持现有仓位，不动",
         d:
           refs.length > 0
-            ? `当前 ${fixed(item.weight, 1)}%。越线项见「纪律参考」注记——仅供参考，是否调整由你拍板。`
-            : `当前 ${fixed(item.weight, 1)}%，未触及任何仓位参考线。`,
+            ? `当前 ${fixed(item.weight, 1)}%。这条建议留档于纪律参考线时期（ADR-0023，v0.1.8），越线项见下方注记；新口径起（ADR-0024）建议不再做纪律判定。`
+            : `当前 ${fixed(item.weight, 1)}%。结论只由行情信号决定（ADR-0024）；仓位纪律的阈值测算见持仓屏纪律卡。`,
       },
       { t: "下一次重算时间", d: "每日 15:05 盘后复盘 + 财报/公告事件触发时即时重算，结果会推到微信。" },
     ];
@@ -452,7 +452,7 @@ export default function AnalysisScreen() {
                         data-od-id="discipline-refs"
                         style={{ marginTop: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)", padding: "10px 14px", background: "var(--surface)" }}
                       >
-                        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>纪律参考（仅供参考、不构成拦截——是否执行由你拍板）</div>
+                        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>纪律参考注记（历史留档查看——ADR-0024 起新建议不再附注；纪律测算见持仓屏）</div>
                         {refs.map((r) => (
                           <div key={r.rule} className="hint" style={{ marginTop: 5 }}>
                             <b style={{ color: "var(--warn)" }}>{r.label}</b>
