@@ -174,15 +174,6 @@ export default function WechatScreen() {
             接入只负责「推送 + 回答」，不读取券商账户、不接管下单；绑定关系在本页管理，连接参数只在服务器配置文件。
           </p>
         </div>
-        <div className="page-actions">
-          <button
-            className="btn"
-            disabled
-            title="测试推送端点另案——当前预警与盘后摘要自动推送绑定会话"
-          >
-            发送测试推送
-          </button>
-        </div>
       </div>
 
       <div className="wx-layout">
