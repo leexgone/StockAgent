@@ -175,6 +175,13 @@ jobs:
           print(f"smoke OK: version={h['version']} static_ready={h['static_ready']}")
           EOF
           curl -fsS http://127.0.0.1:8080/ | grep -qi '<!doctype html'
+      - name: 播种版本戳断言（ADR-0021 补记：新卷首跑走缺戳强刷路径）
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          stamp=$(docker compose exec -T zimu cat /data/.robit/zimu_seed_version)
+          [ "$stamp" = "$ver" ] || { echo "seed stamp '$stamp' != 镜像版本 $ver"; exit 1; }
+          docker compose exec -T zimu test -s /data/.robit/prompts/agent.md
+          echo "seed version stamp OK: $ver（缺戳强刷→建戳→人格就位）"
       - name: sidecar healthz（容器网络内，轮询——Python 重导入启动慢于 server）
         run: |
           for i in $(seq 1 30); do
