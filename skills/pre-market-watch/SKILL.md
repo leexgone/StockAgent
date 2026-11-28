@@ -1,7 +1,7 @@
 ---
 name: pre-market-watch
-description: 盘前关注——开盘前给出市场状态、持仓的关键价位（昨收/涨停/跌停，03 §2 口径）与当日关注点；数字全部来自领域工具返回
-version: 1.1.0
+description: 盘前关注——开盘前给出市场状态、持仓的关键价位（昨收/涨停/跌停）与当日关注点；数字全部来自工具返回
+version: 1.2.0
 triggers:
   - /watch
   - /盘前
@@ -19,9 +19,7 @@ tools_required:
 
 1. `market_status`：今天是否交易日、当前时段、`next_event`/`next_at`（距开盘/收盘）、`next_trade_day`。休市 → 直接给「今日休市，下一交易日 X」+ 持仓静态关注点，不再调行情。`calendar_degraded=true` → 注明「交易日历降级，未排除节假日」。`market_online=false` → 如实说明行情不可用，只给库存数字。
 2. `get_holdings`：持仓清单与组合状态（库存值，注意 updated_at 时点；per[].weight、agg.sectors 等集中度事实从这里取）。
-3. `get_quote`：全部持仓代码一次查询（逗号分隔）——现价/昨收、`limit_up`/`limit_down`（03 §2：整数单元 half-up，显示与拦截同一对限价、含边界）、行级 status。停牌/退市行（status 非 ok）如实标注，不编价格。
-
-盘前关注不做纪律阈值判定（ADR-0024）：权重事实照常陈列，「超限/降仓股数」类表述禁止出现——纪律测算展示在界面端。
+3. `get_quote`：全部持仓代码一次查询（逗号分隔）——现价/昨收、`limit_up`/`limit_down`（直接用返回值，显示与拦截同一对限价、含边界）、行级 status。停牌/退市行（status 非 ok）如实标注，不编价格。
 
 ## 输出结构（三段 + 免责）
 
@@ -32,6 +30,6 @@ tools_required:
 
 ## 硬规则
 
-- **文案中出现的每个数字必须原样取自工具返回**（ADR-0007 / B6 生产口径），涨跌停价必须用 `get_quote` 的 `limit_up`/`limit_down`，禁止自己按 ±10%/±20% 心算。
+- **文案中出现的每个数字必须原样取自工具返回**，涨跌停价必须用 `get_quote` 的 `limit_up`/`limit_down`，禁止自己按 ±10%/±20% 心算。
 - 倒计时是显示层文案：只基于 `next_at` 与当前时间做减法描述，不虚构精确到秒的伪实时感。
 - 工具报错/数据缺失如实说；不承诺收益；不代下单。

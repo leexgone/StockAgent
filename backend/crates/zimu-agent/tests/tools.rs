@@ -439,10 +439,11 @@ async fn calc_advice_over_cap_holds_with_zero_discipline() {
     assert!(out.get("discipline_refs").is_none(), "返回不得带 discipline_refs");
     assert!(out.get("discipline").is_none(), "返回不得带 discipline 块");
     let note = out["note"].as_str().unwrap();
-    assert!(
-        note.contains("不要自行编造") && !note.contains("ADR"),
-        "note 应申明纪律出链且不带内部编号：{note}"
-    );
+    // ADR-0024 补记：连「不要编造超限/参考线」式禁止话术也是纪律词汇载体——
+    // note 里纪律词汇整体清零，反向断言锁死。
+    for banned in ["纪律", "超限", "参考线", "ADR", "§"] {
+        assert!(!note.contains(banned), "note 不得出现纪律词汇/内部编号（{banned}）：{note}");
+    }
 
     // 留档读回：动作与文案照存，refs 列恒空（v5 化石列，历史行不受影响）
     let id = out["advice_id"].as_i64().unwrap();
