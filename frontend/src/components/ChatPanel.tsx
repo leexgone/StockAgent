@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { formatFileSize, MAX_FILE_BYTES, MAX_FILES, type FileMeta } from "../lib/fileAnnotations";
@@ -209,11 +209,29 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
     return () => es.close();
   }, [agentOnline]);
 
-  // 新内容自动滚到底部
+  // 新内容自动滚到底部。agentOnline 必须在依赖里：滚动容器 .chat-log 包在
+  // `{agentOnline && …}` 内，刷新时 health 探测未回→容器未挂载→此时水合触发的
+  // 本 effect 摸到 logRef.current=null 直接跳过；agentOnline 翻真容器才挂载，
+  // 若不进依赖则 entries/pending 未再变、effect 不重跑，页面永远停在顶部第一条
+  //（2026-11-28 复盘：刷新回顶部的根因）。
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [entries, pending]);
+  }, [entries, pending, agentOnline]);
+
+  // 流式期间输入框虽不再上锁，但焦点可能被发送/取消按钮点击或页面操作夺走——
+  // 本轮回复结束（busy true→false 边沿）把光标交还输入框，主人可无缝续打下一条。
+  const prevBusy = useRef(false);
+  useEffect(() => {
+    if (prevBusy.current && !busy) inputRef.current?.focus();
+    prevBusy.current = busy;
+  }, [busy]);
+
+  // Agent 上线时聚焦输入框：输入框随 `{agentOnline && …}` 挂载，刷新/进聊天屏
+  // 后光标直接在输入框里（与滚动 effect 补 agentOnline 依赖同源——容器挂载时序）。
+  useEffect(() => {
+    if (agentOnline) inputRef.current?.focus();
+  }, [agentOnline]);
 
   /** 发送核心：手动提交与 send=1 深链自动发送共用（入口不同，链路与留痕完全一致）。
    *  ADR-0015：multipart/form-data（text + files），浏览器自设 boundary 不手设
@@ -253,6 +271,9 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
       ]);
       setInput("");
       setFiles([]);
+      // 发送成功即回到输入框：按钮点击路径焦点原本留在「发送」上，Enter 路径
+      // 也显式归位——配合输入框不再 disabled，流式期间可直接预打下条内容。
+      inputRef.current?.focus();
     },
     [busy],
   );
@@ -359,7 +380,7 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
           <div className="chat-log" ref={logRef} data-od-id="home-chat-log">
             {entries.length === 0 && (
               <p className="muted chat-empty">
-                输入消息开始对话；试试「请调用 echo 工具回显：你好子木」。
+                输入消息开始对话；试试「今天行情如何」，或 /复盘 /盘前 /建议 /诊断。
               </p>
             )}
             {entries.map((entry, i) => (
@@ -430,7 +451,6 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
               onPaste={(e) => {
                 if (e.clipboardData.files.length > 0) addFiles(e.clipboardData.files);
               }}
-              disabled={busy}
               autoComplete="off"
             />
             <button
@@ -450,7 +470,11 @@ export default function ChatPanel({ agentOnline, prefill, clearNonce, persistKey
   );
 }
 
-function EntryView({ entry }: { entry: Entry }) {
+// memo：SSE 每个 delta 都会 setEntries 产新数组，但只有末条流式 assistant 的
+// entry 引用变化——其余条（尤其历史 assistant 的整棵 react-markdown 树）props
+// 引用相等即跳过重渲染。未 memo 时每 chunk 全表重解析，大历史（~200KB / 30+ 条）
+// 下主线程被 markdown 解析占满 → 页面卡死（2026-11-28 事故复盘）。
+const EntryView = memo(function EntryView({ entry }: { entry: Entry }) {
   switch (entry.kind) {
     case "user":
       return (
@@ -492,7 +516,7 @@ function EntryView({ entry }: { entry: Entry }) {
         </p>
       );
   }
-}
+});
 
 /* ---------- 工具调用卡片（折叠展开，对齐思考段三态取舍） ----------
    执行中（result 未到）：恒展开——工具名 + 参数摘要 + 「⏳ 执行中…」进行指示，
