@@ -19,7 +19,7 @@ tools_required:
 
 ## 流程（按序调用工具，缺一步就在文案里如实降级）
 
-1. `market_status`：取报告时点与交易日背景（标题写「组合诊断报告 · {当前日期}」；`calendar_degraded=true` → 注明「交易日历暂不可用」；`sidecar_online=false` → 预告基准侧可能降级）。
+1. `market_status`：取报告时点与交易日背景（标题写「组合诊断报告 · {当前日期}」；`calendar_degraded=true` → 注明「交易日历暂不可用」；`market_online=false` → 预告基准侧可能降级）。
 2. `calc_diagnosis`：报告的全部区间数字（samples / latest_snapshot / windows 四窗 / bench 元信息 / recent_advice）。**报错（无快照或样本 <2）→ 直接如实转告无法生成报告的原因并停止，绝对禁止编数字或以 0 冒充安全**。`bench.available=false` → 继续生成，但全文禁止出现「跑赢/跑输/超额」表述，基准对比处如实写「基准暂不可用（{reason}）」。
 3. `get_holdings`：当前组合全景（agg.sectors 行业分布、agg.hhi、per[].weight、account.updated_at 时点）。价格是最近一次行情回写值——报告标注数字时点，不现场刷新（区间体检口径 = 留档快照 + 库存持仓）。
 

@@ -18,7 +18,7 @@ tools_required:
 ## 流程（按序调用工具，缺一步就在文案里如实降级）
 
 1. `market_status`：确认今天是否交易日、当前时段。非交易日 → 开篇说明「今日休市，下一交易日 X」，复盘改为「最近一个交易日」口径（数字仍是库存最新值）。`calendar_degraded=true` → 文案注明「交易日历降级，未排除节假日」。
-2. `refresh_quotes`：拉最新行情回写并全量重算。**失败（sidecar 不可达）不中断**：改用 `get_holdings` 的库存值继续，并在开篇如实标注「行情降级，数字为 {updated_at} 库存值」。
+2. `refresh_quotes`：拉最新行情回写并全量重算。**失败（行情服务不可达）不中断**：改用 `get_holdings` 的库存值继续，并在开篇如实标注「行情降级，数字为 {updated_at} 库存值」。
 3. `get_holdings`：组合全景（account / holdings / per / agg）——集中度事实（per[].weight、agg.sectors、agg.hhi、现金占比）都在这里。
 
 复盘不做纪律阈值判定（ADR-0024）：仓位纪律的体检与降仓测算归界面端（持仓屏纪律卡、诊断屏再平衡清单），本技能只陈述组合结构事实。

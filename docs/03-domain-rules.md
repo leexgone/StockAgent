@@ -141,6 +141,9 @@ exposure     = totalMv / totalAssets × 100             # 仓位（不含现金�
 > 零接触。`sell_to` 泛式仍被 §10 的 `sell_qty_hint` 复用（目标来自得分锚 15%，
 > 公式借用不构成纪律判断）。`advice_history.discipline_refs` 列保留（迁移只增不减），
 > 自 ADR-0024 起新行恒空 `[]`，仅供 ADR-0023 期间的历史留档渲染。
+> **补记（同日）**：记账链同样零纪律——`store` 的 `simulate/record` 收据 `warnings`
+> 不再产出「单票将超过 25% 上限」提示（只剩奇零股等交易校验事实）；
+> `TradeOutcome.over_limit` 作为 HTTP 响应字段保留，agent 工具层剥除后不进模型。
 
 | 规则 | 阈值 | 分子 | 分母 |
 |---|---|---|---|

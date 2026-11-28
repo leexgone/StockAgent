@@ -35,3 +35,9 @@ ADR-0023 把纪律从「拦截」降为「参考线」，但纪律仍然占据�
 - `discipline_refs` 列成为只读化石列（新行恒空）；将来纪律回潮若经技能引入，需重开 ADR 说明重新注册工具的理由。
 
 **以后要改回来得动哪里**：`advice.rs`/`advice.ts` 决策表加回纪律输入 + refs 构建（git 历史 `3a8b8a5`~`5d7f719` 区间可考全部实现）、`fixtures/golden/advice.json` 期望回写、`tools/portfolio.rs` 恢复 CalcDisciplineTool 并回 `DOMAIN_TOOL_NAMES`、get_holdings/calc_advice 返回补纪律键、agent.md 参考线段 + persona 守护第 13 子串还原、四技能 frontmatter `tools_required` 回补、置本 ADR 已取代。
+
+## 补记（2026-11-28，同日）
+
+**D1 残留通道收口（用户拍板「警告也一并摘除」）**：模型面文案清理中发现记账链两处漏网点——① `store` 的 `record/simulate` 收据 `preview.warnings` 仍产出「单票将超过 25% 上限」非拦截警告；② `TradeOutcome.over_limit` 布尔随工具返回 JSON 直达模型。处置：store 层不再产出该警告（`warnings` 只剩奇零股等交易校验事实）；agent 工具层 `strip_model_facing()` 从 simulate/record 返回剥除 `over_limit`。**domain `dilution` 模块与 HTTP 契约仍不动（D4 口径）**——`over_limit` 字段照旧在 API 响应里，Web 抽屉超限提示本就前端现算，Web 三处测算展示零影响。要改回来：store warnings 块 + `strip_model_facing` 调用点（git 历史可考）。
+
+同批（非本 ADR 决定，记录在此便于追溯）：全部 14 件领域工具的 description / 返回 note / 错误话术按 `tools/mod.rs` 头新增的「模型面文案约定」收口——内部编号（03 §、ADR、B/P 系列）、HTTP 端点、表名、实现链描述一律退出模型可见文案，只留 Rust 注释作工程追溯；`market_status` 返回键 `sidecar_*` 更名 `market_*`（四技能模板同步）。

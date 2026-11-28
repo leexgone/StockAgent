@@ -404,7 +404,7 @@ async fn calc_advice_bare_unknown_code_rejected_b7() {
     let fake = FakeApi::arc();
     let tool = CalcAdviceTool { deps: deps_with(store, fake) };
     let err = exec_err(&tool, json!({ "code": "600000" })).await;
-    assert!(err.contains("前缀") && err.contains("B7"), "{err}");
+    assert!(err.contains("市场前缀"), "裸代码拒绝话术应指向市场前缀：{err}");
 }
 
 /// ADR-0024 端到端：超 25% 的重仓偏多票——纪律彻底不进链：
@@ -439,7 +439,10 @@ async fn calc_advice_over_cap_holds_with_zero_discipline() {
     assert!(out.get("discipline_refs").is_none(), "返回不得带 discipline_refs");
     assert!(out.get("discipline").is_none(), "返回不得带 discipline 块");
     let note = out["note"].as_str().unwrap();
-    assert!(note.contains("ADR-0024"), "note 应申明纪律出链：{note}");
+    assert!(
+        note.contains("不要自行编造") && !note.contains("ADR"),
+        "note 应申明纪律出链且不带内部编号：{note}"
+    );
 
     // 留档读回：动作与文案照存，refs 列恒空（v5 化石列，历史行不受影响）
     let id = out["advice_id"].as_i64().unwrap();
@@ -523,9 +526,9 @@ async fn get_quote_attaches_domain_limit_prices() {
     assert_eq!(row["limit_pct"], 10);
     assert_eq!(row["status"], "ok");
 
-    // 非持仓裸代码 → B7 拒绝；前缀形态可查
+    // 非持仓裸代码 → 拒绝并指向市场前缀；前缀形态可查
     let err = exec_err(&tool, json!({ "codes": "600000" })).await;
-    assert!(err.contains("B7"), "{err}");
+    assert!(err.contains("市场前缀"), "{err}");
 }
 
 #[tokio::test]
@@ -715,7 +718,24 @@ async fn simulate_trade_previews_without_writing() {
         meta: None,
     };
     let expected = zimu_agent::lock(&store).simulate_trade(&req).unwrap();
-    assert_json_close(&out["preview"], &serde_json::to_value(&expected).unwrap(), "试算预览");
+    // ADR-0024 补记：工具输出在 store 结果基础上剥除 over_limit 纪律布尔——
+    // 对拍时同步剥除；缺席本身另作模型可见面零纪律断言。
+    let mut expected_v = serde_json::to_value(&expected).unwrap();
+    assert!(out["preview"]["outcome"].get("over_limit").is_none(), "模型面不得带纪律布尔");
+    expected_v["outcome"]
+        .as_object_mut()
+        .unwrap()
+        .remove("over_limit");
+    assert_json_close(&out["preview"], &expected_v, "试算预览");
+    assert!(
+        !out["preview"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap_or_default().contains("25")),
+        "warnings 不得带纪律提示：{}",
+        out["preview"]["warnings"]
+    );
     // 试算不落库：持仓股数不变
     assert_eq!(zimu_agent::lock(&store).holdings().unwrap()[0].shares, 100);
 
@@ -731,8 +751,8 @@ async fn market_status_survives_dead_sidecar() {
     fake.set_down(true);
     let tool = MarketStatusTool { deps: deps_with(store, fake) };
     let out = exec(&tool, json!({})).await; // 永不失败：降级如实标注
-    assert_eq!(out["sidecar_online"], false);
-    assert!(out["sidecar_error"].is_string());
+    assert_eq!(out["market_online"], false);
+    assert!(out["market_error"].is_string());
     assert_eq!(out["calendar_available"], false); // 无日历 → 工作日启发式
     assert!(out["clock"]["state"].is_string()); // 时钟照走针
 }
@@ -755,6 +775,8 @@ async fn record_trade_writes_ledger_with_agent_note_mark() {
     assert_eq!(receipt["removed"], false);
     // 读回指令内嵌在工具返回里（模型必然看到，ADR-0012 防线第二层）
     assert!(out["note"].as_str().unwrap().contains("宣读"));
+    // ADR-0024 补记：收据的模型可见面同样剥除纪律布尔
+    assert!(out["receipt"]["preview"]["outcome"].get("over_limit").is_none());
     // 账本落地：持仓 200 股、流水 +1、现金联动（100×112 + 费用）
     let s = zimu_agent::lock(&store);
     assert_eq!(s.holdings().unwrap()[0].shares, 200);
@@ -1378,7 +1400,7 @@ async fn calc_diagnosis_bench_degrades_not_refuses() {
     fake.set_down(true);
     let out = exec(&CalcDiagnosisTool { deps: deps_with(store, fake) }, json!({})).await;
     assert_eq!(out["bench"]["available"], false);
-    assert!(out["bench"]["reason"].as_str().unwrap().contains("sidecar"), "{out}");
+    assert!(out["bench"]["reason"].as_str().unwrap().contains("行情服务不可达"), "{out}");
     let m = &out["windows"][0]["metrics"];
     assert_eq!(m["bench_cum"].as_f64().unwrap(), 0.0);
     assert_eq!(m["beta"].as_f64().unwrap(), 0.0);

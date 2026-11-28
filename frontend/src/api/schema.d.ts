@@ -1275,7 +1275,7 @@ export interface components {
         SimPreview: {
             fee_detail: components["schemas"]["FeeBreakdown"];
             outcome: components["schemas"]["TradeOutcome"];
-            /** @description 非拦截性提示：如「单票将超过 25% 上限」（原型只在预览提示，不拦提交） */
+            /** @description 非拦截性提示（奇零股等交易校验事实；纪律提示不进记账链——ADR-0024 补记） */
             warnings: string[];
         };
         /** @description 未回写标的的明细行（降级不断供：对应持仓保持库存旧值） */
@@ -2030,7 +2030,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 录入收据：trade 行 + 变动后持仓（清仓为 null）+ 试算预览 + warnings（纪律提示不拦提交，如「单票将超过 25% 上限」） */
+            /** @description 录入收据：trade 行 + 变动后持仓（清仓为 null）+ 试算预览 + warnings（非拦截性交易校验提示，如奇零股；纪律提示不进链——ADR-0024 补记） */
             201: {
                 headers: {
                     [name: string]: unknown;

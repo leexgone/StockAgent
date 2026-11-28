@@ -35,7 +35,14 @@ impl Tool for MarketStatusTool {
     }
 
     fn description(&self) -> &str {
-        "查市场时钟与行情服务状态：当前是否交易日、所处时段（盘前/集合竞价/盘中/午休/已收盘/休市，03 §9 生产口径：恒 Asia/Shanghai、交易日历优先）、下一事件与下一交易日、行情 sidecar 是否在线、日历是否降级。复盘/盘前类回答先用本工具确定时间背景；日历降级（calendar_degraded=true）时要在文案里如实说明「未排除节假日」。"
+        // 模型面文案（口径出处 docs/03 §9：恒 Asia/Shanghai、交易日历优先——
+        // 编号/实现链不进 description，见 tools/mod.rs 头约定）。
+        concat!(
+            "查市场时钟与行情服务状态：当前是否交易日、所处时段（盘前/集合竞价/盘中/午休/已收盘/休市）、",
+            "下一事件与下一交易日、行情服务是否在线、交易日历是否降级。",
+            "复盘/盘前类回答先用本工具确定时间背景；",
+            "日历降级（calendar_degraded=true）时要在文案里如实说明「未排除节假日」。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -77,10 +84,10 @@ impl Tool for MarketStatusTool {
             });
         let clock = market_clock(now_shanghai(), &view);
         Ok(ok_json(&json!({
-            "sidecar_url": self.deps.market.base_url(),
-            "sidecar_online": online,
-            "sidecar_version": version,
-            "sidecar_error": health_error,
+            "market_url": self.deps.market.base_url(),
+            "market_online": online,
+            "market_version": version,
+            "market_error": health_error,
             "clock": clock,
             "calendar_available": view.trade_dates.is_some(),
             "calendar_source": view.source,
@@ -119,7 +126,15 @@ impl Tool for GetQuoteTool {
     }
 
     fn description(&self) -> &str {
-        "查实时行情：现价、昨收、今开、最高、最低、成交量/额、涨跌幅、行情时点 as_of、行级状态（ok/halted_or_delisted/empty_or_delisted/no_data）、来源与降级明细 attempts，并按 03 §2 口径附当日涨停价 limit_up / 跌停价 limit_down（zimu-domain price_limit 计算，含边界）。参数 codes 为逗号分隔列表：持仓内可用裸代码（如 600519），非持仓必须带市场前缀（如 sh600519，B7 不做号段猜测）。回答行情必须引用本工具返回的数字并注明 as_of 时点。"
+        // 模型面文案（涨跌停口径 docs/03 §2 由 price_limit 现算，出处不进 description）。
+        concat!(
+            "查实时行情：现价、昨收、今开、最高、最低、成交量/额、涨跌幅、行情时点 as_of、",
+            "行级状态（ok/halted_or_delisted/empty_or_delisted/no_data）、来源与降级明细 attempts，",
+            "并附当日涨停价 limit_up / 跌停价 limit_down。",
+            "参数 codes 为逗号分隔列表：持仓内可用裸代码（如 600519），",
+            "非持仓必须带市场前缀（如 sh600519），不要按号段自行猜测市场。",
+            "回答行情必须引用本工具返回的数字并注明 as_of 时点。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -165,7 +180,7 @@ impl Tool for GetQuoteTool {
                 symbols.push(s);
             } else {
                 resolve_errors.push(format!(
-                    "{t}：不在持仓且未带市场前缀（B7 不做号段猜测），请改用 sh/sz 前缀完整形态"
+                    "{t}：不在持仓且未带市场前缀，请改用 sh/sz 前缀完整形态"
                 ));
             }
         }
@@ -238,7 +253,16 @@ impl Tool for RefreshQuotesTool {
     }
 
     fn description(&self) -> &str {
-        "拉取全部持仓的实时行情并回写数据库，然后按 03 §5 口径全量重算组合（与界面顶栏刷新、POST /api/market/refresh 同一条链）。返回 as_of、updated 回写行数、skipped 未回写明细（停牌/退市等，保持库存旧值）、degraded/attempts 降级明细与重算后的组合全景 portfolio。顺带补全空串行业（P7-T6/ADR-0016：股票查新浪行业板映射、ETF=基金/转债=转债，遍历全部持仓含停牌退市，手工非空值不覆盖；映射失败不阻断行情回写）。生成盘后复盘、建议或任何组合级数字**之前**先调用本工具，确保数字是最新的；sidecar 不可达时如实报错，不写库、不动旧数字。"
+        // 模型面文案（与界面顶栏刷新/POST /api/market/refresh 同一条链=service::refresh_portfolio；
+        // 行业补全 P7-T6/ADR-0016——实现链与编号不进 description）。
+        concat!(
+            "拉取全部持仓的实时行情并回写数据库，然后全量重算组合。",
+            "返回 as_of、updated 回写行数、skipped 未回写明细（停牌/退市等，保持库存旧值）、",
+            "degraded/attempts 降级明细与重算后的组合全景 portfolio。",
+            "顺带补全空串行业字段（手工填过的非空行业不会被覆盖；补全失败不影响行情回写）。",
+            "生成盘后复盘、建议或任何组合级数字**之前**先调用本工具，确保数字是最新的；",
+            "行情服务不可达时如实报错，不写库、不动旧数字。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {

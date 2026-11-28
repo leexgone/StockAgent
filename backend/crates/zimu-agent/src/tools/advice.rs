@@ -84,7 +84,17 @@ impl Tool for CalcAdviceTool {
     }
 
     fn description(&self) -> &str {
-        "生成分析结论的全部数字（ADR-0007：数字归规则）——按 03 §10 生产口径打分：score/conf/四维 dims/action/horizon/target 目标区间/stop 止损/position 建议仓位/中间量 stats（MA5/MA20/动量/区间位置/量比/票数），并当场写入 advice_history 数字列（含 generated_at 与 data_version，B9 留档），返回 advice_id。结论完全由行情信号决定（ADR-0024：仓位纪律不参与打分链，也不随返回给出——不要自行编造「超限/参考线」类纪律表述）。输入依赖近 90 天日线（sidecar），日线拿不到会如实报错拒绝出建议。**返回的每个数字是你文案中数字的唯一来源，不得自行编造或改写**；写完结论/理由/风险文案后必须调用 finalize_advice(advice_id, reason, risks) 归档，否则留档缺文案。"
+        // 模型面文案（打分口径 docs/03 §10，ADR-0007 数字归规则 / ADR-0024 纪律出链；
+        // 留档写 advice_history 数字列，含 generated_at/data_version）。
+        concat!(
+            "生成分析结论的全部数字（规则打分，数字不经模型转写）：",
+            "score/conf/四维 dims/action/horizon/target 目标区间/stop 止损/position 建议仓位",
+            "/中间量 stats（MA5/MA20/动量/区间位置/量比/票数），并当场留档数字、返回 advice_id。",
+            "结论完全由行情信号决定——不要自行编造「超限/参考线」类纪律表述。",
+            "输入依赖近 90 天日线，日线拿不到会如实报错拒绝出建议。",
+            "**返回的每个数字是你文案中数字的唯一来源，不得自行编造或改写**；",
+            "写完结论/理由/风险文案后必须调用 finalize_advice(advice_id, reason, risks) 归档，否则留档缺文案。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -93,7 +103,7 @@ impl Tool for CalcAdviceTool {
             "properties": {
                 "code": {
                     "type": "string",
-                    "description": "标的代码：持仓内可用裸代码（600519）；非持仓必须带市场前缀（sh600519，B7）"
+                    "description": "标的代码：持仓内可用裸代码（600519）；非持仓必须带市场前缀（sh600519）"
                 }
             },
             "required": ["code"]
@@ -130,7 +140,7 @@ impl Tool for CalcAdviceTool {
                     Some(pair) => pair,
                     None => {
                         return Ok(ToolResult::error(format!(
-                            "{arg}：不在持仓且未带市场前缀（B7 不做号段猜测）。请用 sh/sz 前缀完整形态（如 sh{arg}），或先在界面录入持仓"
+                            "{arg}：不在持仓且未带市场前缀。请用 sh/sz 前缀完整形态（如 sh{arg}），或先在界面录入持仓"
                         )))
                     }
                 }
@@ -175,7 +185,7 @@ impl Tool for CalcAdviceTool {
             Err(e) => {
                 return Ok(match e {
                     MarketError::Unavailable(m) => ToolResult::error(format!(
-                        "行情 sidecar 不可达，无法生成建议（建议依赖近 {KLINE_WINDOW_DAYS} 天日线）：{m}。请稍后重试，或让用户检查 datafetch 服务"
+                        "行情服务不可达，无法生成建议（建议依赖近 {KLINE_WINDOW_DAYS} 天日线）：{m}。请稍后重试，或让用户检查行情服务是否在线"
                     )),
                     other => market_err(other),
                 })
@@ -329,7 +339,12 @@ impl Tool for CalcAdviceTool {
             },
             "data_version": data_version,
             "generated_at": generated_at,
-            "note": "以上数字全部由规则函数产出（03 §10 生产口径，ADR-0007 数字归规则），数字列已写入 advice_history；你文案中出现的每个数字必须原样取自本返回（conf 是样本内信号一致性、不是胜率，不得写成涨跌概率）。本结论完全由行情信号决定（ADR-0024：仓位纪律不进建议链）——不要自行编造「参考线/超限/纪律提示」类表述，仓位风险的测算展示在界面端。写完文案后调用 finalize_advice(advice_id, reason, risks) 归档，risks 至少一条。",
+            "note": concat!(
+                "以上数字全部由规则函数产出，数字已留档；",
+                "你文案中出现的每个数字必须原样取自本返回（conf 是样本内信号一致性、不是胜率，不得写成涨跌概率）。",
+                "本结论完全由行情信号决定——不要自行编造「参考线/超限/纪律提示」类表述，仓位风险的测算展示在界面端。",
+                "写完文案后调用 finalize_advice(advice_id, reason, risks) 归档，risks 至少一条。",
+            ),
         })))
     }
 }
@@ -349,7 +364,15 @@ impl Tool for FinalizeAdviceTool {
     }
 
     fn description(&self) -> &str {
-        "把你写好的建议文案回填进 advice_history 留档（只动 reason/risks 文案列，数字列不可改写——ADR-0007）。参数：advice_id（calc_advice 返回）、reason 结论文案（其中的数字必须原样来自 calc_advice 返回，并包含失效条件，如「收盘跌破止损价 x 则结论失效」）、risks 风险自陈字符串数组（至少一条，不可为空——03 §10）。每次 calc_advice 之后必须调用本工具完成归档。"
+        // 模型面文案（数字/文案分列不可互改=ADR-0007；risks 硬规则 docs/03 §10）。
+        concat!(
+            "把你写好的建议文案回填进留档（只动 reason/risks 文案列，数字不可改写）。参数：",
+            "advice_id（calc_advice 返回）、",
+            "reason 结论文案（其中的数字必须原样来自 calc_advice 返回，并包含失效条件，",
+            "如「收盘跌破止损价 x 则结论失效」）、",
+            "risks 风险自陈字符串数组（至少一条，不可为空）。",
+            "每次 calc_advice 之后必须调用本工具完成归档。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -402,7 +425,7 @@ impl Tool for FinalizeAdviceTool {
             .unwrap_or_default();
         if risks.is_empty() {
             return Ok(ToolResult::error(
-                "risks 至少一条且不可为空串（03 §10：风险自陈是这个结论可能错在哪，不允许留空）",
+                "risks 至少一条且不可为空串（风险自陈是这个结论可能错在哪，不允许留空）",
             ));
         }
 
@@ -417,7 +440,7 @@ impl Tool for FinalizeAdviceTool {
         drop(s);
         Ok(ok_json(&json!({
             "archived": row,
-            "note": "已归档：数字与文案同行留档（generated_at + data_version，B9）。可在回复末尾告知用户本条建议已留档可回溯。",
+            "note": "已归档：数字与文案同行留档、可回溯。可在回复末尾告知用户本条建议已留档。",
         })))
     }
 }

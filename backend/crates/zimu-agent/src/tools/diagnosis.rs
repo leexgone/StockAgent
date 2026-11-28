@@ -39,11 +39,11 @@ pub struct CalcDiagnosisTool {
 /// 基准缺失不拒绝出报告，拼进 bench.reason 供模型如实转述）
 fn bench_degrade_reason(e: &MarketError) -> String {
     match e {
-        MarketError::Unavailable(m) => format!("行情 sidecar 不可达（{m}）"),
+        MarketError::Unavailable(m) => format!("行情服务不可达（{m}）"),
         MarketError::Upstream { status, code, message } => {
             format!("行情上游错误（HTTP {status}，{code}）：{message}")
         }
-        MarketError::Contract(m) => format!("行情契约不符（sidecar 与本程序版本漂移）：{m}"),
+        MarketError::Contract(m) => format!("行情数据契约不符（行情服务与本程序版本不一致）：{m}"),
     }
 }
 
@@ -54,7 +54,17 @@ impl Tool for CalcDiagnosisTool {
     }
 
     fn description(&self) -> &str {
-        "组合诊断报告取数（区间风险体检，与界面「组合诊断」屏同一口径；当日归因用 /复盘，单标的建议用 /建议）：净值快照（equity_snapshots 最近 250 条，date 升序）→ perf 十字段（03 §7）按四窗口尾部截断重跑（全区间/近20/45/90 交易日，与诊断屏分区间表一致）+ 最新快照行原值（总资产/仓位/HHI/前三行业占比等）+ 基准对比（sh000300 价格指数日线按 03 §7 基准对齐段 carry-forward 归一到区间起点；未含分红、非全收益口径，文案引用基准必须如实标注）+ 最近 5 条建议留档摘要。基准降级（sidecar 不可达/日线窗口空/对齐失败）时 bench.available=false 且 bench_* 全 0——此时禁止说「跑赢/跑输基准」。净值样本 <2 条时本工具如实报错拒绝出数（不得以 0 冒充安全）。文案中每个数字必须原样取自本工具返回；唯一允许的展示层运算 = 区间超额 cum − bench_cum（03 §7 B11）。"
+        // 模型面文案（数据链=equity_snapshots 尾部 250 条升序 → zimu-domain::perf 四窗口重算
+        // → sh000300 carry-forward 基准对齐，口径 docs/03 §7；实现细节不进 description）。
+        concat!(
+            "组合诊断报告取数（区间风险体检；当日归因请走 /复盘，单标的建议请走 /建议）。返回：",
+            "净值序列（最近至多 250 个交易日）→ 十字段风险指标按四窗口重算",
+            "（全区间/近20/45/90 交易日）+ 最新组合原值（总资产/仓位/HHI/前三行业占比等）+ ",
+            "基准对比（sh000300 价格指数归一到区间起点；**未含分红、非全收益口径，文案引用基准必须如实标注**）+ 最近 5 条建议留档摘要。",
+            "基准降级（行情服务不可达/日线窗口空/对齐失败）时 bench.available=false 且 bench_* 全 0——此时禁止说「跑赢/跑输基准」。",
+            "净值样本 <2 条时如实报错拒绝出数（不得以 0 冒充安全）。",
+            "文案中每个数字必须原样取自本工具返回；唯一允许的展示层运算 = 区间超额 cum − bench_cum。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -74,12 +84,18 @@ impl Tool for CalcDiagnosisTool {
         let rows = store_try!(crate::lock(&self.deps.store).equity_snapshots(SNAPSHOT_LIMIT));
         if rows.is_empty() {
             return Ok(ToolResult::error(
-                "还没有净值快照——净值序列由每交易日 15:05 盘后链归档（03 §12）。如实告诉主人：现在没有可诊断的样本，录入第一笔并等盘后归档后才能生成报告；不要编造任何数字。",
+                concat!(
+                    "还没有净值快照——净值序列由每交易日 15:05 盘后链归档。",
+                    "如实告诉主人：现在没有可诊断的样本，录入第一笔并等盘后归档后才能生成报告；不要编造任何数字。",
+                ),
             ));
         }
         if rows.len() < 2 {
             return Ok(ToolResult::error(
-                "净值快照只有 1 条，区间指标无法计算（perf 需 ≥2 个采样点）。如实说明样本不足，不要给出任何指标数值（不得以 0 冒充安全）。",
+                concat!(
+                    "净值快照只有 1 条，区间指标无法计算（需 ≥2 个采样点）。",
+                    "如实说明样本不足，不要给出任何指标数值（不得以 0 冒充安全）。",
+                ),
             ));
         }
         let dates: Vec<String> = rows.iter().map(|r| r.date.clone()).collect();
@@ -110,7 +126,7 @@ impl Tool for CalcDiagnosisTool {
                     }
                     None => {
                         bench_reason = Some(
-                            "首快照日早于日线窗口，对齐失败（03 §7 carry-forward null 语义）".into(),
+                            "首快照日早于基准日线窗口起点，对齐失败".into(),
                         );
                     }
                 }
@@ -166,7 +182,7 @@ impl Tool for CalcDiagnosisTool {
             "bench": {
                 "symbol": BENCH_SYMBOL,
                 "name": "沪深300",
-                "index_kind": "价格指数（未含分红，非 03 §7 全收益理想口径——文案必须如实标注，B11）",
+                "index_kind": "价格指数（未含分红、非全收益口径——文案必须如实标注）",
                 "available": bench_available,
                 "degraded": bench_degraded,
                 "source": bench_source,
@@ -176,10 +192,10 @@ impl Tool for CalcDiagnosisTool {
             "kpi_window": "90",
             "recent_advice": recent_advice,
             "notes": [
-                "指标由 zimu-domain perf（03 §7，黄金向量校验）计算；窗口 = 尾部截断重跑，与界面诊断屏分区间表一致",
-                "基准对齐 = 03 §7 基准对齐段（carry-forward + 归一到区间起点）；bench.available=false 时 bench_* 全 0，不得表述为跑赢/跑输",
+                "指标由净值序列按窗口尾部截断重算（全区间/近20/45/90 交易日），与界面诊断屏分区间表同源",
+                "基准日线缺口沿用前值并归一到区间起点；bench.available=false 时 bench_* 全 0，不得表述为跑赢/跑输",
                 "sh000300 为价格指数（未含分红）；引用基准对比必须带此标注",
-                "唯一允许的展示层运算 = 区间超额 cum − bench_cum（03 §7 B11）；其余数字原样引用",
+                "唯一允许的展示层运算 = 区间超额 cum − bench_cum；其余数字原样引用",
             ],
         })))
     }

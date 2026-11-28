@@ -177,19 +177,20 @@ fn rejects_insufficient_cash_and_rolls_back() {
 }
 
 #[test]
-fn over_limit_is_warning_not_reject() {
-    // 现金 100 万、单笔买 30 万市值 → 占组合 30% > 25% 上限：
-    // 交易必须成功（原型语义：纪律提示不拦提交），warnings 带「25」
+fn over_limit_not_rejected_and_no_longer_warned() {
+    // 现金 100 万、单笔买 30 万市值 → 占组合 30% > 25%：
+    // ADR-0024 补记——超占比既不拒绝也不提示（纪律不进记账链），
+    // outcome.over_limit 布尔仍由 domain 产出（Web 消费面自取）。
     let s = seed_store(1_000_000.0);
     let r = s
         .record_trade(&buy("600001", 30000, 10.0, meta(("600001", "重仓股"), Kind::Stock, None, None)))
         .unwrap();
+    assert!(r.preview.outcome.over_limit, "domain 布尔输出保留");
     assert!(
-        r.preview.warnings.iter().any(|w| w.contains("25")),
-        "warnings={:?}",
+        !r.preview.warnings.iter().any(|w| w.contains("25")),
+        "warnings 不得再带纪律提示：{:?}",
         r.preview.warnings
     );
-    assert!(r.preview.outcome.over_limit);
 }
 
 #[test]

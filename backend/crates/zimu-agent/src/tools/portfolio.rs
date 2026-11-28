@@ -6,6 +6,9 @@
 //! ADR-0024：calc_discipline（纪律四条体检 + reduce_hint）整体退役——仓位纪律
 //! 只保留 Web 端测算展示（红绿灯卡/再平衡清单，前端对 /api/holdings 原值现算）；
 //! 组合中性事实（weight/行业分布/HHI/现金占比）仍在 get_holdings 里照常可得。
+//! ADR-0024 补记（2026-11-28）：record/simulate 收据的「单票将超过 25% 上限」
+//! 警告与 `outcome.over_limit` 布尔同属漏网渠道——store 层不再产出该警告，
+//! 工具层再剥除 over_limit 字段（HTTP 契约字段保留，见 zimu-server 面）。
 
 use std::sync::Arc;
 
@@ -16,6 +19,19 @@ use zimu_store::{HoldingEditError, HoldingUpsert, RecordError, TradeRequest};
 
 use super::{ok_json, store_err, store_try};
 use crate::AgentDeps;
+
+/// 模型可见面剥除纪律判定产物（ADR-0024 D1 零纪律 + mod.rs 头「模型面文案约定」）：
+/// `TradeOutcome.over_limit` 是 dilution 阈值判定的布尔输出，Web 抽屉的超限提示
+/// 走前端现算、HTTP 契约字段保留，但不应进模型上下文。warnings 数组已在
+/// store 层不再含纪律条目，这里无需处理。
+fn strip_model_facing(mut v: Value) -> Value {
+    for path in ["/preview/outcome", "/receipt/preview/outcome"] {
+        if let Some(o) = v.pointer_mut(path).and_then(Value::as_object_mut) {
+            o.remove("over_limit");
+        }
+    }
+    v
+}
 
 // ============================================================================
 // get_holdings
@@ -32,7 +48,14 @@ impl Tool for GetHoldingsTool {
     }
 
     fn description(&self) -> &str {
-        "查组合全景（03 §5 口径，数字与界面 /api/holdings 同源）：账户现金、持仓明细（代码/名称/类型/行业/股数/摊薄成本/现价/昨收）、逐笔派生 per[]（当日涨跌 day_chg、当日盈亏 day_val、市值 mv、累计盈亏 pnl/pnl_pct、占总资产 weight）、组合汇总 agg（总资产、当日/累计盈亏与百分比、仓位 exposure、行业分布、HHI 集中度）。注意价格是最近一次行情回写的值——需要最新数字先调 refresh_quotes。回答持仓/盈亏必须引用本工具返回的数字。"
+        // 模型面文案（数字与 /api/holdings 同源=recalc 快照，口径 docs/03 §5）。
+        concat!(
+            "查组合全景：账户现金、持仓明细（代码/名称/类型/行业/股数/摊薄成本/现价/昨收）、",
+            "逐笔派生 per[]（当日涨跌 day_chg、当日盈亏 day_val、市值 mv、累计盈亏 pnl/pnl_pct、占总资产 weight）、",
+            "组合汇总 agg（总资产、当日/累计盈亏与百分比、仓位 exposure、行业分布、HHI 集中度）。",
+            "注意现价是最近一次行情回写的值——需要最新数字先调 refresh_quotes。",
+            "回答持仓/盈亏必须引用本工具返回的数字。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -55,7 +78,10 @@ impl Tool for GetHoldingsTool {
         // 仓位纪律的阈值判定与降仓测算退居 Web 端（红绿灯卡/再平衡清单现算）。
         Ok(ok_json(&json!({
             "portfolio": view,
-            "note": "weight 分母是总资产（含现金），行业占比分母是持仓市值（不含现金）——文案里数字旁必须写清分母（03 §5）",
+            "note": concat!(
+                "weight 分母是总资产（含现金），行业占比分母是持仓市值（不含现金）",
+                "——文案里数字旁必须写清分母",
+            ),
         })))
     }
 }
@@ -96,7 +122,14 @@ impl Tool for SimulateTradeTool {
     }
 
     fn description(&self) -> &str {
-        "试算一笔成交（只读预览，不落库——确认要点无误后调 record_trade 落账）：整手与可卖数量校验（03 §1）、涨跌停区间校验（§2，有昨收才拦）、费用三分项（§3：佣金/印花税/过户费，A 股口径）、摊薄成本或已实现盈亏与现金变化（§4）、超 25% 上限等非拦截性警告。参数：code、side（buy/sell）、qty 股数、price 成交价、note 可选；标的未持有且要买入时必须给 meta {name, mkt: SH|SZ, kind: stock|etf|cb, sector, prev?, limit_pct?}。"
+        // 模型面文案（校验口径 docs/03 §1–§4；非拦截警告由存储层组装）。
+        concat!(
+            "试算一笔成交（只读预览，不落库——确认要点无误后调 record_trade 落账）：",
+            "整手与可卖数量校验、涨跌停区间校验（有昨收才拦）、",
+            "费用三分项（佣金/印花税/过户费，A 股口径）、摊薄成本或已实现盈亏与现金变化、非拦截性警告（如单票占比偏高）。",
+            "参数：code、side（buy/sell）、qty 股数、price 成交价、note 可选；",
+            "标的未持有且要买入时必须给 meta {name, mkt: SH|SZ, kind: stock|etf|cb, sector, prev?, limit_pct?}。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -105,8 +138,8 @@ impl Tool for SimulateTradeTool {
             "properties": {
                 "code": { "type": "string", "description": "标的代码，如 600519" },
                 "side": { "type": "string", "enum": ["buy", "sell"], "description": "交易方向" },
-                "qty": { "type": "integer", "description": "股数/张数（整手校验见 03 §1）" },
-                "price": { "type": "number", "description": "成交价（涨跌停校验见 03 §2）" },
+                "qty": { "type": "integer", "description": "股数/张数（受整手校验）" },
+                "price": { "type": "number", "description": "成交价（有昨收时受涨跌停区间校验）" },
                 "note": { "type": "string", "description": "备注（可选）" },
                 "meta": {
                     "type": "object",
@@ -147,10 +180,13 @@ impl Tool for SimulateTradeTool {
             Ok(p) => p,
             Err(e) => return Ok(record_err(e)),
         };
-        Ok(ok_json(&json!({
+        Ok(ok_json(&strip_model_facing(json!({
             "preview": preview,
-            "note": "试算预览，未落库。费用/摊薄/整手/涨跌停数字与录入抽屉同一套领域函数（03 §1–§4），可直接引用；向用户复述要点、确认后调 record_trade 落账（ADR-0012）",
-        })))
+            "note": concat!(
+                "试算预览，未落库。费用/摊薄/整手/涨跌停数字与正式落账同一套校验，可直接引用；",
+                "向用户复述要点、确认后调 record_trade 落账",
+            ),
+        }))))
     }
 }
 
@@ -173,7 +209,19 @@ impl Tool for RecordTradeTool {
     }
 
     fn description(&self) -> &str {
-        "把一笔**已成交**的买卖记入账户流水（写账本：trades 流水 + 持仓变动 + 现金/费用/已实现盈亏联动，03 §1–§4 全量校验，与界面录入抽屉同一事务）。本工具是记账不是执行——系统不连接任何交易系统。写账本三纪律（ADR-0012）：① 数量价格必须来自用户明示，缺任何一项先问，禁止用行情价、记忆或猜测补数；② 先调 simulate_trade 试算并向用户复述要点，再调本工具落账，落账后把收据完整宣读（时间/标的/方向/数量/价格/费用三分项/变动后现金与持仓）；③ 账本只增不改——录错先 get_trades 定位原笔，向用户说明后反向一笔冲正（note 注明「冲正 #原id」），绝不承诺删除重记。参数：code、side（buy/sell）、qty 股数、price 成交价、note 可选；标的未持有且要买入时必须给 meta {name, mkt: SH|SZ, kind: stock|etf|cb, sector, prev?, limit_pct?}。"
+        // 模型面文案（写账本三纪律=ADR-0012 自动落账+读回；全量校验 docs/03 §1–§4，
+        // 与界面录入同一事务——出处不进 description）。
+        concat!(
+            "把一笔**已成交**的买卖记入账户流水（写账本：交易流水 + 持仓变动 + 现金/费用/已实现盈亏联动，",
+            "全量校验后落账并返回收据）。本工具是记账不是执行——系统不连接任何交易系统。",
+            "写账本三纪律：① 数量价格必须来自用户明示，缺任何一项先问，禁止用行情价、记忆或猜测补数；",
+            "② 先调 simulate_trade 试算并向用户复述要点，再调本工具落账，落账后把收据完整宣读",
+            "（时间/标的/方向/数量/价格/费用三分项/变动后现金与持仓）；",
+            "③ 账本只增不改——录错先 get_trades 定位原笔，向用户说明后反向一笔冲正（note 注明「冲正 #原id」），",
+            "绝不承诺删除重记。",
+            "参数：code、side（buy/sell）、qty 股数、price 成交价、note 可选；",
+            "标的未持有且要买入时必须给 meta {name, mkt: SH|SZ, kind: stock|etf|cb, sector, prev?, limit_pct?}。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -183,8 +231,8 @@ impl Tool for RecordTradeTool {
             "properties": {
                 "code": { "type": "string", "description": "标的代码，如 600519" },
                 "side": { "type": "string", "enum": ["buy", "sell"], "description": "交易方向" },
-                "qty": { "type": "integer", "description": "股数/张数（整手校验见 03 §1）" },
-                "price": { "type": "number", "description": "成交价（涨跌停校验见 03 §2）" },
+                "qty": { "type": "integer", "description": "股数/张数（受整手校验）" },
+                "price": { "type": "number", "description": "成交价（有昨收时受涨跌停区间校验）" },
                 "note": { "type": "string", "description": "备注（可选；工具会自动追加来源标记）" },
                 "meta": {
                     "type": "object",
@@ -235,10 +283,14 @@ impl Tool for RecordTradeTool {
             Ok(r) => r,
             Err(e) => return Ok(record_err(e)),
         };
-        Ok(ok_json(&json!({
+        Ok(ok_json(&strip_model_facing(json!({
             "receipt": receipt,
-            "note": "已落账（自动落账 + 读回，ADR-0012）。请立即向用户完整宣读收据：时间、标的、方向、数量、价格、费用三分项（佣金/印花税/过户费）、现金变动、变动后持仓与现金余额，请用户当场核对。账本只增不改；录错用反向一笔冲正。",
-        })))
+            "note": concat!(
+                "已落账并读回。请立即向用户完整宣读收据：",
+                "时间、标的、方向、数量、价格、费用三分项（佣金/印花税/过户费）、现金变动、变动后持仓与现金余额，",
+                "请用户当场核对。账本只增不改；录错用反向一笔冲正。",
+            ),
+        }))))
     }
 }
 
@@ -257,7 +309,13 @@ impl Tool for AdjustCashTool {
     }
 
     fn description(&self) -> &str {
-        "把可用现金校正到用户明示的数值（现金侧快照校正：绝对值覆盖，不写流水、不动期初资金，与界面「可用现金 · 调整」同一语义——ADR-0009 现金单一校正入口）。纪律：数字必须来自用户明示（对账单/截图读数也要向用户复述确认），缺项先问；禁止传增量/delta（工具只收校正后的绝对值）。负现金拒绝。返回 before/after/delta（delta 由后端计算）——落账后向用户宣读调整前后两个数。"
+        // 模型面文案（现金单一校正入口，快照校正语义=ADR-0009；界面「可用现金 · 调整」同义）。
+        concat!(
+            "把可用现金校正到用户明示的数值（绝对值覆盖：不写流水、不动期初资金，现金校正的唯一入口）。",
+            "纪律：数字必须来自用户明示（对账单/截图读数也要向用户复述确认），缺项先问；",
+            "禁止传增量/delta（工具只收校正后的绝对值）。负现金拒绝。",
+            "返回 before/after/delta（delta 由后端计算）——落账后向用户宣读调整前后两个数。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -298,7 +356,10 @@ impl Tool for AdjustCashTool {
             "after": updated.cash,
             "delta": updated.cash - before,
             "reason": reason,
-            "note": "已落账。向用户宣读：调整前后两个数（before → after）与差额；现金校正不写流水、不动期初资金（ADR-0009 现金单一校正入口）。",
+            "note": concat!(
+                "已落账。向用户宣读：调整前后两个数（before → after）与差额；",
+                "现金校正不写流水、不动期初资金。",
+            ),
         })))
     }
 }
@@ -318,7 +379,14 @@ impl Tool for GetTradesTool {
     }
 
     fn description(&self) -> &str {
-        "查成交流水（最新在前；账本只增不改）。用途：核对既往成交、定位要冲正的原笔（冲正前必须先查原笔的 id/code/side/qty/price）。每条含时间、标的、方向、数量、价格、金额、费用三分项、现金变动、已实现盈亏、备注（备注尾「（经智能体录入）」= 智能体写入的流水）。limit 缺省 20、上限 50——对话侧省 context，与 HTTP 端 /api/trades 的 50/500 有意不同；全量历史看界面流水卡。"
+        // 模型面文案（limit 上限与 HTTP 端 /api/trades 有意不同=对话侧省 context）。
+        concat!(
+            "查成交流水（最新在前；账本只增不改）。",
+            "用途：核对既往成交、定位要冲正的原笔（冲正前必须先查原笔的 id/code/side/qty/price）。",
+            "每条含时间、标的、方向、数量、价格、金额、费用三分项、现金变动、已实现盈亏、备注",
+            "（备注尾「（经智能体录入）」= 智能体写入的流水）。",
+            "limit 缺省 20、上限 50，本工具是对话侧查询、不取全量——用户要看全量历史时引导去持仓管理界面流水卡。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -400,7 +468,18 @@ impl Tool for UpsertHoldingTool {
     }
 
     fn description(&self) -> &str {
-        "直接维护持仓行（快照校正，ADR-0009/0013）：初始化映射（券商存量持仓搬入）、定期校准漂移、纠错、场外变动（送股零股/退市/债转股）。**整行覆盖**语义——先调 get_holdings 读现值，只改用户明示的字段，其余字段原样带回（sector 留空会清掉行业）；数字必须来自用户明示（券商界面/对账单读数），缺项先问不猜。校验刻意宽松（03 §13：shares≥1 允许奇零股、跳过 lot 与涨跌停——校正不是委托）；price/prev 行情字段不可改（归刷新链）。三不动：现金、trades 流水、已实现盈亏均不变（现金校正另走 adjust_cash）。审计痕自动写 holding_edits（before/after 行快照 + note 来源标记，同事务）。幂等：与现值逐位一致则不写库不留痕。参数：code、name、mkt(SH|SZ)、kind(stock|etf|cb)、shares、cost 必填；sector、limit_pct、note 可选。"
+        // 模型面文案（快照校正语义=ADR-0009/0013，口径 docs/03 §13；审计痕写 holding_edits 表）。
+        concat!(
+            "直接维护持仓行（快照校正）：初始化映射（券商存量持仓搬入）、定期校准漂移、纠错、",
+            "场外变动（送股零股/退市/债转股）。",
+            "**整行覆盖**语义——先调 get_holdings 读现值，只改用户明示的字段，其余字段原样带回",
+            "（sector 留空会清掉行业）；数字必须来自用户明示（券商界面/对账单读数），缺项先问不猜。",
+            "校验刻意宽松：shares≥1、允许奇零股、跳过整手与涨跌停——校正不是委托；",
+            "price/prev 行情字段不可改（归刷新链）。",
+            "三不动：现金、交易流水、已实现盈亏均不变（现金校正另走 adjust_cash）。",
+            "审计痕自动记录（before/after 行快照 + 来源标记）。幂等：与现值逐位一致则不写库不留痕。",
+            "参数：code、name、mkt(SH|SZ)、kind(stock|etf|cb)、shares、cost 必填；sector、limit_pct、note 可选。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -415,7 +494,7 @@ impl Tool for UpsertHoldingTool {
                 "shares": { "type": "integer", "description": "股数/张数（≥1 任意整数，允许奇零股）" },
                 "cost": { "type": "number", "description": "券商摊薄成本（≥0；调整不产生已实现盈亏）" },
                 "limit_pct": { "type": ["integer", "null"], "description": "涨跌停 %（可选：缺省新建为 null、更新保留原值）" },
-                "note": { "type": "string", "description": "维护备注（可选，只进 holding_edits 留痕；工具会自动追加来源标记）" }
+                "note": { "type": "string", "description": "维护备注（可选，随改动记入维护留痕；工具会自动追加来源标记）" }
             },
             "required": ["code", "name", "mkt", "kind", "shares", "cost"]
         })
@@ -461,7 +540,10 @@ impl Tool for UpsertHoldingTool {
             Err(e) => return Ok(holding_edit_err(e)),
         };
         let note = if changed {
-            "已落账（快照校正：现金、trades 流水、已实现盈亏三不动——校正不是交易；审计痕已写 holding_edits）。向用户宣读校正后的行：代码/名称/股数/成本；涉及现金变化另走 adjust_cash。"
+            concat!(
+                "已落账（快照校正：现金、交易流水、已实现盈亏三不动——校正不是交易；审计痕已记录）。",
+                "向用户宣读校正后的行：代码/名称/股数/成本；涉及现金变化另走 adjust_cash。",
+            )
         } else {
             "与现值逐位一致——未写库、未留痕（幂等）。向用户说明该持仓与现值一致，无需校正。"
         };
@@ -484,7 +566,14 @@ impl Tool for RemoveHoldingTool {
     }
 
     fn description(&self) -> &str {
-        "删除持仓行（快照校正，ADR-0009/0013）。**对话内两步确认纪律**：调用前必须向用户复述将被删除的整行（代码/名称/股数/成本，来自 get_holdings 现值）并得到明确同意——对应界面删除的两步确认交互。语义：trades 流水保留、累计已实现盈亏不回滚、现金不动——流水与持仓的连续性自校正点断开，必须向用户如实说明。留痕自动写 holding_edits（op=delete + before 行快照，可照快照恢复）。标的不在持仓时如实报错。参数：code。"
+        // 模型面文案（快照校正=ADR-0009/0013；留痕写 holding_edits，op=delete）。
+        concat!(
+            "删除持仓行（快照校正）。**对话内两步确认纪律**：调用前必须向用户复述将被删除的整行",
+            "（代码/名称/股数/成本，来自 get_holdings 现值）并得到明确同意。",
+            "语义：交易流水保留、累计已实现盈亏不回滚、现金不动——流水与持仓的连续性自校正点断开，",
+            "必须向用户如实说明。删除留痕自动记录（before 行快照，可照快照恢复）。",
+            "标的不在持仓时如实报错。参数：code。",
+        )
     }
 
     fn parameters_schema(&self) -> Value {
@@ -515,7 +604,10 @@ impl Tool for RemoveHoldingTool {
         match crate::lock(&self.deps.store).remove_holding(code, &now_ts()) {
             Ok(Some(row)) => Ok(ok_json(&json!({
                 "removed": row,
-                "note": "已删除。向用户宣读被删行内容，并如实说明：trades 流水保留、累计已实现盈亏不回滚、现金不动——连续性自校正点断开（03 §13）；如需恢复可按 holding_edits 的 before 快照重新 upsert_holding。",
+                "note": concat!(
+                    "已删除。向用户宣读被删行内容，并如实说明：交易流水保留、累计已实现盈亏不回滚、",
+                    "现金不动——连续性自校正点断开；如需恢复可按删除留痕的 before 快照重新 upsert_holding。",
+                ),
             }))),
             Ok(None) => Ok(ToolResult::error(format!(
                 "持仓中没有 {code}（get_holdings 可查当前持仓）"

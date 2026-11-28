@@ -150,7 +150,7 @@ pub async fn get_trades(State(store): State<SharedStore>, Query(q): Query<Trades
     tag = "holdings",
     request_body = TradeRequest,
     responses(
-        (status = 201, description = "录入收据：trade 行 + 变动后持仓（清仓为 null）+ 试算预览 + warnings（纪律提示不拦提交，如「单票将超过 25% 上限」）", body = RecordReceipt),
+        (status = 201, description = "录入收据：trade 行 + 变动后持仓（清仓为 null）+ 试算预览 + warnings（非拦截性交易校验提示，如奇零股；纪律提示不进链——ADR-0024 补记）", body = RecordReceipt),
         (status = 400, description = "输入问题：数量非整手/超可卖、价格非正、市场码非法", body = ApiError),
         (status = 404, description = "持仓里没有该标的（卖出/减仓）", body = ApiError),
         (status = 422, description = "业务规则拦截：涨跌停越界（out_of_limit_range，带 limit_down/limit_up/decimals）、现金不足（insufficient_cash，带 cash_after）、新建持仓缺 meta（need_meta）", body = ApiError),

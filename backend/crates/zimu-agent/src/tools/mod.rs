@@ -28,6 +28,13 @@
 //! | `calc_diagnosis` | 只读 | `store.equity_snapshots/list_advice` → `zimu-domain::bench+perf`（03 §7，P7-T10） |
 //! | `echo` | 只读 | 链路验证（P2-T2） |
 //!
+//! **模型面文案约定（2026-11-28 清理定稿）**：`description()`、参数 schema 的
+//! description、返回 JSON 的 note/reason 都是模型直接读的文案——只写「何时调用、
+//! 参数契约、返回字段语义、行为纪律、降级如实规则」；上表「口径来源」列的内部编号
+//! （docs/03 §、ADR、P/B 系列）、表名、HTTP 端点与实现链描述**不进模型面文案**，
+//! 留在本注释与表格作工程追溯（模型看不见 docs/03，引用只会烧 token 并可能被复读进
+//! 用户文案）。超长文案一律 `concat!` 按语义分段，避免单行超长。
+//!
 //! **写账本三纪律（ADR-0012，自动落账 + 读回）**：① 记账数字必须来自用户明示，
 //! 缺项先问不猜（禁止用行情价/记忆补数）；② 先 simulate_trade 试算复述、再
 //! record_trade 落账、落账后宣读完整收据；③ 流水只增不改，错账反向一笔冲正
@@ -124,7 +131,7 @@ pub(crate) fn ok_json(v: &impl Serialize) -> ToolResult {
 pub(crate) fn market_err(e: MarketError) -> ToolResult {
     match e {
         MarketError::Unavailable(m) => ToolResult::error(format!(
-            "行情 sidecar 不可达，行情类数字暂不可用：{m}。持仓/留档查询不受影响；请稍后重试或让用户检查 datafetch 服务。"
+            "行情服务不可达，行情类数字暂不可用：{m}。持仓/留档查询不受影响；请稍后重试，或让用户检查行情服务是否在线。"
         )),
         MarketError::Upstream {
             status,
@@ -132,7 +139,7 @@ pub(crate) fn market_err(e: MarketError) -> ToolResult {
             message,
         } => ToolResult::error(format!("行情上游错误（HTTP {status}，{code}）：{message}")),
         MarketError::Contract(m) => ToolResult::error(format!(
-            "行情契约不符（sidecar 与本程序版本漂移，内部错误已记录）：{m}"
+            "行情数据契约不符（行情服务与本程序版本不一致，已记录内部错误）：{m}"
         )),
     }
 }

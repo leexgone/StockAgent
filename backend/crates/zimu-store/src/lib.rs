@@ -18,7 +18,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use zimu_domain::dilution::{apply_trade, ApplyTradeInput, TradeOutcome, SINGLE_STOCK_LIMIT};
+use zimu_domain::dilution::{apply_trade, ApplyTradeInput, TradeOutcome};
 use zimu_domain::fees::{fee, FeeBreakdown, FeeInput};
 use zimu_domain::lot::{lot_size, price_decimals, validate_qty, QtyReason};
 use zimu_domain::price_limit::{limit_prices, validate_price};
@@ -329,7 +329,7 @@ pub struct TradeRequest {
 pub struct SimPreview {
     pub fee_detail: FeeBreakdown,
     pub outcome: TradeOutcome,
-    /// 非拦截性提示：如「单票将超过 25% 上限」（原型只在预览提示，不拦提交）
+    /// 非拦截性提示（奇零股等交易校验事实；纪律提示不进记账链——ADR-0024 补记）
     pub warnings: Vec<String>,
 }
 
@@ -642,7 +642,8 @@ impl Store {
 
     /// 校验 + 试算（不落库）。P4-T6 的 simulate_trade 领域工具直接走这里。
     /// 校验顺序照原型抽屉：数量>0 → 标的/方向合法性 → 整手与可卖 →
-    /// 涨跌停区间（有昨收才拦，03 §2）→ 现金充足。「超 25% 上限」不拒绝、进 warnings。
+    /// 涨跌停区间（有昨收才拦，03 §2）→ 现金充足。超 25% 占比不拒绝也不提示
+    /// （ADR-0024 补记：纪律判定不进记账链；over_limit 字段保留供 HTTP 消费面自取）。
     pub fn simulate_trade(&self, req: &TradeRequest) -> std::result::Result<SimPreview, RecordError> {
         self.preview(req).map(|(p, _)| p)
     }
@@ -902,16 +903,13 @@ impl Store {
             });
         }
 
+        // ADR-0024 补记（2026-11-28）：不再产出「单票将超过 25% 上限」警告——
+        // 纪律判定不进记账链（模型可见面零纪律）；outcome.over_limit 字段仍由
+        // domain 给出，Web 抽屉的超限提示为前端现算（03 §6），与本链无关。
         let mut warnings = Vec::new();
-        if outcome.over_limit {
-            warnings.push(format!(
-                "单票将超过 {:.0}% 上限",
-                SINGLE_STOCK_LIMIT
-            ));
-        }
         let lot = zimu_domain::lot::lot_size(kind);
         if held > 0 && held % lot != 0 {
-            warnings.push(format!("当前持仓含非整手部分（{held}），送股/转股产生，卖出可整手或一次性全卖（B12 待定稿）"));
+            warnings.push(format!("当前持仓含非整手部分（{held}），送股/转股产生，卖出可整手分批或一次性全卖"));
         }
         Ok((
             SimPreview {

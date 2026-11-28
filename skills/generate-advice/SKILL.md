@@ -20,7 +20,7 @@ tools_required:
 ## 流程（严格按序）
 
 1. `refresh_quotes`：刷新行情回写（建议的 weight 等输入需要最新值）。失败不中断——继续，但在文案里注明行情时点。
-2. `calc_advice(code)`：拿到 `advice_id` 与**全部数字**（action/score/conf/dims/target/stop/position/stats/data_version）。代码写法：持仓内裸代码（600519），非持仓带前缀（sh600519）。**本工具报错（日线缺失/sidecar 挂）→ 直接如实转告无法出建议的原因并停止，绝对禁止凭记忆或估计编数字。**
+2. `calc_advice(code)`：拿到 `advice_id` 与**全部数字**（action/score/conf/dims/target/stop/position/stats/data_version）。代码写法：持仓内裸代码（600519），非持仓带前缀（sh600519）。**本工具报错（日线缺失/行情服务不可达）→ 直接如实转告无法出建议的原因并停止，绝对禁止凭记忆或估计编数字。**
 3. 需要给「怎么做」里的委托试算（费用/摊薄/现金变化）时调 `simulate_trade`——数字同样只取返回。
 4. 写完文案后**必须**调 `finalize_advice(advice_id, reason, risks)` 归档：`reason` = 结论段文案（数字原样引用，含失效条件），`risks` = 风险自陈数组（**至少一条**，写「这个结论可能错在哪」，不许空话）。归档失败（如 risks 为空被拒）→ 补齐后重试。
 5. 回复末尾注明：本条建议已留档（advice_id、generated_at、data_version），可回溯当时依据的数据。
