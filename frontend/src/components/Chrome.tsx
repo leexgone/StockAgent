@@ -12,6 +12,10 @@ import { ICONS, IconBell, IconFilter, IconRefresh, IconSearch, IconSpark } from 
 
 /**
  * 共享外壳 —— 复刻 design/assets/data.js 的 chrome()（侧栏 / 顶栏 / 行情条 / 移动底栏）。
+ * 布局形态（2026-11-28 双分区改造）：`.main` 恰满视口高度，顶栏 + 行情条是**不滚动的
+ * 固定区**，children 包在 `.content` 独立滚动区里——滚动条只覆盖内容区，头部不浮动
+ * 其上（sticky 方案废除）；路由切换把内容区滚回顶部。智能问答的 page-fill 全高链
+ * 以 .content 为新链首（chat.css）。
  * P5-T2 接真实数据：
  * - 市场时钟 = 后端 03 §9 生产口径（/api/market/status），倒计时本地走针；
  *   后端不可用退本地启发式（仅展示降级，不作交易判定）。
@@ -34,6 +38,7 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const status = useMarket((s) => s.status);
@@ -45,6 +50,12 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
   const agg = view?.agg;
   const account = view?.account;
   const close = () => setSidebarOpen(false);
+
+  // 内容区是独立滚动区（双分区）：换屏把滚动位置带回顶部，
+  // 替代此前依赖文档滚动的天然归顶行为
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [pathname]);
 
   // 全局搜索需要自选池（命中「持仓/自选」跳分析，docs/02）——外壳兜底拉一次，
   // 用户直接落在任何屏都能搜；已在其它屏加载过则跳过（loaded 标记）
@@ -226,7 +237,10 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
             </span>
           </div>
 
-          {children}
+          {/* 双分区的内容滚动区：滚动条只覆盖这里，上方顶栏/行情条不参与滚动 */}
+          <div className="content" id="main-scroll" ref={contentRef}>
+            {children}
+          </div>
         </div>
       </div>
 

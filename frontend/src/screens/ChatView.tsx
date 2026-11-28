@@ -74,13 +74,8 @@ export default function ChatView({ now }: { now: Date }) {
     if (deepQ) setPrefill({ text: deepQ, nonce: 1, send: deepSend });
   }, [deepQ, deepSend]);
 
-  // 全高布局：给 body 挂标记类，chat.css 据此把 .main 钉到 100dvh——
-  // .main 高度是 auto（仅 min-height）时，子级 flex:1/min-height:0 没有收缩依据，
-  // 会话一长整页就被撑出总滚动条。离屏即摘类，其它屏不受影响。
-  useEffect(() => {
-    document.body.classList.add("chat-fill");
-    return () => document.body.classList.remove("chat-fill");
-  }, []);
+  // 全高布局自 2026-11-28 双分区起由外壳保证（.shell 100dvh → .content 滚动区），
+  // 旧 body.chat-fill 补丁已删——见 chat.css 链注释。
 
   const agg = view?.agg;
   const holdings = view?.holdings ?? [];

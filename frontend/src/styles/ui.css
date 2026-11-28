@@ -16,16 +16,19 @@
 /* ============================================================
    外壳：侧栏 + 顶栏 + 主区
    ============================================================ */
-.shell { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 100dvh; }
+/* 外壳双分区（2026-11-28）：.shell 恰满视口，页面不再走文档滚动——
+   .main = 固定头部区（topbar + strip）+ .content 独立滚动区，
+   滚动条只覆盖内容区，头部不浮动其上 */
+.shell { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); height: 100dvh; }
 
 .sidebar {
-  position: sticky; top: 0; align-self: start;
-  height: 100dvh; display: flex; flex-direction: column;
+  height: 100%; display: flex; flex-direction: column;
   background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 16px 12px 12px;
   gap: 4px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 .brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 14px; }
 .brand-mark {
@@ -71,9 +74,11 @@
 .side-note { font-size: 11px; line-height: 1.5; color: var(--muted); padding: 8px 10px 2px; }
 
 /* 顶栏 */
-.main { min-width: 0; display: flex; flex-direction: column; }
+.main { min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+/* 内容滚动区：flex 列 + 独立滚动；chat 屏 .page-fill 的全高链以这里为链首 */
+.content { flex: 1; min-height: 0; overflow-y: auto; overflow-x: clip; overscroll-behavior: contain; display: flex; flex-direction: column; }
 .topbar {
-  position: sticky; top: 0; z-index: 40;
+  flex: none;
   display: flex; align-items: center; gap: 14px;
   padding: 0 24px; height: var(--topbar-h);
   background: color-mix(in oklab, var(--surface) 82%, transparent);
@@ -117,9 +122,9 @@
 .icon-btn svg { width: 15px; height: 15px; stroke-width: 1.7; }
 .menu-toggle { display: none; }
 
-/* 指数行情条——常驻吸顶：贴在 sticky 顶栏（--topbar-h）下沿，页面滚动不消失 */
+/* 指数行情条——固定头部区第二行（双分区，2026-11-28），不随内容滚动 */
 .strip {
-  position: sticky; top: var(--topbar-h); z-index: 39;
+  flex: none;
   height: var(--strip-h);
   display: flex; gap: 0; align-items: stretch;
   border-bottom: 1px solid var(--border); background: var(--surface);
@@ -216,7 +221,7 @@
    ============================================================ */
 /* 表区容器：横向溢出滚动（窄屏）之外，同时是**纵向有界滚动区**——
    表头的 position: sticky 只有相对真实滚动口才生效（wrap 无高度约束时
-   th 从未吸顶过，属移植遗留死代码）。上限 = 视口 − 吸顶堆叠（顶栏+行情条）
+   th 从未吸顶过，属移植遗留死代码）。上限 = 视口 − 固定头部区（顶栏+行情条）
    − 页头/卡头余量，短表不受影响（max-height 不触顶 = 自然高）。 */
 .tbl-wrap { overflow-x: auto; max-height: max(320px, calc(100dvh - var(--topbar-h) - var(--strip-h) - 128px)); }
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -540,7 +545,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* 打印 */
 @media print {
   .sidebar, .topbar, .mtabs, .toasts, .scrim, .drawer, .page-actions { display: none !important; }
-  .shell { display: block; }
+  .shell { display: block; height: auto; }
+  /* 双分区在纸上还原为文档流：滚动区放开高度与裁剪，全量打印不被截断 */
+  .main { height: auto; overflow: visible; }
+  .content { flex: none; overflow: visible; }
   body { background: #fff; }
   .card { break-inside: avoid; box-shadow: none; }
 }

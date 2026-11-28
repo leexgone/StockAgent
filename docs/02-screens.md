@@ -1,6 +1,8 @@
 # 02 · 界面清单与模块职责
 
-七个页面，共享同一套外壳（侧栏 + 顶栏 + 行情条 + 移动端底部标签栏），外壳由 `ZM.chrome({ active, crumb, onRefresh? })` 注入（`design/assets/data.js:380`）。`onRefresh` 是页面重绘回调：顶栏刷新完成跳动与重算后被调用，各页面用它把读汇总快照的区块重画一遍（见 `04` 行为函数表）。
+七个页面，共享同一套外壳（侧栏 + 顶栏 + 行情条 + 内容滚动区 + 移动端底部标签栏），外壳由 `ZM.chrome({ active, crumb, onRefresh? })` 注入（`design/assets/data.js:380`）。
+
+**双分区布局（2026-11-28，取代旧的文档滚动 + sticky 浮层）**：`.shell` 高度钉死 `100dvh`、页面不再走文档滚动。`.main` 内部分成两个物理区域——**固定头部区**（顶栏 `--topbar-h: 56px` + 行情条 `--strip-h: 38px`，`flex:none`，不参与滚动、不浮动其上）与**内容滚动区** `.content`（`flex:1; overflow-y:auto`，承载各屏 `<main class="page">`）。滚动条只覆盖内容区、范围恰好等于可滚内容，顶栏/行情条作为独立区域始终占位。换屏由 Chrome 的 `#main-scroll` 归零 `scrollTop`。智能问答的全高弹性链改以 `.content` 为链首（chat.css，旧 `body.chat-fill` 补丁作废）。窄屏单列（<1100px）时内容区整体滚、区块完整展开不内滚压缩。打印态还原为文档流（`.content/.main` 放开高度与裁剪）。
 
 ## 全局导航与快捷键
 
@@ -12,7 +14,7 @@
 | 全局搜索回车 | 命中持仓/自选 → `analysis.html?code=`；否则 → `chat.html?q=` | `data.js:474` |
 | 顶栏刷新按钮 | 手动跳一次行情 + 全量重算 + 重绘行情条，再回调页面 `onRefresh` | `data.js:461` |
 | 顶栏铃铛 | toast 汇总待处理预警条数与最近一条 | `data.js:468` |
-| 行情条 | 5 个指数 + 我的总资产 / 今日盈亏（读实时快照，每次跳动后重绘）。**常驻吸顶（2026-11-28）**：sticky 贴在顶栏（`--topbar-h: 56px`）下沿，页面滚动不随内容滚走；高度钉死 `--strip-h: 38px`（供表区上限与锚点堆叠计算）；窄屏超宽走横向滚动（滚动条隐藏），各响应式档行为一致 | `stripHTML()`（`data.js:431`）/ `frontend/styles/ui.css .strip` |
+| 行情条 | 5 个指数 + 我的总资产 / 今日盈亏（读实时快照，每次跳动后重绘）。**固定头部区第二行（2026-11-28 双分区）**：与顶栏同属不滚动区（`flex:none`，高钉死 `--strip-h: 38px`，布局计算引用），滚动只发生在其下的 `.content`；早先的 sticky 吸顶方案已废除（浮层语义不符——用户要求头部与内容物理分区）；窄屏超宽走横向滚动（滚动条隐藏），各响应式档行为一致 | `stripHTML()`（`data.js:431`）/ `frontend/styles/ui.css .strip / .content` |
 | 表格区 | **有界滚动 + 表头区内吸顶（2026-11-28）**：`.tbl-wrap` 上限 `max(320px, 100dvh − 顶栏 − 行情条 − 128px 余量)`——短表零变化（自然高），长表（流水/历史建议/排序）在区内滚动，`th` sticky 对区滚动口生效（此前 wrap 无纵高约束，表头吸顶是从未生效的死代码）；窄屏横向滚动照旧 | `frontend/styles/ui.css .tbl-wrap / .tbl th` |
 | 市场时钟 | 每秒重绘时段与倒计时 | `marketClock()`（`data.js:325`） |
 
