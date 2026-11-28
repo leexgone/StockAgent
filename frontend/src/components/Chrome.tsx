@@ -142,12 +142,8 @@ export default function Chrome({ now, onRefresh, children }: ChromeProps) {
           <div className="nav-group">工作台</div>
           {NAV.map((n) => navItem(n, n.label))}
           {navItem(WECHAT_NAV, WECHAT_NAV.label)}
-          <div className="nav-group">快捷</div>
-          <Link className="nav-item" to="/chat" onClick={close}>
-            <ICONS.chat />
-            <span>问一句</span>
-            <span className="kbd">⌘K</span>
-          </Link>
+          {/* 「快捷 → 问一句」组已移除（2026-11-28，用户拍板用处不大；其 ⌘K
+              角标本就指向搜索框，属误导——直达问答走热键 5 / 顶栏搜索未命中兜底） */}
           <div className="side-foot">
             <div className="side-acct">
               <span className="side-acct-av">{account?.init ?? "我"}</span>

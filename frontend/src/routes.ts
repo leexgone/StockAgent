@@ -45,4 +45,4 @@ export const NAV: NavItem[] = [
   { path: "/diagnosis", icon: "shield", label: "组合诊断", short: "诊断", kbd: "5" },
 ];
 
-export const WECHAT_NAV: NavItem = { path: "/wechat", icon: "wechat", label: "助理接入", short: "微信" };
+export const WECHAT_NAV: NavItem = { path: "/wechat", icon: "wechat", label: "助理接入", short: "微信", kbd: "6" };
