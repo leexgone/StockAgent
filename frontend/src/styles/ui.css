@@ -75,7 +75,7 @@
 .topbar {
   position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; gap: 14px;
-  padding: 0 24px; height: 56px;
+  padding: 0 24px; height: var(--topbar-h);
   background: color-mix(in oklab, var(--surface) 82%, transparent);
   backdrop-filter: saturate(1.4) blur(12px);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
@@ -117,8 +117,9 @@
 .icon-btn svg { width: 15px; height: 15px; stroke-width: 1.7; }
 .menu-toggle { display: none; }
 
-/* 指数行情条 */
+/* 指数行情条——常驻吸顶：贴在 sticky 顶栏（--topbar-h）下沿，页面滚动不消失 */
 .strip {
+  position: sticky; top: var(--topbar-h); z-index: 39;
   display: flex; gap: 0; align-items: stretch;
   border-bottom: 1px solid var(--border); background: var(--surface);
   overflow-x: auto; scrollbar-width: none;
