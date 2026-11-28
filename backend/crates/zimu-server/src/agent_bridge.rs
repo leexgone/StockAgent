@@ -22,7 +22,7 @@
 //! （robit 内部 sanitize+truncate，喂全量即可）；空档案退化为 `Agent::new`
 //! 原语义。工具轨迹不回灌（陈旧数字不进上下文，03「派生数字现算」）。
 //!
-//! 工具面（领域 14 件含写账本五件 ADR-0012/0013 + 诊断 calc_diagnosis P7-T10 + robit 标准面 ADR-0014，注册 25–31 随配置，含计划任务四件 ADR-0022；纪律 ADR-0024 出链）
+//! 工具面（领域 13 件含写账本五件 ADR-0012/0013 + 诊断 calc_diagnosis P7-T10 + robit 标准面 ADR-0014，注册 24–30 随配置，含计划任务四件 ADR-0022；纪律 ADR-0024 出链）
 //! 与 Skill 模板（系统技能播种进 `<wd>/.robit/skills`，ADR-0021）都在 `zimu-agent` crate；
 //! 工具与 HTTP API 共用同一 store/market 句柄——`refresh_quotes` 工具与
 //! `POST /api/market/refresh` 是同一条链（`zimu_agent::service`）。

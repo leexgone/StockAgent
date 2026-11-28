@@ -1,9 +1,9 @@
 //! 领域工具集（P4-T6）：agent 的账本/行情取数与出数入口。
 //!
-//! 工具面组成（ADR-0014 起 = 领域 14 件 + robit 标准面，注册 25–31 随配置；
+//! 工具面组成（ADR-0014 起 = 领域 13 件 + robit 标准面，注册 24–30 随配置；
 //! ADR-0024 起纪律不进智能体，calc_discipline 退役）：
-//! 本模块只管**领域 14 件**（roadmap P4-T6 三件 + 打分/留档两件 + 状态/刷新
-//! 两件 + 写账本五件（ADR-0012/0013）+ 诊断一件（P7-T10）+ echo 链路验证）；
+//! 本模块只管**领域 13 件**（roadmap P4-T6 三件 + 打分/留档两件 + 状态/刷新
+//! 两件 + 写账本五件（ADR-0012/0013）+ 诊断一件（P7-T10））；
 //! robit 标准面（read/write/edit/ls/find/grep/bash/load_skill/search_history/
 //! query_task 恒在，generate_image 随 image provider key、read_image 随 vision
 //! 配置按需）由装配线经 `create_tools_from_config_with` 内核取得后叠加本模块
@@ -26,7 +26,6 @@
 //! | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice`（03 §10 生产口径，ADR-0007） |
 //! | `finalize_advice` | 写 advice_history 文案列 | risks 非空校验（03 §10） |
 //! | `calc_diagnosis` | 只读 | `store.equity_snapshots/list_advice` → `zimu-domain::bench+perf`（03 §7，P7-T10） |
-//! | `echo` | 只读 | 链路验证（P2-T2） |
 //!
 //! **模型面文案约定（2026-11-28 清理定稿）**：`description()`、参数 schema 的
 //! description、返回 JSON 的 note/reason 都是模型直接读的文案——只写「何时调用、
@@ -62,7 +61,6 @@ use robit_agent::{ToolRegistry, ToolResult};
 use serde::Serialize;
 use zimu_market::error::MarketError;
 
-use crate::echo::EchoTool;
 use crate::AgentDeps;
 
 pub use advice::{CalcAdviceTool, FinalizeAdviceTool};
@@ -91,13 +89,13 @@ pub(crate) use store_try;
 
 /// 领域工具名清单（tools_required 校验名单用，与下表逐件对应）。
 /// ADR-0024：calc_discipline 退役——纪律不进智能体可见面（Web 端测算展示独有）。
-pub const DOMAIN_TOOL_NAMES: [&str; 14] = [
+pub const DOMAIN_TOOL_NAMES: [&str; 13] = [
     "market_status", "get_quote", "get_holdings", "simulate_trade",
     "record_trade", "adjust_cash", "get_trades", "upsert_holding", "remove_holding",
-    "refresh_quotes", "calc_advice", "finalize_advice", "calc_diagnosis", "echo",
+    "refresh_quotes", "calc_advice", "finalize_advice", "calc_diagnosis",
 ];
 
-/// 把全部领域工具（14 件）注册进给定 registry——装配线先经
+/// 把全部领域工具（13 件）注册进给定 registry——装配线先经
 /// `create_tools_from_config_with` 取 robit 标准面，再调本函数叠加
 /// （ADR-0014；zimu-server 与 zimu-agent-cli 共用同一装配线）。
 /// 领域名与标准名零冲突（已逐件核对）；同名注册语义为覆盖（robit registry）。
@@ -115,7 +113,6 @@ pub fn register_domain_tools(reg: &mut ToolRegistry, deps: Arc<AgentDeps>) {
     reg.register(CalcAdviceTool { deps: deps.clone() });
     reg.register(FinalizeAdviceTool { deps: deps.clone() });
     reg.register(CalcDiagnosisTool { deps });
-    reg.register(EchoTool);
 }
 
 /// 成功返回：JSON pretty 文本（模型可读，键序稳定便于人工核对留档）

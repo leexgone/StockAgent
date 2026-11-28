@@ -1,11 +1,11 @@
 //! 子木 · zimu-agent-cli —— Agent 调试 REPL（P2-T2 spike 起；P4-T6 换装真实领域工具面）。
 //!
 //! 与 zimu-server 的 Agent 完全同装配（`zimu-agent` 公共 crate，ADR-0014）：
-//! - 领域工具 14 件（ADR-0024 起纪律不进智能体）：market_status / get_quote /
+//! - 领域工具 13 件（ADR-0024 起纪律不进智能体）：market_status / get_quote /
 //!   get_holdings / simulate_trade / record_trade / adjust_cash / get_trades /
 //!   upsert_holding / remove_holding（写账本五件，ADR-0012/0013 自动落账+读回）/
 //!   refresh_quotes / calc_advice / finalize_advice / calc_diagnosis（P7-T10 诊断
-//!   报告取数）+ echo（链路验证）；
+//!   报告取数）；
 //! - robit 标准面：read / write / edit / ls / find / grep / bash / load_skill /
 //!   search_history / query_task（+ generate_image 随 key、read_image 随 vision
 //!   配置按需）——确认关闭自动执行（auto_approve=true，ADR-0014）；

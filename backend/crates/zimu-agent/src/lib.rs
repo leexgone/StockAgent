@@ -25,7 +25,6 @@
 //! `ZIMU_SKILLS_DIR` 可覆盖播种源。
 
 pub mod assembly;
-pub mod echo;
 pub mod scheduler;
 pub mod service;
 pub mod skills;

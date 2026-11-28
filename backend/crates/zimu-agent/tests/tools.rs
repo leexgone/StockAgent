@@ -1168,7 +1168,7 @@ fn seed_from_synthetic_source_copies_aux_files_and_skips_existing() {
 }
 
 // ============================================================================
-// 注册面组成（ADR-0014：robit 标准面 + 领域 14 件，ADR-0024 纪律出链）
+// 注册面组成（ADR-0014：robit 标准面 + 领域 13 件，ADR-0024 纪律出链）
 // ============================================================================
 
 /// 空配置装置：无 provider/image/vision → 条件件（generate_image/read_image）
@@ -1213,12 +1213,12 @@ fn standard_surface_plus_domain_composition_per_adr_0014() {
         assert!(names.contains(&t), "领域面缺 {t}，实有 {names:?}");
     }
     assert!(names.contains(&"send_file"), "IM 发文件工具缺位，实有 {names:?}");
-    assert_eq!(names.len(), 25, "空配置下应恰 10 标准 + 14 领域 + send_file，实有 {names:?}");
+    assert_eq!(names.len(), 24, "空配置下应恰 10 标准 + 13 领域 + send_file，实有 {names:?}");
 }
 
 /// ADR-0022：`[app.schedule] enabled=true` 注册计划任务四件，且不受 standard_tools
 /// 白名单排除（系统工具语义，镜像 robit bootstrap 测试）；enabled=false 缺席
-/// （enabled=None 缺席由上方 app:None 的 25 件计数测试承接）。
+/// （enabled=None 缺席由上方 app:None 的 24 件计数测试承接）。
 #[test]
 fn schedule_tools_register_when_enabled_per_adr_0022() {
     use robit_ai::{config::ScheduleConfig, AppConfig};

@@ -4,7 +4,7 @@ ADR-0005 定案：axum REST + SSE 托管 React SPA，内网部署，默认不开
 当前包含：`zimu-server`（主服务：`/api/health` + `frontend/dist` 静态托管 +
 Agent SSE 会话 + 持仓录入 API + 行情 API + 预警/快照 API + OpenAPI 契约，
 P2-T3/P4-T1/P4-T4/P4-T5/P4-T7；P2-T5 起桥体消费 robit `robit-web` crate；bin 侧
-启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：领域工具 14 件（含 ADR-0012/0013 写账本五件、P7-T10 诊断取数 calc_diagnosis；ADR-0024 起纪律出链，calc_discipline 退役）+ robit 标准工具面（ADR-0014，确认关闭自动执行）+
+启动调度与预警引擎）、`zimu-agent`（P4-T6/T7 agent 应用层：领域工具 13 件（含 ADR-0012/0013 写账本五件、P7-T10 诊断取数 calc_diagnosis；ADR-0024 起纪律出链，calc_discipline 退役）+ robit 标准工具面（ADR-0014，确认关闭自动执行）+
 Skill 模板加载 + 与 HTTP API 共用的刷新链服务 + 调度预警引擎 `scheduler`，
 server 与 CLI 共同消费）、`zimu-agent-cli`（Agent 调试 REPL：P2-T2 spike 起，
 P4-T6 换装与 server 相同的领域工具面与 Skill）、`zimu-domain`（P3-T3 领域纯函数库：
@@ -122,7 +122,7 @@ curl 冒烟——**Windows 终端里中文 payload 必须走 UTF-8 文件**，�
 （服务端报 `invalid unicode code point`）：
 
 ```powershell
-'请调用 echo 工具回显:你好子木' | Out-File -Encoding utf8NoBOM msg.txt
+'请调用 get_holdings 工具报告持仓概况' | Out-File -Encoding utf8NoBOM msg.txt
 curl.exe -sN http://127.0.0.1:8080/api/chat/stream   # 另开窗口看事件流
 # 纯文本（multipart 仅 text 字段；< 从 UTF-8 文件读字段值，避免 Windows 内联编码问题）
 curl.exe -s -X POST http://127.0.0.1:8080/api/chat -F "text=<msg.txt"
@@ -153,7 +153,6 @@ server（SSE 会话）与 CLI（调试 REPL）共用的公共 crate——P2 期 
 | `calc_advice` | 写 advice_history 数字列 | `zimu-domain::advice::score_advice`（03 §10 生产口径）出数 → 数字列直接留档（B9：`generated_at` + `data_version=adv-v1\|k=…\|q=…`；`discipline_refs` 列为 v5 化石列，ADR-0024 起新行恒空）→ 返回 advice_id 与全部数字；**结论纯得分链，纪律零参与**（ADR-0024，取代 ADR-0023 参考线口径）；日线拿不到**拒绝出建议** |
 | `finalize_advice` | 写 advice_history 文案列 | 模型文案只回填 reason/risks（risks 至少一条，03 §10）——**数字不经模型转写**（ADR-0007 结构性保证） |
 | `calc_diagnosis` | 只读 | 诊断报告取数（P7-T10）：equity_snapshots(250) → `bench::align_bench` 基准归一（03 §7）+ `perf` 四窗口（all/20/45/90 尾部截断）+ 最新快照原值 + 最近 5 条建议摘要；基准降级（sidecar 挂/窗口空/对齐失败）`bench.available=false` 不拒绝，净值样本 <2 诚实报错 |
-| `echo` | 只读 | P2-T2 链路验证保留（网关排查不依赖数据） |
 | `send_file` | IM 出站 | 发本地文件/图片给用户（ADR-0017 D9，robit-chatbot SendFileTool）：平台扩展自守卫——QQ 真实 CDN 上传、微信 SDK send_media；Web/CLI 无平台扩展调用如实报错，无副作用 |
 | `schedule_create` | 写任务库（仅 IM） | 创建提醒/周期任务（ADR-0022，robit 0.7.0 M1）：once/interval/cron 触发器、任务级 IANA 时区；主人明确要求才创建、创建后宣读回执；auto_approve 下直接执行 |
 | `schedule_edit` | 写任务库（仅 IM） | 修改/暂停/恢复/删除任务（乐观并发令牌 `expected_updated_at`，冲突如实报错） |
@@ -519,7 +518,7 @@ DashScope compatible-mode 的 qwen），api_key 可写 `${ENV_VAR}` 并从
 cargo run -p zimu-agent-cli
 # > /复盘                ← 触发盘后复盘 Skill（P4-T6）
 # > /建议 600519         ← 建议生成：calc_advice 出数 → 文案 → finalize_advice 归档
-# > 请调用 echo 工具回显：子木集成验证   ← 链路验证（P2-T2 起）
+# > 请调用 get_holdings 报告持仓   ← 工具链验证（P4-T6 起，不依赖行情）
 ```
 
 P4-T6 起 CLI 与 server 是**同一份工具面与 Skill**（`zimu-agent::assembly::AgentCore`：
@@ -588,7 +587,7 @@ crates/zimu-server/         主服务：health + 静态托管 + Agent SSE 会话
                             └─ tests/            market_api.rs 8 项集成（口径等价 + 降级）· contract.rs 3 项契约（文档新鲜度 + 实时响应/28 份样例过 schema）· common/ 共享装置（FakeApi/seed）
 crates/zimu-agent/          agent 应用层（P4-T6/T7）：领域工具 + Skill 加载 + 应用服务 + 调度预警引擎（server/CLI 共用）
                             ├─ lib.rs            AgentDeps（store + market + 日历缓存）与 crate 边界说明
-                            ├─ tools/            领域 14 件（mod.rs register_domain_tools；market/portfolio/advice/diagnosis 四组，portfolio 含 ADR-0012/0013 写账本五件，diagnosis 为 P7-T10 诊断报告取数；ADR-0024 纪律出链后 calc_discipline 退役；robit 标准面经 assembly 内核叠加，ADR-0014）
+                            ├─ tools/            领域 13 件（mod.rs register_domain_tools；market/portfolio/advice/diagnosis 四组，portfolio 含 ADR-0012/0013 写账本五件，diagnosis 为 P7-T10 诊断报告取数；ADR-0024 纪律出链后 calc_discipline 退役；robit 标准面经 assembly 内核叠加，ADR-0014）
                             ├─ service.rs        refresh_portfolio 刷新链（HTTP 与工具同链；P4-T7 增 detailed 变体供调度器复用——多回 quote 原始行，wire 契约不变）+ SkippedRow/RefreshResponse（server 再导出，契约组件名不变）
                             ├─ scheduler.rs      调度与预警引擎（P4-T7 + B13，03 §12 纯编排：tick(now) 时刻注入可测、盘中轮询判定落 alerts（持仓 + 自选无持仓形态）、日级缓存（kline 量窗口/cb_list）、15:05 快照 + /复盘 触发 + push_log）
                             ├─ skills.rs         Skill 播种源解析（ZIMU_SKILLS_DIR → 仓库根 skills/）+ 应用初始化播种进 <wd>/.robit/skills（缺则播种永不覆盖，ADR-0021）+ robit loader 接线
