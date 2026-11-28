@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { IconChat, IconGrid, IconWechat } from "../components/Icons";
+import { useEffect, useRef, useState } from "react";
+import { IconChat, IconChevronRight, IconGrid, IconWechat } from "../components/Icons";
 import { maskChatId } from "../lib/mask";
 import { channelLabel, pushKindLabel } from "../lib/pushKind";
 import { kindForChatId, useBindings, type ChannelBindingRow, type PendingAttempt } from "../store/bindings";
@@ -22,6 +22,7 @@ import { useUi } from "../store/ui";
  *   未绑定来消息入观察队列，一键绑定，不用抄日志）+ 绑定/解绑（两步确认弹窗）/
  *   手工表单兜底；chat_id 默认掩码脱敏、逐行「查看/收起」切换（lib/mask，
  *   展示层投影不动 API 真值）；扫码不上 Web（登录 = 部署侧 CLI，停服约定见 backend/README）。
+ *   待绑定区可折叠（含下方手工表单与说明整块）：空则默认收缩成一行、有新会话自动展开（见 pendingOpen）。
  * - log：最近 6 条全通道 push_log（detail 原样，ok=1 只表示已受理，03 §12）。
  *
  * 纪律：B5 状态色（在线/已绑定 = --ok 绿，绝不用红）；--accent ≤2（仅绑定提交）；
@@ -48,6 +49,14 @@ export default function WechatScreen() {
   const [unbindTarget, setUnbindTarget] = useState<ChannelBindingRow | null>(null);
   // chat_id 展示脱敏：默认掩码，逐行「查看/收起」；组件态离屏即复位回掩码
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  // 待绑定会话折叠：无事项默认收缩；有新会话进来（计数增长，含首载 0→n）自动展开，
+  // 用户手动收起后同批不再强开（60s 轮询重复触发不算「新」）
+  const [pendingOpen, setPendingOpen] = useState(false);
+  const prevPendingCount = useRef(0);
+  useEffect(() => {
+    if (pending.length > prevPendingCount.current) setPendingOpen(true);
+    prevPendingCount.current = pending.length;
+  }, [pending.length]);
   const idKey = (ch: string, id: string) => `${ch}:${id}`;
   const toggleReveal = (key: string) => setRevealed((s) => ({ ...s, [key]: !s[key] }));
 
@@ -320,7 +329,20 @@ export default function WechatScreen() {
             {/* 待绑定会话（D3 补记：未绑定来消息自动入列，一键绑定——不用抄日志） */}
             <div className="card-body" style={{ borderTop: "1px solid var(--border)", paddingBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 550 }}>待绑定会话</span>
+                <button
+                  className="btn btn-sm"
+                  aria-expanded={pendingOpen}
+                  aria-controls="pending-list"
+                  data-od-id="pending-toggle"
+                  onClick={() => setPendingOpen((v) => !v)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontWeight: 550 }}
+                  title={pendingOpen ? "收起待绑定列表" : "展开待绑定列表"}
+                >
+                  <span style={{ display: "inline-flex", transform: pendingOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }}>
+                    <IconChevronRight />
+                  </span>
+                  待绑定会话
+                </button>
                 {pending.length > 0 && <span className="pill warn">{pending.length}</span>}
                 <button
                   className="btn btn-sm"
@@ -330,36 +352,48 @@ export default function WechatScreen() {
                   刷新
                 </button>
               </div>
-              {pending.length ? (
-                pending.map((p, i) => {
-                  const key = idKey(p.channel, p.chat_id);
-                  const shown = revealed[key] ?? false;
-                  return (
-                    <div className="list-item" data-od-id={`pending-${i}`} key={key} style={{ padding: "8px 0" }}>
-                      <span className="li-main">
-                        <span className="li-title">
-                          <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(p.channel)}</span>
-                          <span className="code num" style={{ fontSize: 12 }}>{shown ? p.chat_id : maskChatId(p.chat_id)}</span>
-                        </span>
-                        <span className="li-desc">
-                          {`来消息 ${p.hits} 次 · 最近 ${p.last_seen}${p.last_text ? ` · 「${p.last_text}」` : ""}`}
-                        </span>
-                      </span>
-                      <span className="li-right">
-                        <button className="btn btn-sm" aria-pressed={shown} title={shown ? "重新掩码" : "查看完整 chat_id"} onClick={() => toggleReveal(key)}>
-                          {shown ? "收起" : "查看"}
-                        </button>
-                        <button className="btn btn-sm" onClick={() => void bindPending(p)}>绑定</button>
-                      </span>
-                    </div>
-                  );
-                })
+              {pendingOpen ? (
+                pending.length ? (
+                  <div id="pending-list">
+                    {pending.map((p, i) => {
+                      const key = idKey(p.channel, p.chat_id);
+                      const shown = revealed[key] ?? false;
+                      return (
+                        <div className="list-item" data-od-id={`pending-${i}`} key={key} style={{ padding: "8px 0" }}>
+                          <span className="li-main">
+                            <span className="li-title">
+                              <span className="pill plain" style={{ marginRight: 6 }}>{channelLabel(p.channel)}</span>
+                              <span className="code num" style={{ fontSize: 12 }}>{shown ? p.chat_id : maskChatId(p.chat_id)}</span>
+                            </span>
+                            <span className="li-desc">
+                              {`来消息 ${p.hits} 次 · 最近 ${p.last_seen}${p.last_text ? ` · 「${p.last_text}」` : ""}`}
+                            </span>
+                          </span>
+                          <span className="li-right">
+                            <button className="btn btn-sm" aria-pressed={shown} title={shown ? "重新掩码" : "查看完整 chat_id"} onClick={() => toggleReveal(key)}>
+                              {shown ? "收起" : "查看"}
+                            </button>
+                            <button className="btn btn-sm" onClick={() => void bindPending(p)}>绑定</button>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="hint" style={{ margin: 0 }}>
+                    暂无待绑定会话 · 未绑定会话发来消息会自动出现在这里（点「刷新」或等 60s 轮询）
+                  </div>
+                )
               ) : (
-                <div className="hint" style={{ margin: 0 }}>
-                  暂无待绑定会话 · 未绑定会话发来消息会自动出现在这里（点「刷新」或等 60s 轮询）
+                <div className="hint" style={{ margin: 0 }} data-od-id="pending-collapsed">
+                  {pending.length
+                    ? `${pending.length} 个未绑定会话待处理 · 展开查看并一键绑定`
+                    : "暂无待绑定会话 · 有新会话来消息时自动展开"}
                 </div>
               )}
             </div>
+            {/* 手工表单与说明随待绑定区一起折叠（收缩态只留标题行，2026-11-28） */}
+            {pendingOpen && (
             <div className="card-body" style={{ borderTop: "1px solid var(--border)" }}>
               <div className="field" style={{ margin: "0 0 10px" }}>
                 <label htmlFor="bind-channel">通道</label>
@@ -415,6 +449,7 @@ export default function WechatScreen() {
                 此处手工表单为兜底（服务端日志仍留 chat_id 案底）。微信登录（扫码）在部署侧 CLI 完成，见「接入配置」卡。
               </div>
             </div>
+            )}
           </section>
 
           {/* ---------- 推送日志（全通道最近 6 条） ---------- */}
