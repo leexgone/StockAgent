@@ -35,6 +35,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 ENV CARGO_TARGET_DIR=/src/backend/target
 WORKDIR /src/backend
 COPY backend/Cargo.toml backend/Cargo.lock ./
+# 版本戳（ADR-0021 补记 2026-11-28）：取 [workspace.package] version 烘焙进镜像
+# /app/VERSION——entrypoint 比对卷内戳不一致时强制刷新人格/系统技能播种。
+# 与 ADR-0018 版本守卫同源（同字段），发版 bump Cargo.toml 即自动联动。
+RUN grep -m1 '^version' Cargo.toml | cut -d'"' -f2 > /src/VERSION
 COPY backend/crates/zimu-server/Cargo.toml crates/zimu-server/Cargo.toml
 COPY backend/crates/zimu-agent/Cargo.toml crates/zimu-agent/Cargo.toml
 COPY backend/crates/zimu-agent-cli/Cargo.toml crates/zimu-agent-cli/Cargo.toml
@@ -70,6 +74,7 @@ COPY backend/.robit/prompts/agent.md /app/defaults/agent.md
 COPY deploy/config.example.toml /app/defaults/config.example.toml
 COPY --from=build /src/backend/target/release/zimu-server /usr/local/bin/zimu-server
 COPY --from=build /opt/cli/bin/robit-wechat /usr/local/bin/robit-wechat
+COPY --from=build /src/VERSION /app/VERSION
 COPY deploy/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 # 容器几何（D5）：static/skills 缺省是编译期路径，必须 env 指回烘焙资产；

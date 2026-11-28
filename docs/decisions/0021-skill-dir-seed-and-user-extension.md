@@ -40,3 +40,31 @@ P4-T6 起的 skill 单源政策：模板只从仓库根 `skills/` 加载（`load
 **取代关系**：本 ADR 取代 skills.rs 模块 doc / backend/README「不放 `<workdir>/.robit/skills`」的单源目录条款；ADR-0014「不用 bootstrap_with」决策继续有效（其 skill 单源政策措辞补记指向本 ADR），ADR-0018 D5 烘焙几何补记（env 语义演进）。
 
 **以后要改回来得动哪里**：skills.rs 恢复单源 `load_skills_from_dirs(&[skills_dir()])`、删播种函数与测试、assembly.rs 调用还原、CLAUDE.md/README/08-release 目录口径还原，并置本 ADR 已取代。
+## 补记（2026-11-28）：播种版本戳强刷——「永不覆盖」收窄为「同版本永不覆盖」
+
+**动因**：「升级不刷新系统技能/人格」的运维债在 ADR-0024 集中兑现——文案与口径
+演进后，每个存量部署都要人工登 NAS 点删 `prompts/agent.md` + 四个技能子目录才吃
+得到新资产，release 说明年年背这条。**版本边界本来就是用户预期中「会更新默认
+资产」的时刻**，用它做强制刷新触发器既符合直觉又免运维。
+
+**决定**：镜像烘焙 `/app/VERSION`（取 `[workspace.package] version`，与 ADR-0018
+版本守卫同源字段，Dockerfile 构建期 grep 提取）；entrypoint 启动时比对卷内戳
+`/data/.robit/zimu_seed_version`——
+
+- **一致**：维持原语义（缺则播种、永不覆盖，卷内自定义全保留）；
+- **不一致（含缺戳）**：强制刷新系统播种资产 = 覆盖 `prompts/agent.md` +
+  删除卷内与镜像 `/app/skills/*` 同名的技能目录（应用初始化随即按「缺则播种」
+  重建新版）+ 更新戳；
+- **永不触碰**：用户自增技能目录（名字不在烘焙清单）、`config.toml`、
+  `wechat-state.json`、`robit.db`、`.env`（凭据单通道 D8 不变）。
+
+**缺戳即强刷**的取巧处：旧卷首跑带此机制的新镜像时戳必然缺失 → 自动完成一次
+历史性自愈（A24 时代滞留的旧人格/旧技能就此归位），无需按版本逐一判断。
+
+**后果**：08-release 的「点删重播种」手工流程退役（config 的合并语义不变，
+版本强刷不含 config）；版本变更时用户对**系统技能**的本地修改会被覆盖（用户
+自增不受影响）——接受：这正是「强制更新」的语义本身，08-release 升级指引写明。
+开发期 `cargo run` 不走 entrypoint，模板改动仍靠删卷内副本或改镜像逻辑，不受影响。
+
+**落点**：`deploy/docker/entrypoint.sh`（版本比对与强刷）、`server.Dockerfile`
+（VERSION 烘焙两处）、`docs/08-release.md`（升级指引改写）、roadmap P7-T14。
